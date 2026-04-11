@@ -644,6 +644,7 @@ A new explicit offline/local profile should exist.
 
 ### 15.1 Expected defaults
 
+- bootstrap command = `gbrain init --local`
 - engine = sqlite
 - storage backend = local filesystem
 - embedding provider = local
@@ -662,6 +663,8 @@ When offline profile is enabled, the system should not unexpectedly attempt:
 - remote MCP deployment
 
 The system should be honest: if a feature needs network, it should be disabled in offline mode, not silently attempted.
+
+That includes storage/file features during the first local milestone: until a SQLite-compatible local storage path exists, file/storage commands must fail explicitly rather than pretending remote storage still works.
 
 ---
 

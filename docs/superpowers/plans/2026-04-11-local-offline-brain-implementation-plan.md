@@ -10,6 +10,17 @@
 
 ---
 
+## Local contract decisions
+
+- Canonical bootstrap UX: `gbrain init --local`
+- v1 local mode uses explicit config keys in `~/.gbrain/config.json`; no separate named profile loader is introduced
+- `embedding_provider` values: `none | local`
+- `query_rewrite_provider` values: `none | heuristic | local_llm`
+- `files` / storage-backed commands are **disabled in the first local milestone** unless later tasks add SQLite-compatible metadata + storage support
+- Networked commands that survive in local mode must either respect `offline: true` or fail with explicit, honest guidance
+
+---
+
 ## File Map
 
 ### Core files to create
@@ -126,8 +137,10 @@ Commit scope:
 - Create: `src/core/sqlite-engine.ts`
 - Modify: `src/core/index.ts`
 - Modify: `src/core/engine.ts`
+- Modify: `src/core/migrate.ts`
 - Test: `test/sqlite-engine.test.ts`
 - Test: `test/parity.test.ts`
+- Test: `test/doctor.test.ts`
 
 - [ ] **Step 1: Write failing engine tests**
 
@@ -154,6 +167,9 @@ Create SQLite schema initialization covering:
 - `ingest_log`
 - `config`
 
+Additional requirement:
+- schema creation is versioned and compatible with `src/core/migrate.ts`
+
 - [ ] **Step 3: Implement CRUD and metadata methods**
 
 Implement all non-search `BrainEngine` methods with slug-based behavior preserved.
@@ -171,7 +187,7 @@ Implement:
 Run:
 
 ```bash
-bun test test/sqlite-engine.test.ts test/parity.test.ts
+bun test test/sqlite-engine.test.ts test/parity.test.ts test/doctor.test.ts
 ```
 
 - [ ] **Step 6: Commit**
@@ -295,7 +311,10 @@ Commit scope:
 - Create: `src/core/offline-profile.ts`
 - Modify: `src/core/search/expansion.ts`
 - Modify: `src/commands/doctor.ts`
+- Modify: `src/commands/check-update.ts`
 - Modify: `src/commands/init.ts`
+- Modify: `src/core/operations.ts`
+- Modify: `src/commands/files.ts`
 - Modify: `src/core/config.ts`
 - Test: `test/doctor.test.ts`
 - Test: `test/local-offline.test.ts`
@@ -306,6 +325,7 @@ Cover:
 - doctor shows local providers
 - offline profile avoids cloud assumptions
 - query rewrite can be disabled cleanly
+- `check-update` and file/storage commands behave honestly when `offline: true`
 
 - [ ] **Step 2: Replace Anthropic-only expansion with provider modes**
 
@@ -329,6 +349,7 @@ Doctor should report:
 - embedding provider type
 - rewrite provider type
 - offline profile status
+- unsupported capabilities in local mode (for example file/storage operations)
 
 - [ ] **Step 5: Verify tests**
 
@@ -385,6 +406,10 @@ bun test
 ```
 
 If SQLite/local integration tests require dedicated commands, document and run them here too.
+
+Also verify:
+- a local `gbrain serve` stdio session can list tools
+- one simple MCP tool call succeeds against SQLite config
 
 - [ ] **Step 5: Commit**
 

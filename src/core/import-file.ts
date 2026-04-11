@@ -3,7 +3,7 @@ import { createHash } from 'crypto';
 import type { BrainEngine } from './engine.ts';
 import { parseMarkdown } from './markdown.ts';
 import { chunkText } from './chunkers/recursive.ts';
-import { embedBatch } from './embedding.ts';
+import { estimateTokenCount } from './embedding.ts';
 import type { ChunkInput } from './types.ts';
 
 export interface ImportResult {
@@ -17,7 +17,7 @@ const MAX_FILE_SIZE = 5_000_000; // 5MB
 
 /**
  * Import content from a string. Core pipeline:
- * parse -> hash -> embed (external) -> transaction(version + putPage + tags + chunks)
+ * parse -> hash -> transaction(version + putPage + tags + chunks)
  *
  * Used by put_page operation and importFromFile.
  */
@@ -25,7 +25,7 @@ export async function importFromContent(
   engine: BrainEngine,
   slug: string,
   content: string,
-  opts: { noEmbed?: boolean } = {},
+  _opts: { noEmbed?: boolean } = {},
 ): Promise<ImportResult> {
   const parsed = parseMarkdown(content, slug + '.md');
 
@@ -46,29 +46,7 @@ export async function importFromContent(
     return { slug, status: 'skipped', chunks: 0 };
   }
 
-  // Chunk compiled_truth and timeline
-  const chunks: ChunkInput[] = [];
-  if (parsed.compiled_truth.trim()) {
-    for (const c of chunkText(parsed.compiled_truth)) {
-      chunks.push({ chunk_index: chunks.length, chunk_text: c.text, chunk_source: 'compiled_truth' });
-    }
-  }
-  if (parsed.timeline?.trim()) {
-    for (const c of chunkText(parsed.timeline)) {
-      chunks.push({ chunk_index: chunks.length, chunk_text: c.text, chunk_source: 'timeline' });
-    }
-  }
-
-  // Embed BEFORE the transaction (external API call)
-  if (!opts.noEmbed && chunks.length > 0) {
-    try {
-      const embeddings = await embedBatch(chunks.map(c => c.chunk_text));
-      for (let i = 0; i < chunks.length; i++) {
-        chunks[i].embedding = embeddings[i];
-        chunks[i].token_count = Math.ceil(chunks[i].chunk_text.length / 4);
-      }
-    } catch { /* non-fatal */ }
-  }
+  const chunks = buildPageChunks(parsed.compiled_truth, parsed.timeline);
 
   // Transaction wraps all DB writes
   await engine.transaction(async (tx) => {
@@ -93,9 +71,8 @@ export async function importFromContent(
       await tx.addTag(slug, tag);
     }
 
-    if (chunks.length > 0) {
-      await tx.upsertChunks(slug, chunks);
-    }
+    await tx.deleteChunks(slug);
+    await tx.upsertChunks(slug, chunks);
   });
 
   return { slug, status: 'imported', chunks: chunks.length };
@@ -123,3 +100,31 @@ export async function importFromFile(
 // Backward compat
 export const importFile = importFromFile;
 export type ImportFileResult = ImportResult;
+
+export function buildPageChunks(compiledTruth: string, timeline: string): ChunkInput[] {
+  const chunks: ChunkInput[] = [];
+
+  if (compiledTruth.trim()) {
+    for (const chunk of chunkText(compiledTruth)) {
+      chunks.push({
+        chunk_index: chunks.length,
+        chunk_text: chunk.text,
+        chunk_source: 'compiled_truth',
+        token_count: estimateTokenCount(chunk.text),
+      });
+    }
+  }
+
+  if (timeline.trim()) {
+    for (const chunk of chunkText(timeline)) {
+      chunks.push({
+        chunk_index: chunks.length,
+        chunk_text: chunk.text,
+        chunk_source: 'timeline',
+        token_count: estimateTokenCount(chunk.text),
+      });
+    }
+  }
+
+  return chunks;
+}

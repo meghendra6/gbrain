@@ -1,27 +1,33 @@
 # CLAUDE.md
 
-GBrain is a personal knowledge brain. Postgres + pgvector + hybrid search in a managed Supabase instance.
+GBrain is a personal knowledge brain. It now ships in two truthful runtime profiles: managed Postgres + pgvector, or a fully local/offline SQLite profile with the same CLI/MCP contract.
 
 ## Architecture
 
 Contract-first: `src/core/operations.ts` defines ~30 shared operations. CLI and MCP
 server are both generated from this single source. Skills are fat markdown files
-(tool-agnostic, work with both CLI and plugin contexts).
+(tool-agnostic, work with both CLI and plugin contexts). The engine is selected at
+runtime (`postgres` or `sqlite`), while offline profile policy controls what stays
+available in local mode versus what must fail with honest guidance.
 
 ## Key files
 
 - `src/core/operations.ts` — Contract-first operation definitions (the foundation)
 - `src/core/engine.ts` — Pluggable engine interface (BrainEngine)
 - `src/core/postgres-engine.ts` — Postgres + pgvector implementation
-- `src/core/db.ts` — Connection management, schema initialization
+- `src/core/sqlite-engine.ts` — SQLite engine for local/offline mode
+- `src/core/engine-factory.ts` — Config resolution + engine selection (`postgres` vs `sqlite`)
+- `src/core/offline-profile.ts` — Honest capability gating for local/offline mode
+- `src/core/embedding/provider.ts` — Local embedding runtime integration + availability reporting
+- `src/core/db.ts` — Postgres connection management, schema initialization
 - `src/core/import-file.ts` — importFromFile + importFromContent (chunk + embed + tags)
 - `src/core/sync.ts` — Pure sync functions (manifest parsing, filtering, slug conversion)
 - `src/core/storage.ts` — Pluggable storage interface (S3, Supabase Storage, local)
 - `src/core/supabase-admin.ts` — Supabase admin API (project discovery, pgvector check)
 - `src/core/file-resolver.ts` — MIME detection, content hashing for file uploads
 - `src/core/chunkers/` — 3-tier chunking (recursive, semantic, LLM-guided)
-- `src/core/search/` — Hybrid search: vector + keyword + RRF + multi-query expansion + dedup
-- `src/core/embedding.ts` — OpenAI text-embedding-3-large, batch, retry, backoff
+- `src/core/search/` — Hybrid search: vector + keyword + RRF + heuristic/local query expansion + dedup
+- `src/core/embedding.ts` — Embedding pipeline orchestration
 - `src/mcp/server.ts` — MCP stdio server (generated from operations)
 - `supabase/functions/gbrain-mcp/index.ts` — Remote MCP server (Supabase Edge Function)
 - `src/edge-entry.ts` — Curated bundle entry point for Edge Function (excludes fs-dependent modules)
@@ -29,28 +35,19 @@ server are both generated from this single source. Skills are fat markdown files
 - `src/core/schema-embedded.ts` — AUTO-GENERATED from schema.sql (run `bun run build:schema`)
 - `src/schema.sql` — Full Postgres + pgvector DDL (source of truth, generates schema-embedded.ts)
 - `scripts/deploy-remote.sh` — One-script remote MCP deployment
-- `docs/mcp/` — Per-client setup guides (Claude Desktop, Code, Cowork, Perplexity, ChatGPT)
+- `docs/mcp/` — Remote/hosted per-client setup guides (Claude Desktop, Code, Cowork, Perplexity, ChatGPT)
+- `docs/local-offline.md` — Local/offline SQLite + Codex/Claude Code setup guide
 - `openclaw.plugin.json` — ClawHub bundle plugin manifest
 
 ## Commands
 
-Run `gbrain --help` or `gbrain --tools-json` for full command reference.
+Run `gbrain --help` or `gbrain --tools-json` for full command reference. For local/offline contributors: `gbrain init --local` writes the SQLite/offline profile, and `gbrain serve` is the stdio MCP entrypoint both Codex and Claude Code consume.
 
 ## Testing
 
-`bun test` runs all tests (20 unit test files + 4 E2E test files). Unit tests run
-without a database. E2E tests skip gracefully when `DATABASE_URL` is not set.
+`bun test` runs the repo test suite. Unit tests run without a database. Postgres-backed E2E coverage skips gracefully when `DATABASE_URL` is not set.
 
-Unit tests: `test/markdown.test.ts` (frontmatter parsing), `test/chunkers/recursive.test.ts`
-(chunking), `test/sync.test.ts` (sync logic), `test/parity.test.ts` (operations contract
-parity), `test/cli.test.ts` (CLI structure), `test/config.test.ts` (config redaction),
-`test/files.test.ts` (MIME/hash), `test/import-file.test.ts` (import pipeline),
-`test/upgrade.test.ts` (schema migrations), `test/doctor.test.ts` (doctor command),
-`test/file-migration.test.ts` (file migration), `test/file-resolver.test.ts` (file resolution),
-`test/import-resume.test.ts` (import checkpoints), `test/migrate.test.ts` (migration),
-`test/setup-branching.test.ts` (setup flow), `test/slug-validation.test.ts` (slug validation),
-`test/storage.test.ts` (storage backends), `test/supabase-admin.test.ts` (Supabase admin),
-`test/yaml-lite.test.ts` (YAML parsing), `test/check-update.test.ts` (version check + update CLI).
+Unit tests include `test/sqlite-engine.test.ts` (SQLite engine parity), `test/local-offline.test.ts` (offline profile + local embedding/rewrite semantics), `test/markdown.test.ts` (frontmatter parsing), `test/chunkers/recursive.test.ts` (chunking), `test/sync.test.ts` (sync logic), `test/parity.test.ts` (operations contract parity), `test/cli.test.ts` (CLI structure), `test/config.test.ts` (config resolution), `test/files.test.ts` / `test/file-migration.test.ts` / `test/file-resolver.test.ts` (storage + file handling), `test/import-file.test.ts` / `test/import-resume.test.ts` (import pipeline), `test/upgrade.test.ts`, `test/doctor.test.ts`, `test/migrate.test.ts`, `test/setup-branching.test.ts`, `test/slug-validation.test.ts`, `test/storage.test.ts`, `test/supabase-admin.test.ts`, `test/yaml-lite.test.ts`, and `test/check-update.test.ts`.
 
 E2E tests (`test/e2e/`): Run against real Postgres+pgvector. Require `DATABASE_URL`.
 - `bun run test:e2e` runs Tier 1 (mechanical, all operations, no API keys)

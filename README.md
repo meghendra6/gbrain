@@ -19,7 +19,9 @@ This is what I actually use day to day. The agent runs while I sleep... literall
 
 **You don't need Postgres to start.** The knowledge model is just markdown files in a git repo. The [skills](docs/GBRAIN_SKILLPACK.md) and [schema](docs/GBRAIN_RECOMMENDED_SCHEMA.md) work with any AI agent that can read and write files. Start there.
 
-I added Postgres + pgvector later because at 1,000 to 10,000 long markdown docs, `grep` stops working. You need real chunking, real retrieval, real search. GBrain is the thin CLI and MCP layer I built on top of Postgres to solve that, optimized for OpenClaw and smart agents.
+**You also don't need cloud services anymore.** `gbrain init --local` now boots a full local/offline brain on SQLite, `gbrain serve` exposes the same MCP tools over stdio, and Codex or Claude Code can attach to it without Supabase, OpenAI, or Anthropic in the loop. Local embeddings are optional and backfill-driven: import/sync stay usable immediately, and semantic retrieval comes online once you configure a local runtime and run `gbrain embed --stale`. See [docs/local-offline.md](docs/local-offline.md).
+
+I added Postgres + pgvector later because at 1,000 to 10,000 long markdown docs, `grep` stops working. You need real chunking, real retrieval, real search. GBrain now supports both that managed path and a local/offline SQLite path, optimized for OpenClaw and smart agents.
 
 ### Ask it anything
 
@@ -37,7 +39,7 @@ I added Postgres + pgvector later because at 1,000 to 10,000 long markdown docs,
 
 Your markdown repo is the source of truth. GBrain makes it searchable. Your AI agent makes it live.
 
-## Why Postgres
+## Why Postgres still matters
 
 At 500 files, `grep` is fine. At 3,000 people pages, 5,800 Apple Notes, and 13 years of calendar data, `grep` falls apart. You need keyword search for exact names, vector search for semantic meaning, and something that fuses both. You need an index that updates incrementally when one file changes, not a full directory walk. You need your agent to find "everyone who was at the board dinner last March" in milliseconds, not 30 seconds of grepping.
 
@@ -66,7 +68,7 @@ An agent without this loop answers from stale context. An agent with it gets sma
 
 Never do anything twice. If you look someone up once, that lookup lives in the brain forever. If a pattern emerges across three meetings, the agent captures it. If you generate an original idea in conversation, it goes to `originals/` — your searchable intellectual archive.
 
-## Architecture
+## Architecture (managed/Postgres example)
 
 ```
 ┌──────────────────┐    ┌───────────────┐    ┌──────────────────┐
@@ -84,7 +86,7 @@ Never do anything twice. If you look someone up once, that lookup lives in the b
 └──────────────────┘    └───────────────┘    └──────────────────┘
 ```
 
-The repo is the system of record. GBrain is the retrieval layer. The agent reads and writes through both. Human always wins — you can edit any markdown file directly and `gbrain sync` picks up the changes.
+The repo is the system of record. GBrain is the retrieval layer. The agent reads and writes through both. Human always wins — you can edit any markdown file directly and `gbrain sync` picks up the changes. In managed mode that retrieval layer is Postgres + pgvector; in local/offline mode it is SQLite plus the same CLI/MCP contract.
 
 ## What a Production Agent Looks Like
 
@@ -135,7 +137,7 @@ GBrain doesn't ship with demo data. It finds YOUR markdown and makes it searchab
 === Discovery Complete ===
 ```
 
-**Act 2: Import.** Your files move from the repo into Supabase.
+**Act 2: Import (managed/Postgres example).** Your files move from the repo into Supabase.
 
 ```bash
 gbrain import ~/git/brain/
@@ -169,9 +171,9 @@ Your file count will be different. Your queries will be different. The agent pic
 
 ### Prerequisites
 
-**Without Postgres**, you can use the GBrain knowledge model right now: the [skills](docs/GBRAIN_SKILLPACK.md), [schema](docs/GBRAIN_RECOMMENDED_SCHEMA.md), and compiled truth + timeline pattern work with any agent that reads and writes markdown files. Add Postgres when `grep` stops being enough.
+**Local/offline (SQLite, no cloud)** is now a first-class path: run `gbrain init --local` to create `~/.gbrain/brain.db`, keep your repo on disk, and expose the same tools over `gbrain serve`. Keyword search works immediately. Semantic embeddings are optional, backfill-driven, and only require a local Ollama-compatible runtime when you want them. See [docs/local-offline.md](docs/local-offline.md).
 
-**With Postgres**, GBrain needs three things:
+**Managed Postgres** still matters when you want pgvector at scale, remote MCP deployment, or cloud file/storage workflows. For that path, GBrain needs three things:
 
 | Dependency | What it's for | How to get it |
 |------------|--------------|---------------|
@@ -263,18 +265,24 @@ Install globally and use gbrain from the terminal:
 
 ```bash
 bun add -g github:garrytan/gbrain
-gbrain init --supabase          # guided wizard, connects to your Postgres
-gbrain import ~/git/brain/      # index your markdown
+gbrain init --local             # boot a local/offline SQLite brain
+gbrain import ~/git/brain/      # index your markdown into SQLite
 gbrain query "what do we know about competitive dynamics?"
+gbrain embed --stale            # optional: backfill semantic embeddings once a local runtime is configured
 ```
 
-The CLI gives you every operation: page CRUD, search, tags, links, timeline, graph traversal, file management, health checks. Run `gbrain --help` for the full list.
+The CLI gives you page CRUD, search, tags, links, timeline, graph traversal, health checks, and MCP serve in both profiles. Cloud file/storage commands remain Postgres-only today and return honest unsupported-capability errors in sqlite/local mode. Run `gbrain --help` for the full list.
 
-#### MCP server (Claude Code, Cursor, Windsurf, etc.)
+#### Local MCP server (Codex, Claude Code, Cursor, Windsurf, etc.)
 
-GBrain exposes 30 MCP tools via stdio. Add this to your MCP client config:
+GBrain exposes 30 MCP tools via stdio. Initialize `gbrain init --local` first so `gbrain serve` reads your SQLite/offline config, then attach your MCP client:
 
-**Claude Code** (`~/.claude/server.json`):
+**Codex**
+```bash
+codex mcp add gbrain -- gbrain serve
+```
+
+**Claude Code** (`~/.claude/server.json` shape)
 ```json
 {
   "mcpServers": {
@@ -296,7 +304,7 @@ GBrain exposes 30 MCP tools via stdio. Add this to your MCP client config:
 }
 ```
 
-This gives your agent `get_page`, `put_page`, `search`, `query`, `add_link`, `traverse_graph`, `sync_brain`, `file_upload`, and 22 more tools. All generated from the same operation definitions as the CLI.
+This gives your agent `get_page`, `put_page`, `search`, `query`, `add_link`, `traverse_graph`, `sync_brain`, `get_stats`, and more from the same operation definitions as the CLI. File/storage operations are still part of the contract, but in sqlite/local mode they intentionally fail with guidance because cloud storage workflows are not implemented there yet.
 
 #### Remote MCP Server (Claude Desktop, Cowork, Perplexity, ChatGPT)
 
@@ -360,7 +368,11 @@ await engine.putPage('concepts/superlinear-returns', {
 
 The `BrainEngine` interface is pluggable. See `docs/ENGINES.md` for how to add backends.
 
-All paths require a Postgres database with pgvector. Supabase Pro ($25/mo) is the recommended zero-ops option.
+GBrain now has two honest runtime profiles:
+- **Local/offline** — SQLite + stdio MCP on your machine, no cloud required
+- **Managed** — Postgres + pgvector + optional remote MCP/file workflows
+
+Use SQLite when you want a sovereign local brain for Codex or Claude Code. Use Postgres when you want managed scale, remote deployment, or storage/file migration features.
 
 ## Upgrade
 
@@ -377,21 +389,29 @@ clawhub update gbrain
 # Download the latest from https://github.com/garrytan/gbrain/releases
 ```
 
-After upgrading, run `gbrain init` again to apply any schema migrations (idempotent, safe to re-run).
+After upgrading, re-run the initializer that matches your profile to apply any schema migrations (idempotent, safe to re-run): `gbrain init --local` for SQLite or `gbrain init --supabase` / `gbrain init --url ...` for Postgres.
 
 ## Setup
 
-After installing via CLI or library path, run the setup wizard:
+After installing via CLI or library path, choose the setup profile you want:
 
 ```bash
-# Guided wizard: auto-provisions Supabase or accepts a connection URL
+# Zero-cloud local/offline setup (SQLite in ~/.gbrain/brain.db)
+gbrain init --local
+
+# Optional custom SQLite path
+gbrain init --local --path ~/brains/personal-brain.db
+
+# Guided managed setup: accepts a Supabase/Postgres connection URL
 gbrain init --supabase
 
 # Or connect to any Postgres with pgvector
 gbrain init --url postgresql://user:pass@host:5432/dbname
 ```
 
-The init wizard:
+`gbrain init --local` boots the SQLite schema, writes the offline profile to `~/.gbrain/config.json`, and leaves you ready to attach Codex or Claude Code over `gbrain serve`.
+
+The managed Postgres wizard:
 1. Checks for Supabase CLI, offers auto-provisioning
 2. Falls back to manual connection URL if CLI isn't available
 3. Runs the full schema migration (tables, indexes, triggers, extensions)
@@ -414,7 +434,7 @@ gbrain import /path/to/brain/ --no-embed
 gbrain embed --stale
 ```
 
-Import is idempotent. Re-running it skips unchanged files (compared by SHA-256 content hash). Progress bar shows status. ~30s for text import of 7,000 files, ~10-15 min for embedding.
+Import is idempotent. Re-running it skips unchanged files (compared by SHA-256 content hash). Progress bar shows status. ~30s for text import of 7,000 files, ~10-15 min for embedding. In local/offline mode, import and sync do not block on local embeddings being unavailable: keyword search works immediately, and `gbrain embed --stale` backfills semantic retrieval later once `OLLAMA_HOST` or `GBRAIN_LOCAL_EMBEDDING_URL` is configured.
 
 ## File storage and migration
 
@@ -454,7 +474,7 @@ gbrain files restore ~/git/brain/attachments/
 gbrain files clean ~/git/brain/attachments/ --yes
 ```
 
-**Storage backends:** S3-compatible (AWS S3, Cloudflare R2, MinIO), Supabase Storage, or local filesystem. Configured during `gbrain init`.
+**Storage backends:** S3-compatible (AWS S3, Cloudflare R2, MinIO), Supabase Storage, or local filesystem. Configured during managed/Postgres `gbrain init`. These file/storage workflows are not yet supported in sqlite/local mode.
 
 Additional file commands:
 

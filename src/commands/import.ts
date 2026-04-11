@@ -3,9 +3,9 @@ import { execFileSync } from 'child_process';
 import { join, relative } from 'path';
 import { cpus, totalmem, homedir } from 'os';
 import type { BrainEngine } from '../core/engine.ts';
-import { PostgresEngine } from '../core/postgres-engine.ts';
 import { importFile } from '../core/import-file.ts';
 import { loadConfig } from '../core/config.ts';
+import { createConnectedEngine, supportsParallelWorkers } from '../core/engine-factory.ts';
 
 function defaultWorkers(): number {
   const cpuCount = cpus().length;
@@ -19,7 +19,6 @@ function defaultWorkers(): number {
 }
 
 export async function runImport(engine: BrainEngine, args: string[]) {
-  const noEmbed = args.includes('--no-embed');
   const fresh = args.includes('--fresh');
   const jsonOutput = args.includes('--json');
   const workersIdx = args.indexOf('--workers');
@@ -31,7 +30,7 @@ export async function runImport(engine: BrainEngine, args: string[]) {
   const dir = args.find((a, i) => !a.startsWith('--') && !flagValues.has(i));
 
   if (!dir) {
-    console.error('Usage: gbrain import <dir> [--no-embed] [--workers N] [--fresh] [--json]');
+    console.error('Usage: gbrain import <dir> [--workers N] [--fresh] [--json]');
     process.exit(1);
   }
 
@@ -83,7 +82,7 @@ export async function runImport(engine: BrainEngine, args: string[]) {
   async function processFile(eng: BrainEngine, filePath: string) {
     const relativePath = relative(dir, filePath);
     try {
-      const result = await importFile(eng, filePath, relativePath, { noEmbed });
+      const result = await importFile(eng, filePath, relativePath);
       if (result.status === 'imported') {
         imported++;
         chunksCreated += result.chunks;
@@ -126,14 +125,17 @@ export async function runImport(engine: BrainEngine, args: string[]) {
   }
 
   if (actualWorkers > 1) {
-    // Parallel: create per-worker engine instances with small pool
     const config = loadConfig();
+    if (!config) {
+      throw new Error('No brain configured. Run: gbrain init or set GBRAIN_DATABASE_URL / DATABASE_URL.');
+    }
+    if (!supportsParallelWorkers(config)) {
+      throw new Error(`Parallel import workers are not supported for ${config.engine} bootstrap yet.`);
+    }
+
+    // Parallel: create per-worker engine instances with backend-aware bootstrap
     const workerEngines = await Promise.all(
-      Array.from({ length: actualWorkers }, async () => {
-        const eng = new PostgresEngine();
-        await eng.connect({ database_url: config.database_url!, poolSize: 2 });
-        return eng;
-      })
+      Array.from({ length: actualWorkers }, async () => createConnectedEngine(config, { poolSize: 2 }))
     );
 
     // Thread-safe queue: use an atomic index counter instead of array.shift()

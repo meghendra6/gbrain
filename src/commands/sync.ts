@@ -23,7 +23,6 @@ export interface SyncOpts {
   dryRun?: boolean;
   full?: boolean;
   noPull?: boolean;
-  noEmbed?: boolean;
 }
 
 function git(repoPath: string, ...args: string[]): string {
@@ -168,7 +167,6 @@ export async function performSync(engine: BrainEngine, opts: SyncOpts): Promise<
     };
   }
 
-  const noEmbed = opts.noEmbed || totalChanges > 100;
   if (totalChanges > 100) {
     console.log(`Large sync (${totalChanges} files). Importing text, deferring embeddings.`);
   }
@@ -196,7 +194,7 @@ export async function performSync(engine: BrainEngine, opts: SyncOpts): Promise<
     // Reimport at new path (picks up content changes)
     const filePath = join(repoPath, to);
     if (existsSync(filePath)) {
-      const result = await importFile(engine, filePath, to, { noEmbed });
+      const result = await importFile(engine, filePath, to);
       if (result.status === 'imported') chunksCreated += result.chunks;
     }
     pagesAffected.push(newSlug);
@@ -209,7 +207,7 @@ export async function performSync(engine: BrainEngine, opts: SyncOpts): Promise<
       const filePath = join(repoPath, path);
       if (!existsSync(filePath)) continue;
       try {
-        const result = await importFile(engine, filePath, path, { noEmbed });
+        const result = await importFile(engine, filePath, path);
         if (result.status === 'imported') {
           chunksCreated += result.chunks;
           pagesAffected.push(result.slug);
@@ -242,8 +240,8 @@ export async function performSync(engine: BrainEngine, opts: SyncOpts): Promise<
     summary: `Sync: +${filtered.added.length} ~${filtered.modified.length} -${filtered.deleted.length} R${filtered.renamed.length}, ${chunksCreated} chunks, ${elapsed}ms`,
   });
 
-  if (noEmbed && totalChanges > 100) {
-    console.log(`Text imported. Run 'gbrain embed --stale' to generate embeddings.`);
+  if (chunksCreated > 0) {
+    console.log(`Text imported. Run 'gbrain embed --stale' to backfill missing embeddings.`);
   }
 
   return {
@@ -268,7 +266,6 @@ async function performFullSync(
   console.log(`Running full import of ${repoPath}...`);
   const { runImport } = await import('./import.ts');
   const importArgs = [repoPath];
-  if (opts.noEmbed) importArgs.push('--no-embed');
   await runImport(engine, importArgs);
 
   return {
@@ -289,9 +286,8 @@ export async function runSync(engine: BrainEngine, args: string[]) {
   const dryRun = args.includes('--dry-run');
   const full = args.includes('--full');
   const noPull = args.includes('--no-pull');
-  const noEmbed = args.includes('--no-embed');
 
-  const opts: SyncOpts = { repoPath, dryRun, full, noPull, noEmbed };
+  const opts: SyncOpts = { repoPath, dryRun, full, noPull };
 
   if (!watch) {
     const result = await performSync(engine, opts);

@@ -1,8 +1,13 @@
 import { execSync } from 'child_process';
-import { PostgresEngine } from '../core/postgres-engine.ts';
-import { saveConfig, type GBrainConfig } from '../core/config.ts';
+import {
+  createLocalConfigDefaults,
+  saveConfig,
+  type GBrainConfig,
+} from '../core/config.ts';
+import { createEngineFromConfig, toEngineConfig } from '../core/engine-factory.ts';
 
 export async function runInit(args: string[]) {
+  const isLocal = args.includes('--local');
   const isSupabase = args.includes('--supabase');
   const isNonInteractive = args.includes('--non-interactive');
   const jsonOutput = args.includes('--json');
@@ -10,6 +15,40 @@ export async function runInit(args: string[]) {
   const manualUrl = urlIndex !== -1 ? args[urlIndex + 1] : null;
   const keyIndex = args.indexOf('--key');
   const apiKey = keyIndex !== -1 ? args[keyIndex + 1] : null;
+  const pathIndex = args.findIndex(arg => arg === '--path' || arg === '--db-path');
+  const localDatabasePath = pathIndex !== -1 ? args[pathIndex + 1] : undefined;
+
+  if (isLocal) {
+    const engineConfig = createLocalConfigDefaults({
+      ...(localDatabasePath ? { database_path: localDatabasePath } : {}),
+    });
+    const engine = createEngineFromConfig(engineConfig);
+
+    console.log('Bootstrapping local SQLite brain...');
+    await engine.connect(toEngineConfig(engineConfig));
+    console.log('Running schema migration...');
+    await engine.initSchema();
+
+    saveConfig(engineConfig);
+    console.log('Config saved to ~/.gbrain/config.json');
+
+    const stats = await engine.getStats();
+    await engine.disconnect();
+
+    if (jsonOutput) {
+      console.log(JSON.stringify({
+        status: 'success',
+        pages: stats.page_count,
+        config_path: '~/.gbrain/config.json',
+        profile: 'local_offline',
+      }));
+    } else {
+      console.log(`\nLocal brain ready. ${stats.page_count} pages.`);
+      console.log(`SQLite DB: ${engineConfig.database_path}`);
+      console.log('Next: gbrain import <dir> to index your markdown locally.');
+    }
+    return;
+  }
 
   let databaseUrl: string;
 
@@ -20,13 +59,13 @@ export async function runInit(args: string[]) {
     if (envUrl) {
       databaseUrl = envUrl;
     } else {
-      console.error('--non-interactive requires --url <connection_string> or GBRAIN_DATABASE_URL env var');
+      console.error('--non-interactive requires --url <connection_string> or GBRAIN_DATABASE_URL / DATABASE_URL');
       process.exit(1);
     }
   } else if (isSupabase) {
-    databaseUrl = await supabaseWizard();
+    databaseUrl = await postgresWizard();
   } else {
-    databaseUrl = await supabaseWizard();
+    databaseUrl = await postgresWizard();
   }
 
   // Detect Supabase direct connection URLs and warn about IPv6
@@ -42,9 +81,17 @@ export async function runInit(args: string[]) {
 
   // Connect and init schema
   console.log('Connecting to database...');
-  const engine = new PostgresEngine();
+  const engineConfig: GBrainConfig = {
+    engine: 'postgres',
+    database_url: databaseUrl,
+    offline: false,
+    embedding_provider: 'none',
+    query_rewrite_provider: 'none',
+    ...(apiKey ? { openai_api_key: apiKey } : {}),
+  };
+  const engine = createEngineFromConfig(engineConfig);
   try {
-    await engine.connect({ database_url: databaseUrl });
+    await engine.connect(toEngineConfig(engineConfig));
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     // Provide better error for Supabase IPv6 failures
@@ -62,8 +109,9 @@ export async function runInit(args: string[]) {
     const conn = (engine as any).sql || (await import('../core/db.ts')).getConnection();
     const ext = await conn`SELECT extname FROM pg_extension WHERE extname = 'vector'`;
     if (ext.length === 0) {
-      console.error('pgvector extension not found. Run in Supabase SQL Editor:');
+      console.error('pgvector extension not found. Run this on your Postgres database:');
       console.error('  CREATE EXTENSION vector;');
+      console.error("  Use psql, your provider's query console, or Supabase SQL Editor if applicable.");
       await engine.disconnect();
       process.exit(1);
     }
@@ -75,12 +123,7 @@ export async function runInit(args: string[]) {
   await engine.initSchema();
 
   // Save config
-  const config: GBrainConfig = {
-    engine: 'postgres',
-    database_url: databaseUrl,
-    ...(apiKey ? { openai_api_key: apiKey } : {}),
-  };
-  saveConfig(config);
+  saveConfig(engineConfig);
   console.log('Config saved to ~/.gbrain/config.json');
 
   // Verify
@@ -96,23 +139,25 @@ export async function runInit(args: string[]) {
   }
 }
 
-async function supabaseWizard(): Promise<string> {
+async function postgresWizard(): Promise<string> {
   // Try Supabase CLI auto-provision
   try {
     execSync('bunx supabase --version', { stdio: 'pipe' });
-    console.log('Supabase CLI detected.');
-    console.log('To auto-provision, run: bunx supabase login && bunx supabase projects create');
-    console.log('Then use: gbrain init --url <your-connection-string>');
+    console.log('Supabase CLI detected (optional managed Postgres helper).');
+    console.log('If you want a managed Postgres example, you can run:');
+    console.log('  bunx supabase login && bunx supabase projects create');
+    console.log('Then pass any working connection string with: gbrain init --url <connection_string>');
   } catch {
-    console.log('Supabase CLI not found.');
-    console.log('Or provide a connection URL directly.');
+    console.log('No Supabase CLI detected (optional).');
+    console.log('That is fine — any reachable Postgres connection string works.');
   }
 
   // Fallback to manual URL
-  console.log('\nEnter your Supabase/Postgres connection URL:');
-  console.log('  Format: postgresql://postgres.[ref]:[password]@aws-0-[region].pooler.supabase.com:6543/postgres');
-  console.log('  Find it: Supabase Dashboard > gear icon (Project Settings) > Database >');
-  console.log('           Connection string > URI tab > change dropdown to "Session pooler"\n');
+  console.log('\nEnter your Postgres connection URL:');
+  console.log('  Example format: postgresql://user:password@host:5432/database');
+  console.log('  Any working postgres:// or postgresql:// connection string is acceptable.');
+  console.log('  Example managed provider: Supabase session pooler URI from Dashboard >');
+  console.log('    gear icon (Project Settings) > Database > Connection string > URI > Session pooler\n');
 
   const url = await readLine('Connection URL: ');
   if (!url) {

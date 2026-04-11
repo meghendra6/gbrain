@@ -1,0 +1,128 @@
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { runEmbed } from '../src/commands/embed.ts';
+import { resetEmbeddingProviderForTests, setEmbeddingProviderForTests } from '../src/core/embedding.ts';
+import { importFile } from '../src/core/import-file.ts';
+import { SQLiteEngine } from '../src/core/sqlite-engine.ts';
+
+let tempDir = '';
+let dbPath = '';
+let engine: SQLiteEngine;
+
+function createFakeProvider() {
+  const batches: string[][] = [];
+  return {
+    batches,
+    provider: {
+      capability: {
+        available: true,
+        mode: 'local' as const,
+        implementation: 'test-local',
+        model: 'test-local-v1',
+        dimensions: 3,
+      },
+      embedBatch: async (texts: string[]) => {
+        batches.push([...texts]);
+        return texts.map((text, index) => new Float32Array([text.length, index + 1, texts.length]));
+      },
+    },
+  };
+}
+
+beforeEach(async () => {
+  tempDir = mkdtempSync(join(tmpdir(), 'gbrain-local-offline-'));
+  dbPath = join(tempDir, 'brain.db');
+  engine = new SQLiteEngine();
+  await engine.connect({ engine: 'sqlite', database_path: dbPath });
+  await engine.initSchema();
+});
+
+afterEach(async () => {
+  resetEmbeddingProviderForTests();
+  await engine.disconnect();
+  rmSync(tempDir, { recursive: true, force: true });
+});
+
+describe('local/offline embedding flow', () => {
+  test('stale-only embedding updates only missing chunks', async () => {
+    const fake = createFakeProvider();
+    setEmbeddingProviderForTests(fake.provider);
+
+    await engine.putPage('concepts/stale-only', {
+      type: 'concept',
+      title: 'Stale Only',
+      compiled_truth: 'already embedded\nneeds embedding',
+      timeline: 'still missing',
+      frontmatter: {},
+    });
+    await engine.upsertChunks('concepts/stale-only', [
+      {
+        chunk_index: 0,
+        chunk_text: 'already embedded',
+        chunk_source: 'compiled_truth',
+        embedding: new Float32Array([9, 9, 9]),
+        model: 'seed-model',
+        token_count: 3,
+      },
+      {
+        chunk_index: 1,
+        chunk_text: 'needs embedding',
+        chunk_source: 'compiled_truth',
+      },
+      {
+        chunk_index: 2,
+        chunk_text: 'still missing',
+        chunk_source: 'timeline',
+      },
+    ]);
+
+    const before = await engine.getChunks('concepts/stale-only');
+    const originalEmbeddedAt = before[0].embedded_at?.toISOString();
+
+    await runEmbed(engine, ['--stale']);
+
+    expect(fake.batches).toEqual([['needs embedding', 'still missing']]);
+
+    const after = await engine.getChunks('concepts/stale-only');
+    expect(after[0].model).toBe('seed-model');
+    expect(after[0].embedded_at?.toISOString()).toBe(originalEmbeddedAt);
+    expect(after[1].embedded_at).toBeInstanceOf(Date);
+    expect(after[1].model).toBe('test-local-v1');
+    expect(after[2].embedded_at).toBeInstanceOf(Date);
+    expect(after[2].model).toBe('test-local-v1');
+  });
+
+  test('unchanged content does not trigger re-embedding', async () => {
+    const fake = createFakeProvider();
+    setEmbeddingProviderForTests(fake.provider);
+
+    const filePath = join(tempDir, 'unchanged.md');
+    writeFileSync(filePath, `---
+type: concept
+title: Unchanged
+---
+
+This page should only be embedded during explicit backfill.
+`);
+
+    const first = await importFile(engine, filePath, 'concepts/unchanged.md');
+    expect(first.status).toBe('imported');
+    expect(fake.batches).toEqual([]);
+
+    await runEmbed(engine, ['concepts/unchanged']);
+    expect(fake.batches).toHaveLength(1);
+
+    const before = await engine.getChunks('concepts/unchanged');
+    const second = await importFile(engine, filePath, 'concepts/unchanged.md');
+    const after = await engine.getChunks('concepts/unchanged');
+
+    expect(second.status).toBe('skipped');
+    expect(fake.batches).toHaveLength(1);
+    expect(after.map(chunk => chunk.model)).toEqual(before.map(chunk => chunk.model));
+    expect(after.map(chunk => chunk.embedded_at?.toISOString())).toEqual(
+      before.map(chunk => chunk.embedded_at?.toISOString()),
+    );
+  });
+});

@@ -1,7 +1,8 @@
-import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
+import { describe, test, expect, beforeAll, afterAll, afterEach } from 'bun:test';
 import { writeFileSync, mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import { importFile } from '../src/core/import-file.ts';
+import { resetEmbeddingProviderForTests, setEmbeddingProviderForTests } from '../src/core/embedding.ts';
 import type { BrainEngine } from '../src/core/engine.ts';
 
 const TMP = join(import.meta.dir, '.tmp-import-test');
@@ -34,6 +35,10 @@ beforeAll(() => {
 
 afterAll(() => {
   rmSync(TMP, { recursive: true, force: true });
+});
+
+afterEach(() => {
+  resetEmbeddingProviderForTests();
 });
 
 describe('importFile', () => {
@@ -249,6 +254,45 @@ Content to chunk but not embed.
       for (const chunk of chunkCall.args[1]) {
         expect(chunk.embedding).toBeUndefined();
       }
+    }
+  });
+
+  test('imports successfully without inline embeddings even when a provider is available', async () => {
+    const filePath = join(TMP, 'deferred-embed.md');
+    writeFileSync(filePath, `---
+type: concept
+title: Deferred Embed
+---
+
+This import should write chunks first and defer embeddings.
+`);
+
+    const calls: string[][] = [];
+    setEmbeddingProviderForTests({
+      capability: {
+        available: true,
+        mode: 'local',
+        implementation: 'test-local',
+        model: 'test-local-v1',
+        dimensions: 3,
+      },
+      embedBatch: async (texts: string[]) => {
+        calls.push([...texts]);
+        return texts.map((text, index) => new Float32Array([text.length, index + 1, 1]));
+      },
+    });
+
+    const engine = mockEngine();
+    const result = await importFile(engine, filePath, 'concepts/deferred-embed.md');
+
+    expect(result.status).toBe('imported');
+    expect(calls).toEqual([]);
+
+    const chunkCall = (engine as any)._calls.find((c: any) => c.method === 'upsertChunks');
+    expect(chunkCall).toBeTruthy();
+    for (const chunk of chunkCall.args[1]) {
+      expect(chunk.embedding).toBeUndefined();
+      expect(chunk.model).toBeUndefined();
     }
   });
 

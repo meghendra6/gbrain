@@ -1,94 +1,137 @@
-/**
- * Embedding Service
- * Ported from production Ruby implementation (embedding_service.rb, 190 LOC)
- *
- * OpenAI text-embedding-3-large at 1536 dimensions.
- * Retry with exponential backoff (4s base, 120s cap, 5 retries).
- * 8000 character input truncation.
- */
+import { loadConfig, type GBrainConfig } from './config.ts';
+import type { ChunkInput } from './types.ts';
+import type { ResolvedEmbeddingProvider } from './embedding/provider.ts';
+import { resolveEmbeddingProvider } from './embedding/provider.ts';
 
-import OpenAI from 'openai';
-
-const MODEL = 'text-embedding-3-large';
-const DIMENSIONS = 1536;
 const MAX_CHARS = 8000;
-const MAX_RETRIES = 5;
-const BASE_DELAY_MS = 4000;
-const MAX_DELAY_MS = 120000;
 const BATCH_SIZE = 100;
 
-let client: OpenAI | null = null;
+export type {
+  EmbeddingProviderCapability,
+  ResolvedEmbeddingProvider,
+} from './embedding/provider.ts';
 
-function getClient(): OpenAI {
-  if (!client) {
-    client = new OpenAI();
+export interface EmbeddingRuntimeOptions {
+  config?: GBrainConfig | null;
+  allowLegacyOpenAIFallback?: boolean;
+  provider?: ResolvedEmbeddingProvider;
+}
+
+export interface EmbeddedChunkBatch {
+  capability: ResolvedEmbeddingProvider['capability'];
+  chunks: ChunkInput[];
+  deferred: boolean;
+}
+
+let providerOverrideForTests: ResolvedEmbeddingProvider | null = null;
+
+export function setEmbeddingProviderForTests(provider: ResolvedEmbeddingProvider): void {
+  providerOverrideForTests = provider;
+}
+
+export function resetEmbeddingProviderForTests(): void {
+  providerOverrideForTests = null;
+}
+
+export function getEmbeddingProvider(
+  options: EmbeddingRuntimeOptions = {},
+): ResolvedEmbeddingProvider {
+  if (options.provider) return options.provider;
+  if (providerOverrideForTests) return providerOverrideForTests;
+
+  return resolveEmbeddingProvider({
+    config: options.config ?? safeLoadConfig(),
+    allowLegacyOpenAIFallback: options.allowLegacyOpenAIFallback ?? true,
+  });
+}
+
+export function getEmbeddingRuntime(
+  options: EmbeddingRuntimeOptions = {},
+): ResolvedEmbeddingProvider['capability'] {
+  return getEmbeddingProvider(options).capability;
+}
+
+export async function embed(text: string, options: EmbeddingRuntimeOptions = {}): Promise<Float32Array> {
+  const results = await embedBatch([text], options);
+  return results[0];
+}
+
+export async function embedBatch(
+  texts: string[],
+  options: EmbeddingRuntimeOptions = {},
+): Promise<Float32Array[]> {
+  const provider = getEmbeddingProvider(options);
+  const truncated = texts.map(text => truncateForEmbedding(text));
+
+  if (!provider.capability.available) {
+    throw new Error(provider.capability.reason || 'Embedding provider unavailable');
   }
-  return client;
-}
 
-export async function embed(text: string): Promise<Float32Array> {
-  const truncated = text.slice(0, MAX_CHARS);
-  const result = await embedBatch([truncated]);
-  return result[0];
-}
-
-export async function embedBatch(texts: string[]): Promise<Float32Array[]> {
-  const truncated = texts.map(t => t.slice(0, MAX_CHARS));
   const results: Float32Array[] = [];
-
-  // Process in batches of BATCH_SIZE
-  for (let i = 0; i < truncated.length; i += BATCH_SIZE) {
-    const batch = truncated.slice(i, i + BATCH_SIZE);
-    const batchResults = await embedBatchWithRetry(batch);
+  for (let index = 0; index < truncated.length; index += BATCH_SIZE) {
+    const batch = truncated.slice(index, index + BATCH_SIZE);
+    const batchResults = await provider.embedBatch(batch);
+    if (batchResults.length !== batch.length) {
+      throw new Error('Embedding provider returned an unexpected result count');
+    }
     results.push(...batchResults);
   }
 
   return results;
 }
 
-async function embedBatchWithRetry(texts: string[]): Promise<Float32Array[]> {
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-    try {
-      const response = await getClient().embeddings.create({
-        model: MODEL,
-        input: texts,
-        dimensions: DIMENSIONS,
-      });
-
-      // Sort by index to maintain order
-      const sorted = response.data.sort((a, b) => a.index - b.index);
-      return sorted.map(d => new Float32Array(d.embedding));
-    } catch (e: unknown) {
-      if (attempt === MAX_RETRIES - 1) throw e;
-
-      // Check for rate limit with Retry-After header
-      let delay = exponentialDelay(attempt);
-
-      if (e instanceof OpenAI.APIError && e.status === 429) {
-        const retryAfter = e.headers?.['retry-after'];
-        if (retryAfter) {
-          const parsed = parseInt(retryAfter, 10);
-          if (!isNaN(parsed)) {
-            delay = parsed * 1000;
-          }
-        }
-      }
-
-      await sleep(delay);
-    }
+export async function embedChunks(
+  chunks: ChunkInput[],
+  options: EmbeddingRuntimeOptions = {},
+): Promise<EmbeddedChunkBatch> {
+  const provider = getEmbeddingProvider(options);
+  if (chunks.length === 0) {
+    return { capability: provider.capability, chunks: [], deferred: false };
   }
 
-  // Should not reach here
-  throw new Error('Embedding failed after all retries');
+  if (!provider.capability.available) {
+    return {
+      capability: provider.capability,
+      chunks: chunks.map(chunk => ({
+        ...chunk,
+        token_count: chunk.token_count ?? estimateTokenCount(chunk.chunk_text),
+      })),
+      deferred: true,
+    };
+  }
+
+  const embeddings = await embedBatch(
+    chunks.map(chunk => chunk.chunk_text),
+    { ...options, provider },
+  );
+
+  return {
+    capability: provider.capability,
+    deferred: false,
+    chunks: chunks.map((chunk, index) => ({
+      ...chunk,
+      embedding: embeddings[index],
+      model: provider.capability.model ?? chunk.model,
+      token_count: chunk.token_count ?? estimateTokenCount(chunk.chunk_text),
+    })),
+  };
 }
 
-function exponentialDelay(attempt: number): number {
-  const delay = BASE_DELAY_MS * Math.pow(2, attempt);
-  return Math.min(delay, MAX_DELAY_MS);
+export function estimateTokenCount(text: string): number {
+  return Math.ceil(text.length / 4);
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+export const EMBEDDING_MODEL = 'text-embedding-3-large';
+export const EMBEDDING_DIMENSIONS = 1536;
+
+function truncateForEmbedding(text: string): string {
+  return text.slice(0, MAX_CHARS);
 }
 
-export { MODEL as EMBEDDING_MODEL, DIMENSIONS as EMBEDDING_DIMENSIONS };
+function safeLoadConfig(): GBrainConfig | null {
+  try {
+    return loadConfig();
+  } catch {
+    return null;
+  }
+}

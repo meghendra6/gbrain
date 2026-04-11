@@ -5,6 +5,7 @@ import { join } from 'path';
 import { runEmbed } from '../src/commands/embed.ts';
 import { getEmbeddingProvider, resetEmbeddingProviderForTests, setEmbeddingProviderForTests } from '../src/core/embedding.ts';
 import { importFile } from '../src/core/import-file.ts';
+import { hybridSearch } from '../src/core/search/hybrid.ts';
 import { SQLiteEngine } from '../src/core/sqlite-engine.ts';
 
 let tempDir = '';
@@ -27,6 +28,41 @@ function createFakeProvider() {
         batches.push([...texts]);
         return texts.map((text, index) => new Float32Array([text.length, index + 1, texts.length]));
       },
+    },
+  };
+}
+
+function createMappedProvider(vectors: Record<string, number[]>) {
+  return {
+    capability: {
+      available: true,
+      mode: 'local' as const,
+      implementation: 'test-local',
+      model: 'test-local-v1',
+      dimensions: Object.values(vectors)[0]?.length ?? null,
+    },
+    embedBatch: async (texts: string[]) => texts.map((text) => {
+      const vector = vectors[text];
+      if (!vector) {
+        throw new Error(`No test embedding configured for "${text}"`);
+      }
+      return new Float32Array(vector);
+    }),
+  };
+}
+
+function createUnavailableProvider(reason: string) {
+  return {
+    capability: {
+      available: false,
+      mode: 'none' as const,
+      implementation: 'none' as const,
+      model: null,
+      dimensions: null,
+      reason,
+    },
+    embedBatch: async () => {
+      throw new Error(reason);
     },
   };
 }
@@ -279,5 +315,161 @@ Timeline sentence.
     const rebuiltChunks = await engine.getChunks('concepts/page-rebuild');
     expect(rebuiltChunks.every(chunk => chunk.model === 'test-local-v2')).toBe(true);
     expect(rebuiltChunks.every(chunk => chunk.embedded_at instanceof Date)).toBe(true);
+  });
+
+  test('sqlite local vector search ranks embedded chunks by cosine similarity', async () => {
+    await engine.putPage('concepts/vector-top', {
+      type: 'concept',
+      title: 'Vector Top',
+      compiled_truth: 'Highest cosine similarity match.',
+      timeline: '',
+      frontmatter: {},
+    });
+    await engine.upsertChunks('concepts/vector-top', [
+      {
+        chunk_index: 0,
+        chunk_text: 'Highest cosine similarity match.',
+        chunk_source: 'compiled_truth',
+        embedding: new Float32Array([1, 0, 0]),
+      },
+    ]);
+
+    await engine.putPage('concepts/vector-second', {
+      type: 'concept',
+      title: 'Vector Second',
+      compiled_truth: 'Second-best cosine similarity match.',
+      timeline: '',
+      frontmatter: {},
+    });
+    await engine.upsertChunks('concepts/vector-second', [
+      {
+        chunk_index: 0,
+        chunk_text: 'Second-best cosine similarity match.',
+        chunk_source: 'compiled_truth',
+        embedding: new Float32Array([0.5, 0.5, 0]),
+      },
+    ]);
+
+    const results = await engine.searchVector(new Float32Array([1, 0, 0]), { limit: 2 });
+
+    expect(results.map(result => result.slug)).toEqual([
+      'concepts/vector-top',
+      'concepts/vector-second',
+    ]);
+    expect(results[0]?.score).toBeGreaterThan(results[1]?.score ?? 0);
+  });
+
+  test('hybrid search falls back to keyword-only when query embeddings are unavailable', async () => {
+    setEmbeddingProviderForTests(createUnavailableProvider('offline embedding runtime unavailable'));
+
+    await engine.putPage('concepts/keyword-only', {
+      type: 'concept',
+      title: 'Keyword Only',
+      compiled_truth: 'Offline retrieval fallback keeps keyword search working.',
+      timeline: '',
+      frontmatter: {},
+    });
+    await engine.upsertChunks('concepts/keyword-only', [
+      {
+        chunk_index: 0,
+        chunk_text: 'Offline retrieval fallback keeps keyword search working.',
+        chunk_source: 'compiled_truth',
+      },
+    ]);
+
+    const keywordResults = await engine.searchKeyword('offline retrieval fallback', { limit: 5 });
+    const hybridResults = await hybridSearch(engine, 'offline retrieval fallback', { limit: 5 });
+
+    expect(hybridResults).toEqual(keywordResults);
+  });
+
+  test('hybrid search fuses vector and keyword rankings when both are available', async () => {
+    setEmbeddingProviderForTests(createMappedProvider({
+      'hybrid fusion': [1, 0, 0],
+    }));
+
+    await engine.putPage('concepts/semantic-match', {
+      type: 'project',
+      title: 'Semantic Match',
+      compiled_truth: 'A concept about dense embeddings and latent neighbors.',
+      timeline: '',
+      frontmatter: {},
+    });
+    await engine.upsertChunks('concepts/semantic-match', [
+      {
+        chunk_index: 0,
+        chunk_text: 'Dense embedding neighbors line up with the intent.',
+        chunk_source: 'compiled_truth',
+        embedding: new Float32Array([0.92, 0.08, 0]),
+      },
+    ]);
+
+    await engine.putPage('concepts/overlap-match', {
+      type: 'concept',
+      title: 'Overlap Match',
+      compiled_truth: 'Hybrid fusion keeps exact hybrid fusion phrasing near the top.',
+      timeline: '',
+      frontmatter: {},
+    });
+    await engine.upsertChunks('concepts/overlap-match', [
+      {
+        chunk_index: 0,
+        chunk_text: 'hybrid fusion stays strong when keyword and vector evidence agree',
+        chunk_source: 'compiled_truth',
+        embedding: new Float32Array([1, 0, 0]),
+      },
+    ]);
+
+    const results = await hybridSearch(engine, 'hybrid fusion', { limit: 5 });
+
+    expect(results[0]?.slug).toBe('concepts/overlap-match');
+    expect(results.some(result => result.slug === 'concepts/semantic-match')).toBe(true);
+    const semanticResult = results.find(result => result.slug === 'concepts/semantic-match');
+    expect(results[0]?.score).toBeGreaterThan(semanticResult?.score ?? 0);
+  });
+
+  test('hybrid search fuses available vector results when embedding coverage is partial', async () => {
+    setEmbeddingProviderForTests(createMappedProvider({
+      'partial coverage': [1, 0, 0],
+    }));
+
+    await engine.putPage('concepts/vector-covered', {
+      type: 'concept',
+      title: 'Vector Covered',
+      compiled_truth: 'Semantic chunk without exact query terms.',
+      timeline: '',
+      frontmatter: {},
+    });
+    await engine.upsertChunks('concepts/vector-covered', [
+      {
+        chunk_index: 0,
+        chunk_text: 'Nearest-neighbor recall from the local vector store.',
+        chunk_source: 'compiled_truth',
+        embedding: new Float32Array([1, 0, 0]),
+      },
+    ]);
+
+    await engine.putPage('concepts/keyword-only-partial', {
+      type: 'concept',
+      title: 'Keyword Only Partial',
+      compiled_truth: 'partial coverage must still surface keyword hits without stored embeddings.',
+      timeline: '',
+      frontmatter: {},
+    });
+    await engine.upsertChunks('concepts/keyword-only-partial', [
+      {
+        chunk_index: 0,
+        chunk_text: 'partial coverage must still surface keyword hits without stored embeddings.',
+        chunk_source: 'compiled_truth',
+      },
+    ]);
+
+    const results = await hybridSearch(engine, 'partial coverage', { limit: 5 });
+
+    expect(results.map(result => result.slug)).toEqual([
+      'concepts/vector-covered',
+      'concepts/keyword-only-partial',
+    ]);
+    expect(results[1]?.chunk_text).toContain('partial coverage');
   });
 });

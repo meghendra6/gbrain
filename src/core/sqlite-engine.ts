@@ -5,6 +5,7 @@ import { homedir } from 'os';
 import { dirname, join } from 'path';
 import type { BrainEngine } from './engine.ts';
 import { LATEST_VERSION } from './migrate.ts';
+import { searchLocalVectors } from './search/vector-local.ts';
 import { slugifyPath } from './sync.ts';
 import type {
   Page, PageInput, PageFilters, PageType,
@@ -412,8 +413,44 @@ export class SQLiteEngine implements BrainEngine {
     return rows.map(row => rowToSearchResult(row, query));
   }
 
-  async searchVector(_embedding: Float32Array, _opts?: SearchOpts): Promise<SearchResult[]> {
-    return [];
+  async searchVector(embedding: Float32Array, opts?: SearchOpts): Promise<SearchResult[]> {
+    const limit = opts?.limit ?? 20;
+    const params: unknown[] = [];
+    let sql = `
+      SELECT
+        p.id AS page_id,
+        p.slug,
+        p.title,
+        p.type,
+        cc.chunk_text,
+        cc.chunk_source,
+        cc.embedding,
+        CASE WHEN EXISTS (
+          SELECT 1 FROM timeline_entries te
+          WHERE te.page_id = p.id AND p.updated_at < te.created_at
+        ) THEN 1 ELSE 0 END AS stale
+      FROM content_chunks cc
+      JOIN pages p ON p.id = cc.page_id
+      WHERE cc.embedding IS NOT NULL
+    `;
+
+    if (opts?.type) {
+      sql += ` AND p.type = ?`;
+      params.push(opts.type);
+    }
+
+    if (opts?.exclude_slugs?.length) {
+      sql += ` AND p.slug NOT IN (${opts.exclude_slugs.map(() => '?').join(', ')})`;
+      params.push(...opts.exclude_slugs.map(slug => validateSlug(slug)));
+    }
+
+    const rows = this.database.query(sql).all(...params) as Record<string, unknown>[];
+
+    return searchLocalVectors(
+      embedding,
+      rows.map(rowToLocalVectorCandidate),
+      limit,
+    );
   }
 
   async upsertChunks(slug: string, chunks: ChunkInput[]): Promise<void> {
@@ -930,6 +967,12 @@ function float32ToBlob(value: Float32Array): Uint8Array {
   return new Uint8Array(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength));
 }
 
+function blobToFloat32(value: unknown): Float32Array | null {
+  if (!(value instanceof Uint8Array)) return null;
+  if (value.byteLength === 0 || value.byteLength % Float32Array.BYTES_PER_ELEMENT !== 0) return null;
+  return new Float32Array(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength));
+}
+
 function rowToPage(row: Record<string, unknown>): Page {
   return {
     id: Number(row.id),
@@ -1028,6 +1071,19 @@ function rowToSearchResult(row: Record<string, unknown>, query: string): SearchR
     chunk_source,
     score: Math.max(0, -rawRank),
     stale: Boolean(row.stale),
+  };
+}
+
+function rowToLocalVectorCandidate(row: Record<string, unknown>) {
+  return {
+    slug: String(row.slug),
+    page_id: Number(row.page_id),
+    title: String(row.title),
+    type: row.type as PageType,
+    chunk_text: String(row.chunk_text),
+    chunk_source: row.chunk_source as 'compiled_truth' | 'timeline',
+    stale: Boolean(row.stale),
+    embedding: blobToFloat32(row.embedding),
   };
 }
 

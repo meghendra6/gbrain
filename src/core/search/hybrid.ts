@@ -8,7 +8,7 @@
 
 import type { BrainEngine } from '../engine.ts';
 import type { SearchResult, SearchOpts } from '../types.ts';
-import { embed } from '../embedding.ts';
+import { embed, getEmbeddingProvider } from '../embedding.ts';
 import { dedupResults } from './dedup.ts';
 
 const RRF_K = 60;
@@ -24,6 +24,7 @@ export async function hybridSearch(
   opts?: HybridSearchOpts,
 ): Promise<SearchResult[]> {
   const limit = opts?.limit || 20;
+  const keywordPromise = engine.searchKeyword(query, { ...opts, limit: limit * 2 });
 
   // Determine query variants (optionally with expansion)
   let queries = [query];
@@ -36,16 +37,27 @@ export async function hybridSearch(
     }
   }
 
-  // Embed all query variants
-  const embeddings = await Promise.all(queries.map(q => embed(q)));
+  const keywordResults = await keywordPromise;
+  const provider = getEmbeddingProvider();
+  if (!provider.capability.available) {
+    return keywordResults.slice(0, limit);
+  }
 
-  // Run vector search for each embedding
-  const vectorLists = await Promise.all(
-    embeddings.map(emb => engine.searchVector(emb, { limit: limit * 2 })),
-  );
+  let vectorLists: SearchResult[][] = [];
+  try {
+    const embeddings = await Promise.all(
+      queries.map(q => embed(q, { provider })),
+    );
+    vectorLists = await Promise.all(
+      embeddings.map(emb => engine.searchVector(emb, { ...opts, limit: limit * 2 })),
+    );
+  } catch {
+    return keywordResults.slice(0, limit);
+  }
 
-  // Run keyword search (only the original query)
-  const keywordResults = await engine.searchKeyword(query, { limit: limit * 2 });
+  if (vectorLists.every(list => list.length === 0)) {
+    return keywordResults.slice(0, limit);
+  }
 
   // Merge all result lists via RRF
   const allLists = [...vectorLists, keywordResults];

@@ -43,19 +43,25 @@ export async function hybridSearch(
     return keywordResults.slice(0, limit);
   }
 
-  let vectorLists: SearchResult[][] = [];
-  try {
-    const embeddings = await Promise.all(
-      queries.map(q => embed(q, { provider })),
-    );
-    vectorLists = await Promise.all(
-      embeddings.map(emb => engine.searchVector(emb, { ...opts, limit: limit * 2 })),
-    );
-  } catch {
+  const embeddingSettled = await Promise.allSettled(
+    queries.map(q => embed(q, { provider })),
+  );
+  const embeddings = embeddingSettled.flatMap((result) => (
+    result.status === 'fulfilled' ? [result.value] : []
+  ));
+
+  if (embeddings.length === 0) {
     return keywordResults.slice(0, limit);
   }
 
-  if (vectorLists.every(list => list.length === 0)) {
+  const vectorSettled = await Promise.allSettled(
+    embeddings.map(emb => engine.searchVector(emb, { ...opts, limit: limit * 2 })),
+  );
+  const vectorLists = vectorSettled.flatMap((result) => (
+    result.status === 'fulfilled' ? [result.value] : []
+  ));
+
+  if (vectorLists.length === 0 || vectorLists.every(list => list.length === 0)) {
     return keywordResults.slice(0, limit);
   }
 

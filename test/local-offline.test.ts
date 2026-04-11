@@ -472,4 +472,109 @@ Timeline sentence.
     ]);
     expect(results[1]?.chunk_text).toContain('partial coverage');
   });
+
+  test('hybrid search keeps successful vector variants when one expanded query embedding fails', async () => {
+    setEmbeddingProviderForTests(createMappedProvider({
+      'hybrid fusion': [1, 0, 0],
+    }));
+
+    await engine.putPage('concepts/semantic-resilient', {
+      type: 'project',
+      title: 'Semantic Resilient',
+      compiled_truth: 'Semantic result should survive one failed expansion embedding.',
+      timeline: '',
+      frontmatter: {},
+    });
+    await engine.upsertChunks('concepts/semantic-resilient', [
+      {
+        chunk_index: 0,
+        chunk_text: 'Dense vector recall survives per-query embedding failures.',
+        chunk_source: 'compiled_truth',
+        embedding: new Float32Array([1, 0, 0]),
+      },
+    ]);
+
+    await engine.putPage('concepts/keyword-resilient', {
+      type: 'concept',
+      title: 'Keyword Resilient',
+      compiled_truth: 'hybrid fusion remains available through keyword search.',
+      timeline: '',
+      frontmatter: {},
+    });
+    await engine.upsertChunks('concepts/keyword-resilient', [
+      {
+        chunk_index: 0,
+        chunk_text: 'hybrid fusion remains available through keyword search.',
+        chunk_source: 'compiled_truth',
+      },
+    ]);
+
+    const results = await hybridSearch(engine, 'hybrid fusion', {
+      limit: 5,
+      expansion: true,
+      expandFn: async () => ['missing expansion'],
+    });
+
+    expect(results.some(result => result.slug === 'concepts/semantic-resilient')).toBe(true);
+    expect(results.some(result => result.slug === 'concepts/keyword-resilient')).toBe(true);
+  });
+
+  test('hybrid search keeps successful vector variants when one vector search path fails', async () => {
+    setEmbeddingProviderForTests(createMappedProvider({
+      'hybrid vector resilience': [1, 0, 0],
+      'related expansion': [0, 1, 0],
+    }));
+
+    await engine.putPage('concepts/vector-resilient', {
+      type: 'project',
+      title: 'Vector Resilient',
+      compiled_truth: 'A successful vector search path should still contribute.',
+      timeline: '',
+      frontmatter: {},
+    });
+    await engine.upsertChunks('concepts/vector-resilient', [
+      {
+        chunk_index: 0,
+        chunk_text: 'Successful vector retrieval survives sibling failures.',
+        chunk_source: 'compiled_truth',
+        embedding: new Float32Array([1, 0, 0]),
+      },
+    ]);
+
+    await engine.putPage('concepts/keyword-vector-resilient', {
+      type: 'concept',
+      title: 'Keyword Vector Resilient',
+      compiled_truth: 'hybrid vector resilience also remains available through keyword search.',
+      timeline: '',
+      frontmatter: {},
+    });
+    await engine.upsertChunks('concepts/keyword-vector-resilient', [
+      {
+        chunk_index: 0,
+        chunk_text: 'hybrid vector resilience also remains available through keyword search.',
+        chunk_source: 'compiled_truth',
+      },
+    ]);
+
+    const originalSearchVector = engine.searchVector.bind(engine);
+    engine.searchVector = async (embedding, opts) => {
+      if (embedding[1] === 1) {
+        throw new Error('simulated vector path failure');
+      }
+      return originalSearchVector(embedding, opts);
+    };
+
+    try {
+      const results = await hybridSearch(engine, 'hybrid vector resilience', {
+        limit: 5,
+        expansion: true,
+        expandFn: async () => ['related expansion'],
+      });
+
+      expect(results.some(result => result.slug === 'concepts/vector-resilient')).toBe(true);
+      expect(results.some(result => result.slug === 'concepts/keyword-vector-resilient')).toBe(true);
+    } finally {
+      engine.searchVector = originalSearchVector;
+    }
+  });
 });

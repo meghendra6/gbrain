@@ -1,4 +1,4 @@
-<!-- gbrain-agent-rules-version: 0.5.0 -->
+<!-- gbrain-agent-rules-version: 0.5.1 -->
 <!-- source: https://raw.githubusercontent.com/meghendra6/gbrain/master/docs/GBRAIN_AGENT_RULES.md -->
 # GBrain Agent Rules
 
@@ -7,9 +7,8 @@ compounding knowledge system. Without these rules the MCP tools are available bu
 the brain-agent loop does not run -- knowledge stops compounding.
 
 For the full reference architecture (enrichment pipelines, meeting ingestion,
-cron schedules, page templates), read the complete SKILLPACK:
-`docs/GBRAIN_SKILLPACK.md` in the gbrain package, or call the `get_skillpack`
-MCP tool with a specific section name.
+cron schedules, page templates), call the `get_skillpack` MCP tool with a
+specific section name (e.g. `get_skillpack section="enrichment"`).
 
 ---
 
@@ -163,8 +162,8 @@ Check both. gbrain for facts about the world. Agent memory for how to behave.
 ## Reference
 
 For detailed patterns not covered here (enrichment pipelines, meeting ingestion
-format, cron schedules, page templates, upgrade procedures), consult the full
-SKILLPACK: `docs/GBRAIN_SKILLPACK.md` or use the `get_skillpack` MCP tool.
+format, cron schedules, page templates, upgrade procedures), use the
+`get_skillpack` MCP tool with a section number or keyword.
 
 | Section | Topic |
 |---------|-------|

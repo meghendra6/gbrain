@@ -95,7 +95,7 @@ export async function runSetupAgent(args: string[]) {
       console.log(`    [${rulesIcon}] Rules: ${r.rules}`);
     }
     console.log('\nDone. Start a new session in your AI client to activate the rules.');
-    console.log('Full reference: docs/GBRAIN_SKILLPACK.md');
+    console.log('Full reference: use the get_skillpack MCP tool inside your AI client.');
   }
 }
 

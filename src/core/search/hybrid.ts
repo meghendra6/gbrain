@@ -31,7 +31,7 @@ export async function hybridSearch(
   if (opts?.expansion && opts?.expandFn) {
     try {
       const expanded = await opts.expandFn(query);
-      queries = [query, ...expanded].slice(0, 3);
+      queries = dedupeQueryVariants([query, ...expanded]).slice(0, 3);
     } catch {
       // Expansion failure is non-fatal
     }
@@ -73,6 +73,22 @@ export async function hybridSearch(
   const deduped = dedupResults(fused);
 
   return deduped.slice(0, limit);
+}
+
+function dedupeQueryVariants(queries: string[]): string[] {
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+
+  for (const query of queries) {
+    const normalized = query.trim();
+    if (!normalized) continue;
+    const key = normalized.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(normalized);
+  }
+
+  return deduped;
 }
 
 /**

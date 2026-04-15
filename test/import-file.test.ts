@@ -79,6 +79,49 @@ This is the compiled truth.
     expect(chunkCall).toBeTruthy();
   });
 
+  test('infers system page type from systems path during import', async () => {
+    const filePath = join(TMP, 'llvm.md');
+    writeFileSync(filePath, `---
+title: LLVM
+repo: https://github.com/llvm/llvm-project
+codemap:
+  - system: systems/llvm
+    pointers:
+      - path: llvm/lib/Passes/PassBuilder.cpp
+        symbol: PassBuilder::buildPerModuleDefaultPipeline()
+        role: Constructs optimization pipelines
+        verified_at: 2026-04-15
+---
+
+Compiler infrastructure summary.
+`);
+
+    const engine = mockEngine();
+    const result = await importFile(engine, filePath, 'systems/llvm.md');
+
+    expect(result.status).toBe('imported');
+    expect(result.slug).toBe('systems/llvm');
+
+    const calls = (engine as any)._calls;
+    const putCall = calls.find((c: any) => c.method === 'putPage');
+    expect(putCall).toBeTruthy();
+    expect(putCall.args[0]).toBe('systems/llvm');
+    expect(putCall.args[1].type).toBe('system');
+    expect(putCall.args[1].frontmatter.codemap).toEqual([
+      {
+        system: 'systems/llvm',
+        pointers: [
+          {
+            path: 'llvm/lib/Passes/PassBuilder.cpp',
+            symbol: 'PassBuilder::buildPerModuleDefaultPipeline()',
+            role: 'Constructs optimization pipelines',
+            verified_at: '2026-04-15',
+          },
+        ],
+      },
+    ]);
+  });
+
   test('skips files larger than MAX_FILE_SIZE (5MB)', async () => {
     const filePath = join(TMP, 'big-file.md');
     const bigContent = '---\ntitle: Big\n---\n' + 'x'.repeat(5_100_000);

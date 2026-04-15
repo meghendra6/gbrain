@@ -44,7 +44,7 @@ export function parseMarkdown(content: string, filePath?: string): ParsedMarkdow
   const slug = (frontmatter.slug as string) || inferSlug(filePath);
 
   // Remove processed fields from frontmatter (they're stored as columns)
-  const cleanFrontmatter = { ...frontmatter };
+  const cleanFrontmatter = normalizeFrontmatter({ ...frontmatter });
   delete cleanFrontmatter.type;
   delete cleanFrontmatter.title;
   delete cleanFrontmatter.tags;
@@ -127,6 +127,7 @@ function inferType(filePath?: string): PageType {
 
   // Normalize: add leading / for consistent matching
   const lower = ('/' + filePath).toLowerCase();
+  if (lower.includes('/systems/') || lower.includes('/system/')) return 'system';
   if (lower.includes('/people/') || lower.includes('/person/')) return 'person';
   if (lower.includes('/companies/') || lower.includes('/company/')) return 'company';
   if (lower.includes('/deals/') || lower.includes('/deal/')) return 'deal';
@@ -158,4 +159,26 @@ function extractTags(frontmatter: Record<string, unknown>): string[] {
   if (Array.isArray(tags)) return tags.map(String);
   if (typeof tags === 'string') return tags.split(',').map(t => t.trim()).filter(Boolean);
   return [];
+}
+
+function normalizeFrontmatter(value: unknown): any {
+  if (value instanceof Date) {
+    return isDateOnly(value) ? value.toISOString().slice(0, 10) : value.toISOString();
+  }
+  if (Array.isArray(value)) {
+    return value.map(item => normalizeFrontmatter(item));
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, entry]) => [key, normalizeFrontmatter(entry)]),
+    );
+  }
+  return value;
+}
+
+function isDateOnly(value: Date): boolean {
+  return value.getUTCHours() === 0
+    && value.getUTCMinutes() === 0
+    && value.getUTCSeconds() === 0
+    && value.getUTCMilliseconds() === 0;
 }

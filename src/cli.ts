@@ -22,6 +22,7 @@ for (const op of operations) {
 const CLI_ONLY = new Set([
   'init',
   'upgrade',
+  'post-upgrade',
   'check-update',
   'integrations',
   'import',
@@ -245,6 +246,11 @@ async function handleCliOnly(command: string, args: string[]) {
   if (command === 'upgrade') {
     const { runUpgrade } = await import('./commands/upgrade.ts');
     await runUpgrade(args);
+    return;
+  }
+  if (command === 'post-upgrade') {
+    const { runPostUpgrade } = await import('./commands/upgrade.ts');
+    runPostUpgrade();
     return;
   }
   if (command === 'check-update') {

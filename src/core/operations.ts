@@ -81,6 +81,10 @@ export interface Operation {
   };
 }
 
+const runtimeImport = new Function('specifier', 'return import(specifier)') as (
+  specifier: string,
+) => Promise<any>;
+
 // --- Page CRUD ---
 
 const get_page: Operation = {
@@ -429,7 +433,8 @@ const sync_brain: Operation = {
   },
   mutating: true,
   handler: async (ctx, p) => {
-    const { performSync } = await import('../commands/sync.ts');
+    // Keep sync local-only so the remote Edge bundle doesn't pull in CLI/import engine code.
+    const { performSync } = await runtimeImport('../commands/sync.ts');
     return performSync(ctx.engine, {
       repoPath: p.repo as string | undefined,
       dryRun: ctx.dryRun || (p.dry_run as boolean) || false,

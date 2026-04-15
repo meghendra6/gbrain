@@ -1,5 +1,5 @@
 import { execSync } from 'child_process';
-import { readdirSync, statSync } from 'fs';
+import { readdirSync, statSync, lstatSync } from 'fs';
 import { join } from 'path';
 import {
   createLocalConfigDefaults,
@@ -239,7 +239,8 @@ function countMarkdownFiles(dir: string, maxScan = 1500): number {
         if (entry.startsWith('.') || entry === 'node_modules') continue;
         const full = join(d, entry);
         try {
-          const stat = statSync(full);
+          const stat = lstatSync(full);
+          if (stat.isSymbolicLink()) continue;
           if (stat.isDirectory()) scan(full);
           else if (entry.endsWith('.md')) count++;
         } catch {

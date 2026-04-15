@@ -4,6 +4,7 @@ import { join } from 'path';
 import { importFile, importFromContent } from '../src/core/import-file.ts';
 import { resetEmbeddingProviderForTests, setEmbeddingProviderForTests } from '../src/core/embedding.ts';
 import type { BrainEngine } from '../src/core/engine.ts';
+import { SQLiteEngine } from '../src/core/sqlite-engine.ts';
 
 const TMP = join(import.meta.dir, '.tmp-import-test');
 
@@ -77,6 +78,31 @@ This is the compiled truth.
     // Chunks were upserted
     const chunkCall = calls.find((c: any) => c.method === 'upsertChunks');
     expect(chunkCall).toBeTruthy();
+  });
+
+  test('timestamp-only frontmatter changes do not get skipped', async () => {
+    const engine = new SQLiteEngine();
+    await engine.connect({ engine: 'sqlite', database_path: ':memory:' });
+    try {
+      await engine.initSchema();
+
+      const first = `---
+title: Date Test
+reviewed_at: 2026-04-15T12:30:00-07:00
+---
+Body`;
+      const second = `---
+title: Date Test
+reviewed_at: 2026-04-16T12:30:00-07:00
+---
+Body`;
+
+      expect((await importFromContent(engine, 'concepts/date-test', first)).status).toBe('imported');
+      expect((await importFromContent(engine, 'concepts/date-test', second)).status).toBe('imported');
+      expect((await engine.getPage('concepts/date-test'))?.frontmatter.reviewed_at).toBe('2026-04-16T19:30:00.000Z');
+    } finally {
+      await engine.disconnect();
+    }
   });
 
   test('infers system page type from systems path during import', async () => {

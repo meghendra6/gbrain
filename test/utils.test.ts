@@ -118,6 +118,26 @@ describe('importContentHash', () => {
     });
     expect(h1).toBe(h2);
   });
+
+  test('preserves Date frontmatter values instead of collapsing them', () => {
+    const h1 = importContentHash({
+      title: 'LLVM',
+      type: 'system',
+      compiled_truth: 'Compiler infrastructure.',
+      timeline: '',
+      frontmatter: { reviewed_at: new Date('2026-04-15T12:30:00-07:00') },
+      tags: [],
+    });
+    const h2 = importContentHash({
+      title: 'LLVM',
+      type: 'system',
+      compiled_truth: 'Compiler infrastructure.',
+      timeline: '',
+      frontmatter: { reviewed_at: new Date('2026-04-16T12:30:00-07:00') },
+      tags: [],
+    });
+    expect(h1).not.toBe(h2);
+  });
 });
 
 describe('rowToPage', () => {

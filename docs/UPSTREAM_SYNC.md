@@ -40,10 +40,15 @@ Each entry has three parts:
 - **Deferred (revisit)** — changes worth evaluating in a later sync, with
   the reason they were not done yet.
 
-Do NOT re-bump the fork's `package.json` version or `VERSION` file to match
-upstream. The fork's version slot is managed separately by the maintainer —
-when content aligns with upstream, it should still be called out in this log
-rather than expressed via a matching version number.
+The fork's **version number tracks upstream's latest released version** (e.g.
+upstream `0.10.1` → fork `0.10.1`). That policy makes sync state legible from
+the CLI (`gbrain --version`) and the skills manifest, but it is deliberately
+decoupled from content parity: matching version numbers do NOT imply matching
+content. The content story for each version lives in `CHANGELOG.md`; the
+commit-level accounting of what was adopted vs. skipped vs. deferred lives in
+this file. Both are load-bearing. Never bump `VERSION` / `package.json` /
+`skills/manifest.json` without also adding a `CHANGELOG.md` entry and a sync
+log block here that explains which upstream commits the bump represents.
 
 ---
 
@@ -53,6 +58,7 @@ rather than expressed via a matching version number.
 - **Upstream HEAD**: `b7e3005` (upstream v0.10.1)
 - **Prior merge-base**: `91ced66` (upstream v0.8.0; last brought in by PR #19 on 2026-04-16)
 - **Feature branch**: `codex/upstream-sync-20260417`
+- **Fork version after sync**: `0.10.1` (aligned with upstream release number)
 
 Upstream commits between `91ced66..b7e3005` (23 commits) were classified
 and applied as follows.

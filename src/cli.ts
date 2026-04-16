@@ -99,7 +99,7 @@ async function main() {
 
     const ctx = makeContext(engine, params);
     const result = await op.handler(ctx, params);
-    const output = formatResult(op.name, result);
+    const output = formatResult(op.name, result, params);
     if (output) process.stdout.write(output);
   } catch (e: unknown) {
     if (e instanceof OperationError) {
@@ -114,26 +114,92 @@ async function main() {
   }
 }
 
-function parseOpArgs(op: Operation, args: string[]): Record<string, unknown> {
+export interface ParseOpArgsOptions {
+  warn?: (msg: string) => void;
+}
+
+function splitEquals(raw: string): { token: string; inlineValue?: string } {
+  const eq = raw.indexOf('=');
+  if (eq === -1) return { token: raw };
+  return { token: raw.slice(0, eq), inlineValue: raw.slice(eq + 1) };
+}
+
+function coerceNumber(key: string, raw: string): number {
+  const n = Number(raw);
+  if (Number.isNaN(n)) {
+    throw new Error(`Invalid number for --${key.replace(/_/g, '-')}: "${raw}"`);
+  }
+  return n;
+}
+
+export function parseOpArgs(
+  op: Operation,
+  args: string[],
+  options: ParseOpArgsOptions = {},
+): Record<string, unknown> {
   const params: Record<string, unknown> = {};
   const positional = op.cliHints?.positional || [];
+  const aliases = op.cliHints?.aliases || {};
+  const warn = options.warn ?? ((msg: string) => console.error(`Warning: ${msg}`));
   let posIdx = 0;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-    if (arg.startsWith('--')) {
-      const key = arg.slice(2).replace(/-/g, '_');
+
+    if (arg.startsWith('--') && arg.length > 2) {
+      const { token, inlineValue } = splitEquals(arg.slice(2));
+      const key = token.replace(/-/g, '_');
+      const paramDef = op.params[key];
+      if (!paramDef) {
+        warn(`unknown flag --${token} (ignored)`);
+        if (inlineValue === undefined && i + 1 < args.length && !args[i + 1].startsWith('-')) i++;
+        continue;
+      }
+      if (paramDef.type === 'boolean') {
+        params[key] = inlineValue === undefined ? true : inlineValue !== 'false';
+        continue;
+      }
+      let value: string | undefined = inlineValue;
+      if (value === undefined) {
+        if (i + 1 >= args.length) {
+          warn(`--${token} expects a value`);
+          continue;
+        }
+        value = args[++i];
+      }
+      params[key] = paramDef.type === 'number' ? coerceNumber(key, value) : value;
+      continue;
+    }
+
+    if (arg.startsWith('-') && arg.length > 1 && arg !== '--') {
+      const { token, inlineValue } = splitEquals(arg.slice(1));
+      const key = aliases[token];
+      if (!key) {
+        warn(`unknown flag -${token} (ignored)`);
+        if (inlineValue === undefined && i + 1 < args.length && !args[i + 1].startsWith('-')) i++;
+        continue;
+      }
       const paramDef = op.params[key];
       if (paramDef?.type === 'boolean') {
-        params[key] = true;
-      } else if (i + 1 < args.length) {
-        params[key] = args[++i];
-        if (paramDef?.type === 'number') params[key] = Number(params[key]);
+        params[key] = inlineValue === undefined ? true : inlineValue !== 'false';
+        continue;
       }
-    } else if (posIdx < positional.length) {
+      let value: string | undefined = inlineValue;
+      if (value === undefined) {
+        if (i + 1 >= args.length) {
+          warn(`-${token} expects a value`);
+          continue;
+        }
+        value = args[++i];
+      }
+      params[key] = paramDef?.type === 'number' ? coerceNumber(key, value) : value;
+      continue;
+    }
+
+    if (posIdx < positional.length) {
       const key = positional[posIdx++];
       const paramDef = op.params[key];
-      params[key] = paramDef?.type === 'number' ? Number(arg) : arg;
+      params[key] = paramDef?.type === 'number' ? coerceNumber(key, arg) : arg;
     }
   }
 
@@ -153,7 +219,7 @@ function makeContext(engine: BrainEngine, params: Record<string, unknown>): Oper
   };
 }
 
-function formatResult(opName: string, result: unknown): string {
+export function formatResult(opName: string, result: unknown, params: Record<string, unknown> = {}): string {
   switch (opName) {
     case 'get_page': {
       const r = result as any;
@@ -167,9 +233,14 @@ function formatResult(opName: string, result: unknown): string {
     case 'list_pages': {
       const pages = result as any[];
       if (pages.length === 0) return 'No pages found.\n';
-      return pages.map(p =>
+      const rows = pages.map(p =>
         `${p.slug}\t${p.type}\t${p.updated_at?.toString().slice(0, 10) || '?'}\t${p.title}`,
       ).join('\n') + '\n';
+      const requestedLimit = (params.limit as number) ?? 50;
+      if (pages.length >= requestedLimit) {
+        return rows + `\n(result may be truncated at ${requestedLimit}; pass --limit N or -n N to change)\n`;
+      }
+      return rows;
     }
     case 'search':
     case 'query': {
@@ -445,7 +516,9 @@ Run gbrain <command> --help for command-specific help.
 `);
 }
 
-main().catch(e => {
-  console.error(e.message || e);
-  process.exit(1);
-});
+if (import.meta.main) {
+  main().catch(e => {
+    console.error(e.message || e);
+    process.exit(1);
+  });
+}

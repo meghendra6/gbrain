@@ -43,6 +43,7 @@ available in local mode versus what must fail with honest guidance.
 - `docs/local-offline.md` — Local/offline SQLite + Codex/Claude Code setup guide (English)
 - `docs/local-offline.ko.md` — Local/offline SQLite + Codex/Claude Code setup guide (Korean)
 - `skills/_brain-filing-rules.md` — Cross-cutting brain filing rules (referenced by all brain-writing skills)
+- `docs/UPSTREAM_SYNC.md` — Log of which upstream (garrytan/gbrain) commits have been adopted, skipped (with reasons), or deferred. READ BEFORE a new upstream sync.
 - `openclaw.plugin.json` — ClawHub bundle plugin manifest
 
 ## Commands

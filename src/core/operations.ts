@@ -89,6 +89,7 @@ export interface Operation {
     positional?: string[];
     stdin?: string;
     hidden?: boolean;
+    aliases?: Record<string, string>;
   };
 }
 
@@ -175,7 +176,7 @@ const list_pages: Operation = {
     const pages = await ctx.engine.listPages({
       type: p.type as any,
       tag: p.tag as string,
-      limit: (p.limit as number) || 50,
+      limit: (p.limit as number) ?? 50,
     });
     return pages.map(pg => ({
       slug: pg.slug,
@@ -184,7 +185,7 @@ const list_pages: Operation = {
       updated_at: pg.updated_at,
     }));
   },
-  cliHints: { name: 'list' },
+  cliHints: { name: 'list', aliases: { n: 'limit' } },
 };
 
 // --- Search ---
@@ -197,7 +198,7 @@ const search: Operation = {
     limit: { type: 'number', description: 'Max results (default 20)' },
   },
   handler: async (ctx, p) => {
-    return ctx.engine.searchKeyword(p.query as string, { limit: (p.limit as number) || 20 });
+    return ctx.engine.searchKeyword(p.query as string, { limit: (p.limit as number) ?? 20 });
   },
   cliHints: { name: 'search', positional: ['query'] },
 };
@@ -213,7 +214,7 @@ const query: Operation = {
   handler: async (ctx, p) => {
     const expand = p.expand !== false;
     return hybridSearch(ctx.engine, p.query as string, {
-      limit: (p.limit as number) || 20,
+      limit: (p.limit as number) ?? 20,
       expansion: expand,
       expandFn: expand ? (query) => expandQuery(query, { config: ctx.config }) : undefined,
     });
@@ -337,7 +338,7 @@ const traverse_graph: Operation = {
     depth: { type: 'number', description: 'Max traversal depth (default 5)' },
   },
   handler: async (ctx, p) => {
-    return ctx.engine.traverseGraph(p.slug as string, (p.depth as number) || 5);
+    return ctx.engine.traverseGraph(p.slug as string, (p.depth as number) ?? 5);
   },
   cliHints: { name: 'graph', positional: ['slug'] },
 };
@@ -541,7 +542,7 @@ const get_ingest_log: Operation = {
     limit: { type: 'number', description: 'Max entries (default 20)' },
   },
   handler: async (ctx, p) => {
-    return ctx.engine.getIngestLog({ limit: (p.limit as number) || 20 });
+    return ctx.engine.getIngestLog({ limit: (p.limit as number) ?? 20 });
   },
 };
 

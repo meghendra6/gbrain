@@ -1,4 +1,4 @@
-<!-- gbrain-agent-rules-version: 0.5.2 -->
+<!-- gbrain-agent-rules-version: 0.5.3 -->
 <!-- source: https://raw.githubusercontent.com/garrytan/gbrain/master/docs/GBRAIN_AGENT_RULES.md -->
 # GBrain Agent Rules
 

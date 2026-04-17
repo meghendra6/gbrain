@@ -218,7 +218,8 @@ function installClaudeStopHook(claudeDir: string): void {
   const hookPath = join(claudeDir, 'scripts', 'hooks', 'stop-gbrain-check.sh');
   const libPath = join(claudeDir, 'scripts', 'hooks', 'lib', 'gbrain-relevance.sh');
   const skipDirsPath = join(claudeDir, 'gbrain-skip-dirs');
-  const hooksJsonPath = join(claudeDir, 'hooks', 'hooks.json');
+  const settingsPath = join(claudeDir, 'settings.json');
+  const legacyHooksJsonPath = join(claudeDir, 'hooks', 'hooks.json');
 
   atomicWrite(hookPath, CLAUDE_GBRAIN_STOP_HOOK);
   chmodSync(hookPath, 0o755);
@@ -226,10 +227,11 @@ function installClaudeStopHook(claudeDir: string): void {
   atomicWrite(libPath, CLAUDE_GBRAIN_RELEVANCE_LIB);
   atomicWrite(skipDirsPath, CLAUDE_GBRAIN_SKIP_DIRS);
 
-  upsertClaudeStopHook(hooksJsonPath);
+  upsertClaudeStopHook(settingsPath);
+  cleanupLegacyHooksJson(legacyHooksJsonPath);
 }
 
-function upsertClaudeStopHook(hooksJsonPath: string): void {
+function upsertClaudeStopHook(settingsPath: string): void {
   const stopHookEntry = {
     matcher: '*',
     hooks: [{
@@ -241,9 +243,9 @@ function upsertClaudeStopHook(hooksJsonPath: string): void {
     id: 'stop:gbrain-check',
   };
 
-  const base = existsSync(hooksJsonPath)
-    ? JSON.parse(readFileSync(hooksJsonPath, 'utf-8'))
-    : { hooks: {} as Record<string, unknown> };
+  const base: Record<string, unknown> = existsSync(settingsPath)
+    ? parseJsonOrEmpty(settingsPath)
+    : {};
 
   const hooks = typeof base.hooks === 'object' && base.hooks ? base.hooks as Record<string, unknown> : {};
   const stop = Array.isArray(hooks.Stop) ? hooks.Stop as any[] : [];
@@ -252,7 +254,36 @@ function upsertClaudeStopHook(hooksJsonPath: string): void {
   hooks.Stop = [...withoutExisting, stopHookEntry];
   base.hooks = hooks;
 
-  atomicWrite(hooksJsonPath, JSON.stringify(base, null, 2) + '\n');
+  atomicWrite(settingsPath, JSON.stringify(base, null, 2) + '\n');
+}
+
+function cleanupLegacyHooksJson(legacyPath: string): void {
+  // Older versions of setup-agent wrote stop:gbrain-check into ~/.claude/hooks/hooks.json,
+  // but Claude Code does not load user-level hooks from that path (it is plugin-scoped).
+  // Remove only our own stale entry; leave any other hooks intact.
+  if (!existsSync(legacyPath)) return;
+
+  const parsed = parseJsonOrEmpty(legacyPath) as { hooks?: Record<string, unknown> };
+  const hooks = parsed.hooks;
+  if (!hooks || typeof hooks !== 'object') return;
+
+  const stop = Array.isArray(hooks.Stop) ? hooks.Stop as any[] : null;
+  if (!stop) return;
+
+  const filtered = stop.filter(entry => entry?.id !== 'stop:gbrain-check');
+  if (filtered.length === stop.length) return;
+
+  hooks.Stop = filtered;
+  atomicWrite(legacyPath, JSON.stringify(parsed, null, 2) + '\n');
+}
+
+function parseJsonOrEmpty(path: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf-8'));
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
 }
 
 function formatRulesBlock(rulesContent: string): string {

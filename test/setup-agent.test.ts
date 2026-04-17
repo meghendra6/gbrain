@@ -99,12 +99,65 @@ describe('setup-agent', () => {
     expect(existsSync(join(tempHome, '.claude', 'scripts', 'hooks', 'lib', 'gbrain-relevance.sh'))).toBe(true);
     expect(existsSync(join(tempHome, '.claude', 'gbrain-skip-dirs'))).toBe(true);
 
-    const hooksJson = JSON.parse(readFileSync(join(tempHome, '.claude', 'hooks', 'hooks.json'), 'utf-8'));
-    const stopHooks = hooksJson?.hooks?.Stop ?? [];
+    const settings = JSON.parse(readFileSync(join(tempHome, '.claude', 'settings.json'), 'utf-8'));
+    const stopHooks = settings?.hooks?.Stop ?? [];
     const gbrainHook = stopHooks.find((entry: any) => entry.id === 'stop:gbrain-check');
 
     expect(gbrainHook).toBeDefined();
     expect(gbrainHook.hooks[0].command).toBe('bash "$HOME/.claude/scripts/hooks/stop-gbrain-check.sh"');
+  });
+
+  test('setup-agent preserves existing settings.json fields when adding the stop hook', async () => {
+    const settingsPath = join(tempHome, '.claude', 'settings.json');
+    writeFileSync(
+      settingsPath,
+      JSON.stringify({
+        permissions: { defaultMode: 'bypassPermissions' },
+        enabledPlugins: { 'ecc@ecc': true },
+        hooks: {
+          PreToolUse: [{ id: 'existing:pre', matcher: 'Bash', hooks: [{ type: 'command', command: 'echo pre' }] }],
+        },
+      }, null, 2),
+      'utf-8',
+    );
+
+    const result = await runSetupAgent(['--claude', '--skip-mcp']);
+    expect(result.exitCode).toBe(0);
+
+    const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
+    expect(settings.permissions.defaultMode).toBe('bypassPermissions');
+    expect(settings.enabledPlugins['ecc@ecc']).toBe(true);
+    expect(settings.hooks.PreToolUse).toHaveLength(1);
+    expect(settings.hooks.PreToolUse[0].id).toBe('existing:pre');
+    expect(settings.hooks.Stop).toHaveLength(1);
+    expect(settings.hooks.Stop[0].id).toBe('stop:gbrain-check');
+  });
+
+  test('setup-agent removes legacy stop:gbrain-check entry from ~/.claude/hooks/hooks.json', async () => {
+    const legacyPath = join(tempHome, '.claude', 'hooks', 'hooks.json');
+    mkdirSync(dirname(legacyPath), { recursive: true });
+    writeFileSync(
+      legacyPath,
+      JSON.stringify({
+        hooks: {
+          Stop: [
+            { id: 'stop:gbrain-check', matcher: '*', hooks: [{ type: 'command', command: 'bash stale' }] },
+            { id: 'stop:other', matcher: '*', hooks: [{ type: 'command', command: 'echo other' }] },
+          ],
+          PreToolUse: [{ id: 'pre:keep', matcher: 'Bash', hooks: [{ type: 'command', command: 'echo keep' }] }],
+        },
+      }, null, 2),
+      'utf-8',
+    );
+
+    const result = await runSetupAgent(['--claude', '--skip-mcp']);
+    expect(result.exitCode).toBe(0);
+
+    const legacy = JSON.parse(readFileSync(legacyPath, 'utf-8'));
+    const legacyStop = legacy?.hooks?.Stop ?? [];
+    expect(legacyStop.find((e: any) => e.id === 'stop:gbrain-check')).toBeUndefined();
+    expect(legacyStop.find((e: any) => e.id === 'stop:other')).toBeDefined();
+    expect(legacy.hooks.PreToolUse[0].id).toBe('pre:keep');
   });
 
   test('installed Claude hook emits a block decision for a relevant session', async () => {
@@ -188,8 +241,8 @@ describe('setup-agent', () => {
     expect((await runSetupAgent(['--claude', '--skip-mcp'])).exitCode).toBe(0);
     expect((await runSetupAgent(['--claude', '--skip-mcp'])).exitCode).toBe(0);
 
-    const hooksJson = JSON.parse(readFileSync(join(tempHome, '.claude', 'hooks', 'hooks.json'), 'utf-8'));
-    const stopHooks = hooksJson?.hooks?.Stop ?? [];
+    const settings = JSON.parse(readFileSync(join(tempHome, '.claude', 'settings.json'), 'utf-8'));
+    const stopHooks = settings?.hooks?.Stop ?? [];
     const gbrainHooks = stopHooks.filter((entry: any) => entry.id === 'stop:gbrain-check');
 
     expect(gbrainHooks).toHaveLength(1);

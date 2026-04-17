@@ -1,7 +1,12 @@
-import { existsSync, readFileSync, writeFileSync, renameSync } from 'fs';
-import { join } from 'path';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from 'fs';
+import { dirname, join } from 'path';
 import { execSync } from 'child_process';
 import { VERSION } from '../version.ts';
+import {
+  CLAUDE_GBRAIN_RELEVANCE_LIB,
+  CLAUDE_GBRAIN_SKIP_DIRS,
+  CLAUDE_GBRAIN_STOP_HOOK,
+} from './setup-agent-hook-assets.ts';
 
 const MARKER_START = '<!-- GBRAIN:RULES:START -->';
 const MARKER_END = '<!-- GBRAIN:RULES:END -->';
@@ -77,6 +82,10 @@ export async function runSetupAgent(args: string[]) {
 
     // Step 2: Inject agent rules
     const rulesStatus = injectRules(client, rulesContent);
+
+    if (client.name === 'claude') {
+      installClaudeStopHook(client.configDir);
+    }
 
     results.push({ client: client.name, mcp: mcpStatus, rules: rulesStatus });
   }
@@ -205,6 +214,47 @@ function injectRules(client: DetectedClient, rulesContent: string): string {
   return 'injected';
 }
 
+function installClaudeStopHook(claudeDir: string): void {
+  const hookPath = join(claudeDir, 'scripts', 'hooks', 'stop-gbrain-check.sh');
+  const libPath = join(claudeDir, 'scripts', 'hooks', 'lib', 'gbrain-relevance.sh');
+  const skipDirsPath = join(claudeDir, 'gbrain-skip-dirs');
+  const hooksJsonPath = join(claudeDir, 'hooks', 'hooks.json');
+
+  atomicWrite(hookPath, CLAUDE_GBRAIN_STOP_HOOK);
+  chmodSync(hookPath, 0o755);
+
+  atomicWrite(libPath, CLAUDE_GBRAIN_RELEVANCE_LIB);
+  atomicWrite(skipDirsPath, CLAUDE_GBRAIN_SKIP_DIRS);
+
+  upsertClaudeStopHook(hooksJsonPath);
+}
+
+function upsertClaudeStopHook(hooksJsonPath: string): void {
+  const stopHookEntry = {
+    matcher: '*',
+    hooks: [{
+      type: 'command',
+      command: 'bash "$HOME/.claude/scripts/hooks/stop-gbrain-check.sh"',
+      timeout: 5,
+    }],
+    description: 'Ask agent to write session knowledge back to gbrain.',
+    id: 'stop:gbrain-check',
+  };
+
+  const base = existsSync(hooksJsonPath)
+    ? JSON.parse(readFileSync(hooksJsonPath, 'utf-8'))
+    : { hooks: {} as Record<string, unknown> };
+
+  const hooks = typeof base.hooks === 'object' && base.hooks ? base.hooks as Record<string, unknown> : {};
+  const stop = Array.isArray(hooks.Stop) ? hooks.Stop as any[] : [];
+  const withoutExisting = stop.filter(entry => entry?.id !== 'stop:gbrain-check');
+
+  hooks.Stop = [...withoutExisting, stopHookEntry];
+  base.hooks = hooks;
+
+  atomicWrite(hooksJsonPath, JSON.stringify(base, null, 2) + '\n');
+}
+
 function formatRulesBlock(rulesContent: string): string {
   return `${MARKER_START}\n${rulesContent}\n${MARKER_END}`;
 }
@@ -219,6 +269,7 @@ function extractVersion(content: string): string | null {
 }
 
 function atomicWrite(targetPath: string, content: string): void {
+  mkdirSync(dirname(targetPath), { recursive: true });
   const tmp = targetPath + '.gbrain.tmp';
   writeFileSync(tmp, content, 'utf-8');
   renameSync(tmp, targetPath);

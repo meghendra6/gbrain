@@ -32,6 +32,8 @@ The target architecture resolves those issues without abandoning Markdown, local
 | Canonical Memory | Store curated notes, procedures, operational work records, and scoped profile records. | Canonical. |
 | Derived Structure and Orientation | Build manifests, context maps, context atlases, embeddings, indexes, and orientation reports from canonical sources. | Derived. |
 | Governance and Promotion | Hold candidate claims, review state, contradiction handling, and promotion or supersession records. | Canonical for review state, not for truth claims until promoted. |
+| Profile Memory and Scope Isolation | Enforce the boundary between work memory and personal memory in retrieval, write routing, and visibility. | Canonical for scope rules and scoped profile records. |
+| Evaluation and Dream-Cycle Maintenance | Measure retrieval quality, repeated-work prevention, and maintenance outcomes while running deferred cleanup and improvement loops over existing memory. | Neither a primary source of truth nor a canonical knowledge layer. |
 | Retrieval and Orchestration | Route reads and writes through scope, intent, verification, and source selection rules. | Neither a storage layer nor a source of truth. |
 | Interfaces and Runtime Surfaces | Expose the system through CLI, MCP, and local runtime services. | Projection layer only. |
 
@@ -53,8 +55,10 @@ The target architecture uses the following stable object vocabulary:
 | Note Manifest | Derived structural extraction of deterministic note metadata and link structure. |
 | Context Map | Derived navigational graph overlay connecting notes, code, tasks, and evidence. |
 | Context Atlas | Derived higher-level orientation artifact that composes multiple maps or corpora. |
+| Map Report | Derived orientation artifact that explains useful subgraphs, bridges, gaps, and entry points for navigation. |
 | Memory Candidate | Canonical governance object for a proposed claim, link, or synthesis that is not yet truth. |
 | Promotion / Supersession Record | Canonical governance outcome showing how candidate state affected canonical memory. |
+| Retrieval Trace | Canonical or persisted trace record explaining which sources, maps, and checks informed a retrieval outcome. |
 | Profile Memory | Canonical personal-scope memory for stable preferences, routines, and user-specific facts. |
 | Personal Episode | Canonical personal-scope event record analogous to work episodes. |
 

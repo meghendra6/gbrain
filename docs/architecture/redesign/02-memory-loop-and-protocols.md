@@ -76,9 +76,9 @@ Code claims are uniquely vulnerable to staleness and branch drift. Memory may su
 3. Reconfirm branch-sensitive assumptions when a claim depends on the active worktree or branch state.
 4. Reconfirm tests, commands, or failure modes before treating a previous observation as still true.
 5. Distinguish clearly between historical memory and current workspace truth.
-6. If verification fails, downgrade the remembered claim to a Memory Candidate in the Memory Inbox rather than using it as evidence.
+6. If verification fails, remove authority for the current answer while preserving the original Task Thread, Working Set, Event / Episode, and Attempt / Decision records as historical memory.
 
-Operational memory is still valuable here: it can preserve which files mattered, which commands failed, and which branches were relevant. But the answer must state what was revalidated versus what remains historical context.
+Operational memory is still valuable here: it preserves which files mattered, which commands failed, and which branches were relevant as history. A failed revalidation does not turn that history into governance state; it only means the remembered code claim cannot be treated as current evidence. Only new proposed durable claims belong in Memory Candidate or Memory Inbox handling.
 
 ## Write Route and Candidate Lifecycle
 
@@ -115,7 +115,7 @@ Fallbacks are controlled degradations, not excuses to ignore the protocol.
 
 1. If Context Maps, Atlases, or Map Reports are stale or unavailable, fall back to curated notes and focused Source Record reads.
 2. If canonical synthesis is thin, fall back to Source Records rather than inflating map-derived suggestions into truth.
-3. If code verification cannot confirm a remembered claim, move it back into Memory Candidate treatment and answer with the degraded confidence explicitly.
+3. If code verification cannot confirm a remembered claim, keep the historical operational record intact, drop the claim's authority for the current answer, and answer with the degraded confidence explicitly.
 4. If scope is ambiguous, narrow scope before retrieval or durable write.
 5. If the route selection remains ambiguous, prefer the narrower and more verifiable route over the broader and more speculative one.
 6. If promotion checks cannot clear a candidate, keep it in governance state rather than forcing a canonical write.

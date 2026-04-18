@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from 'fs';
 import { cpus, homedir, totalmem } from 'os';
-import { join, relative } from 'path';
+import { dirname, join, relative } from 'path';
 import type { BrainEngine } from '../engine.ts';
 import { loadConfig } from '../config.ts';
 import { createConnectedEngine, supportsParallelWorkers } from '../engine-factory.ts';
@@ -209,7 +209,7 @@ export async function runImportService(
 
   const writeCheckpoint = () => {
     try {
-      const cpDir = join(homedir(), '.mbrain');
+      const cpDir = dirname(checkpointPath);
       if (!existsSync(cpDir)) {
         mkdirSync(cpDir, { recursive: true });
       }
@@ -308,13 +308,6 @@ export async function runImportService(
   } else if (errors > 0 && existsSync(checkpointPath)) {
     logger.log(`  Checkpoint preserved (${errors} errors). Run again to retry failed files.`);
   }
-
-  await engine.logIngest({
-    source_type: 'directory',
-    source_ref: options.rootDir,
-    pages_updated: importedSlugs,
-    summary: `Imported ${imported} pages, ${skipped} skipped, ${chunksCreated} chunks`,
-  });
 
   await updateImportGitState(engine, options.rootDir);
 

@@ -25,7 +25,14 @@ export async function runImport(engine: BrainEngine, args: string[]) {
     fresh: args.includes('--fresh'),
     workers: workerCount,
   });
-  printImportSummary(summary, args.includes('--json'));
+  const jsonOutput = args.includes('--json');
+  printImportSummary(summary, jsonOutput);
+  await engine.logIngest({
+    source_type: 'directory',
+    source_ref: dir,
+    pages_updated: summary.importedSlugs,
+    summary: `Imported ${summary.imported} pages, ${summary.skipped} skipped, ${summary.chunksCreated} chunks`,
+  });
 }
 
 function printImportSummary(summary: ImportRunSummary, jsonOutput: boolean) {

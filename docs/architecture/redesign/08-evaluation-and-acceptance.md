@@ -46,6 +46,7 @@ The redesign uses a small set of baseline families so later measurements stay co
 | Markdown retrieval baseline | How quickly and accurately the system finds canonical notes, procedures, headings, and source-linked Markdown artifacts. | Markdown corpus and retrieval traces. | The redesign keeps Markdown as a first-class canonical interface. |
 | Context-map baseline | How much raw search the system needs before a derived map becomes useful. | Map queries, map reports, and follow-up source reads. | Derived orientation is only valuable if it reduces search burden without replacing canonical sources. |
 | Governance baseline | How often review, promotion, rejection, and supersession decisions are correct on the first pass. | Inbox state transitions and review outcomes. | Candidate handling must get cleaner, not noisier, as derived signals increase. |
+| Provenance and trace baseline | Whether Source Records stay intact and Retrieval Traces stay complete enough to explain read and write behavior later. | Source Records and Retrieval Traces. | Evaluation fails if outcomes improve while provenance or explainability fragments. |
 | Local-performance baseline | How the system behaves in local or offline execution, including latency and throughput under the supported contract. | Local execution traces and benchmark runs. | Local-first remains a hard architectural constraint. |
 | Scope-isolation baseline | Whether work, personal, and mixed requests stay inside the correct boundaries. | Retrieval traces and scope-gate records. | Scope leakage is a correctness failure, not a ranking issue. |
 
@@ -126,6 +127,27 @@ Acceptance rules:
 
 This evaluation succeeds only when the map is an orienting layer, not a truth replacement.
 
+## Provenance and Retrieval Trace Evaluation
+
+This evaluation measures whether the redesign preserves the canonical evidence trail needed to trust later metrics and rollback decisions.
+
+Required measures:
+
+- Source Record completeness rate for durable writes and promoted candidates
+- Source Record link integrity, meaning promoted or reviewed claims still resolve to their canonical provenance destination
+- Retrieval Trace completeness for scope, route, verification, and write-outcome fields
+- retrieval-trace coverage rate for flows that require durable explainability
+- rollback audit continuity for Source Records and Retrieval Traces across phase changes
+
+Acceptance rules:
+
+1. Durable writes and promoted candidates must remain linked to canonical provenance rather than to ephemeral summaries alone.
+2. Retrieval Traces must capture enough route and verification detail to explain how a durable answer or write decision happened.
+3. Explainability records must remain readable across phase changes and rollback boundaries.
+4. If task, governance, or retrieval outcomes improve while provenance fragments or trace completeness drops, the phase is not accepted.
+
+This evaluation succeeds only if later measurements and investigations still have canonical evidence to stand on.
+
 ## Governance Precision Evaluation
 
 This evaluation measures whether the inbox boundary keeps derived signals from polluting canonical memory.
@@ -183,11 +205,11 @@ Each phase must satisfy the baseline family it is expected to improve, plus the 
 | Phase 1 | Repeated-work prevention improves against the baseline without breaking task continuity, Markdown continuity, or local/offline behavior. |
 | Phase 2 | Deterministic structural extraction improves orientation without weakening Markdown retrieval or canonical-source authority. |
 | Phase 3 | Context maps reduce raw search and improve path finding without exceeding bounded-output or freshness limits. |
-| Phase 4 | Reusable operating knowledge becomes easier to recall and reuse without collapsing task state into procedure state. |
+| Phase 4 | Reusable operating knowledge becomes easier to recall and reuse during repeated task patterns without collapsing task state into procedure state or losing procedure usefulness. |
 | Phase 5 | Governance decisions become more precise, more auditable, and harder to bypass than the baseline. |
 | Phase 6 | Higher-noise derived analysis remains constrained by governance and does not degrade local performance past the accepted threshold. |
-| Phase 7 | Profile memory and scope isolation remain clean, with no measurable rise in cross-scope leakage or accidental write routing. |
-| Phase 8 | The full redesign is measurable as a system, regressions are detectable, and the baseline families remain comparable over time. |
+| Phase 7 | Later canonical knowledge consolidation preserves provenance, historical-validity safeguards, and current-evidence discipline without outrunning review boundaries. |
+| Phase 8 | The full redesign is measurable as a system, profile and scope isolation remain clean, regressions are detectable, and the baseline families remain comparable over time. |
 
 General acceptance rule:
 
@@ -204,6 +226,8 @@ The following conditions must trigger investigation and, if necessary, rollback 
 - exact Markdown notes or procedures become harder to retrieve than their derived summaries
 - map output starts being trusted without canonical follow-through
 - promotion occurs without provenance, scope fit, or contradiction checks
+- Source Records become incomplete, unresolvable, or fragmented across promoted memory
+- Retrieval Traces stop recording scope, route, verification, or durable write outcomes needed for audit
 - work memory and personal memory begin to mix without explicit scope permission
 - local execution depends on network access for the phase's core contract
 - parity between supported backend and local execution paths breaks at the public contract boundary

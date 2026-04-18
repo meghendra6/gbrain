@@ -814,6 +814,48 @@ Updated chunk content for the same page.
     expect(after[0]?.chunk_text).toBe('Compiler infrastructure overview.');
   });
 
+  test('stale-only embedding accepts shared boolean normalization forms', async () => {
+    const fake = createFakeProvider();
+    setEmbeddingProviderForTests(fake.provider);
+    const capture = captureConsole();
+
+    try {
+      await engine.putPage('concepts/stale-bool', {
+        type: 'concept',
+        title: 'Stale Bool',
+        compiled_truth: 'already embedded\nneeds embedding',
+        timeline: '',
+        frontmatter: {},
+      });
+      await engine.upsertChunks('concepts/stale-bool', [
+        {
+          chunk_index: 0,
+          chunk_text: 'already embedded',
+          chunk_source: 'compiled_truth',
+          embedding: new Float32Array([9, 9, 9]),
+          model: 'seed-model',
+          token_count: 3,
+        },
+        {
+          chunk_index: 1,
+          chunk_text: 'needs embedding',
+          chunk_source: 'compiled_truth',
+        },
+      ]);
+
+      await runEmbed(engine, ['--stale=true']);
+    } finally {
+      capture.restore();
+    }
+
+    expect(capture.exitSpy).not.toHaveBeenCalled();
+    expect(fake.batches).toEqual([['already embedded\nneeds embedding']]);
+    const after = await engine.getChunks('concepts/stale-bool');
+    expect(after).toHaveLength(1);
+    expect(after[0]?.embedded_at).toBeInstanceOf(Date);
+    expect(after[0]?.model).toBe('test-local-v1');
+  });
+
   test('unchanged content does not trigger re-embedding', async () => {
     const fake = createFakeProvider();
     setEmbeddingProviderForTests(fake.provider);

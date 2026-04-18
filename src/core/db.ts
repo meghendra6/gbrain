@@ -34,6 +34,16 @@ export function clearConnectionOwner(engine?: ConnectedPostgresEngine): void {
   }
 }
 
+export async function closeConnectionOwners(): Promise<void> {
+  const owners = [...connectionOwners];
+  connectionOwners.length = 0;
+  activeConnectionOwner = null;
+
+  for (const engine of owners.reverse()) {
+    await engine.disconnect();
+  }
+}
+
 export function unsupportedGlobalConnectionAccess(): never {
   throw new MBrainError(
     'Global Postgres access removed',
@@ -64,13 +74,7 @@ export async function connect(config: EngineConfig): Promise<void> {
 }
 
 export async function disconnect(): Promise<void> {
-  const owners = [...connectionOwners];
-  connectionOwners.length = 0;
-  activeConnectionOwner = null;
-
-  for (const engine of owners.reverse()) {
-    await engine.disconnect();
-  }
+  await closeConnectionOwners();
 }
 
 export async function initSchema(): Promise<void> {

@@ -192,7 +192,7 @@ describe('engine factory', () => {
     }
   });
 
-  test('non-postgres createConnectedEngine clears stale compatibility owners instead of leaving them queued for db.disconnect', async () => {
+  test('non-postgres createConnectedEngine closes stale compatibility owners instead of leaving them queued for db.disconnect', async () => {
     const postgresDisconnects: PostgresEngine[] = [];
     const sqliteDisconnects: SQLiteEngine[] = [];
 
@@ -232,10 +232,11 @@ describe('engine factory', () => {
 
       expect(sqliteEngine).toBeInstanceOf(SQLiteEngine);
       expect(() => db.getConnection()).toThrow('Global Postgres access removed');
+      expect(postgresDisconnects).toHaveLength(1);
 
       await db.disconnect();
 
-      expect(postgresDisconnects).toHaveLength(0);
+      expect(postgresDisconnects).toHaveLength(1);
       expect(sqliteDisconnects).toHaveLength(0);
     } finally {
       postgresConnectSpy.mockRestore();

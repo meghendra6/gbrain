@@ -1,5 +1,5 @@
 import type { BrainEngine } from './engine.ts';
-import { clearConnectionOwner, registerConnectionOwner } from './db.ts';
+import { closeConnectionOwners, registerConnectionOwner } from './db.ts';
 import { PostgresEngine } from './postgres-engine.ts';
 import { SQLiteEngine } from './sqlite-engine.ts';
 import { MBrainError, type EngineConfig } from './types.ts';
@@ -71,7 +71,7 @@ export async function createConnectedEngine(
   if (config.engine === 'postgres' && !options?.poolSize && engine instanceof PostgresEngine) {
     registerConnectionOwner(engine);
   } else if (!options?.poolSize) {
-    clearConnectionOwner();
+    await closeConnectionOwners();
   }
   return engine;
 }

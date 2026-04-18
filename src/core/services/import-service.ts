@@ -544,7 +544,7 @@ export async function runImportService(
     }
   }
 
-  await updateImportGitState(engine, options.rootDir);
+  await updateImportGitState(engine, options.rootDir, { advanceCommit: errors === 0 });
 
   return {
     durationSeconds: Number(((Date.now() - startTime) / 1000).toFixed(1)),
@@ -558,16 +558,24 @@ export async function runImportService(
   };
 }
 
-async function updateImportGitState(engine: BrainEngine, rootDir: string) {
+async function updateImportGitState(
+  engine: BrainEngine,
+  rootDir: string,
+  options: { advanceCommit: boolean },
+) {
   try {
     if (!existsSync(join(rootDir, '.git'))) {
       return;
     }
 
+    await engine.setConfig('sync.repo_path', rootDir);
+    await engine.setConfig('sync.last_run', new Date().toISOString());
+    if (!options.advanceCommit) {
+      return;
+    }
+
     const head = execFileSync('git', ['-C', rootDir, 'rev-parse', 'HEAD'], { encoding: 'utf-8' }).trim();
     await engine.setConfig('sync.last_commit', head);
-    await engine.setConfig('sync.last_run', new Date().toISOString());
-    await engine.setConfig('sync.repo_path', rootDir);
   } catch {
     // Not a git repo or git not available, skip sync metadata.
   }

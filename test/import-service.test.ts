@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { execFileSync } from 'child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join, relative } from 'path';
@@ -25,6 +26,10 @@ function makeTempDir(prefix: string): string {
 
 function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function runGit(cwd: string, ...args: string[]) {
+  execFileSync('git', ['-C', cwd, ...args], { stdio: 'pipe' });
 }
 
 describe('import service', () => {
@@ -130,6 +135,43 @@ describe('import service', () => {
     expect(secondSummary.errors).toBe(0);
     expect(attemptedFilesByRun[1]).toEqual(['099.md', '100.md']);
     expect(existsSync(checkpointPath)).toBe(false);
+  });
+
+  test('runImportService does not advance sync.last_commit when a git-backed import fails', async () => {
+    const rootDir = makeTempDir('mbrain-import-git-failure-');
+    writeFileSync(join(rootDir, 'note.md'), '# note\n');
+    runGit(rootDir, 'init');
+    runGit(rootDir, 'config', 'user.email', 'test@example.com');
+    runGit(rootDir, 'config', 'user.name', 'Test User');
+    runGit(rootDir, 'add', 'note.md');
+    runGit(rootDir, 'commit', '-m', 'seed');
+
+    const setConfigCalls: Array<[string, unknown]> = [];
+    const engine = {
+      setConfig: async (key: string, value: unknown) => {
+        setConfigCalls.push([key, value]);
+      },
+    } as any;
+
+    const summary = await runImportService(
+      engine,
+      { rootDir, workers: 1 },
+      {
+        createConnectedEngine: async () => {
+          throw new Error('not used');
+        },
+        importFile: async () => {
+          throw new Error('boom');
+        },
+        loadConfig: () => null,
+        supportsParallelWorkers: () => false,
+      },
+    );
+
+    expect(summary.errors).toBe(1);
+    expect(setConfigCalls.some(([key]) => key === 'sync.last_commit')).toBe(false);
+    expect(setConfigCalls.some(([key, value]) => key === 'sync.repo_path' && value === rootDir)).toBe(true);
+    expect(setConfigCalls.some(([key]) => key === 'sync.last_run')).toBe(true);
   });
 
   test('runImportService uses staged local concurrency for prepare work but commits in file order', async () => {

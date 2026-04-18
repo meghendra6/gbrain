@@ -158,6 +158,9 @@ async function main() {
 
   if (command === 'sync') {
     const syncCliRouting = resolveSyncCliRouting(subArgs);
+    for (const warning of syncCliRouting.warnings) {
+      console.error(warning);
+    }
     if (syncCliRouting.error) {
       console.error(syncCliRouting.error);
       process.exit(1);
@@ -241,22 +244,28 @@ function getCliHelpSpec(command: string): Operation | undefined {
   return cliOps.get(command) || CLI_ONLY_SPECS[command];
 }
 
-function resolveSyncCliRouting(args: string[]): { watch: boolean; args: string[]; error?: string } {
-  const params = parseSharedOpArgs(SYNC_CLI_SPEC, args, { warn: () => undefined });
+function resolveSyncCliRouting(
+  args: string[],
+): { watch: boolean; args: string[]; warnings: string[]; error?: string } {
+  const warnings: string[] = [];
+  const params = parseSharedOpArgs(SYNC_CLI_SPEC, args, {
+    warn: (message) => warnings.push(`Warning: ${message}`),
+  });
   const watchEnabled = params.watch === true;
   const intervalProvided = args.some(arg => arg === '--interval' || arg.startsWith('--interval='));
 
   if (intervalProvided && !watchEnabled) {
-    return { watch: false, args, error: '--interval requires --watch' };
+    return { watch: false, args, warnings, error: '--interval requires --watch' };
   }
 
   if (watchEnabled) {
-    return { watch: true, args: normalizeSyncCliExtensionArgs(params) };
+    return { watch: true, args: normalizeSyncCliExtensionArgs(params), warnings };
   }
 
   return {
     watch: false,
     args: args.filter(arg => arg !== '--watch=false'),
+    warnings: [],
   };
 }
 

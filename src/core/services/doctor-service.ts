@@ -232,13 +232,13 @@ export function buildDoctorReport(input: DoctorInputs): DoctorReport {
       checks.push({
         name: 'embeddings',
         status: 'warn',
-        message: `${pct}% coverage, ${input.health.missing_embeddings} missing. Run: mbrain embed refresh`,
+        message: `${pct}% coverage, ${input.health.missing_embeddings} missing. Run: mbrain embed --stale`,
       });
     } else {
       checks.push({
         name: 'embeddings',
         status: 'warn',
-        message: 'No embeddings yet. Run: mbrain embed refresh',
+        message: 'No embeddings yet. Run: mbrain embed --stale',
       });
     }
   }

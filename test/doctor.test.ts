@@ -82,6 +82,67 @@ describe('doctor command', () => {
     expect(report.checks.some((check) => check.name === 'offline_profile')).toBe(true);
   });
 
+  test('buildDoctorReport points embedding remediation to mbrain embed --stale', () => {
+    const partial = buildDoctorReport({
+      connectionOk: true,
+      stats: {
+        page_count: 3,
+        chunk_count: 6,
+        embedded_count: 2,
+        link_count: 0,
+        tag_count: 0,
+        timeline_entry_count: 0,
+        pages_by_type: {},
+      },
+      config: null,
+      profile: null,
+      rawPostgresChecksSupported: false,
+      schemaVersion: '4',
+      latestVersion: 4,
+      health: {
+        page_count: 3,
+        embed_coverage: 0.5,
+        stale_pages: 0,
+        orphan_pages: 0,
+        dead_links: 0,
+        missing_embeddings: 3,
+      },
+    });
+    const none = buildDoctorReport({
+      connectionOk: true,
+      stats: {
+        page_count: 3,
+        chunk_count: 6,
+        embedded_count: 0,
+        link_count: 0,
+        tag_count: 0,
+        timeline_entry_count: 0,
+        pages_by_type: {},
+      },
+      config: null,
+      profile: null,
+      rawPostgresChecksSupported: false,
+      schemaVersion: '4',
+      latestVersion: 4,
+      health: {
+        page_count: 3,
+        embed_coverage: 0,
+        stale_pages: 0,
+        orphan_pages: 0,
+        dead_links: 0,
+        missing_embeddings: 3,
+      },
+    });
+
+    const partialEmbeddings = partial.checks.find((check) => check.name === 'embeddings');
+    const noEmbeddings = none.checks.find((check) => check.name === 'embeddings');
+
+    expect(partialEmbeddings?.message).toContain('mbrain embed --stale');
+    expect(partialEmbeddings?.message).not.toContain('embed refresh');
+    expect(noEmbeddings?.message).toContain('mbrain embed --stale');
+    expect(noEmbeddings?.message).not.toContain('embed refresh');
+  });
+
   test('doctor module exports runDoctor', async () => {
     const { runDoctor } = await import('../src/commands/doctor.ts');
     expect(typeof runDoctor).toBe('function');

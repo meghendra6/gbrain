@@ -611,7 +611,7 @@ Engineer.
       expect(earlyExit.exited).toBe(false);
 
       proc.kill();
-      const [stdout, stderr, exitCode] = await Promise.all([
+      const [stdout, stderr] = await Promise.all([
         new Response(proc.stdout).text(),
         new Response(proc.stderr).text(),
         proc.exited,
@@ -620,7 +620,63 @@ Engineer.
       expect(stdout).toContain('Watching for changes every 1s');
       expect(stderr).not.toContain('unknown flag --watch');
       expect(stderr).not.toContain('unknown flag --interval');
-      expect(exitCode).not.toBe(0);
+    } finally {
+      rmSync(repoDir, { recursive: true, force: true });
+    }
+  });
+
+  test('sync --watch surfaces unknown flag warnings instead of silently dropping them', async () => {
+    const initProc = Bun.spawn(['bun', 'run', 'src/cli.ts', 'init', '--local', '--json'], {
+      cwd: repoRoot,
+      env: { ...process.env, HOME: tempHome },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    expect(await initProc.exited).toBe(0);
+
+    const repoDir = mkdtempSync(join(tmpdir(), 'mbrain-sync-watch-warning-repo-'));
+    try {
+      mkdirSync(join(repoDir, 'people'), { recursive: true });
+      writeFileSync(join(repoDir, 'people', 'alice.md'), `---
+type: person
+title: Alice
+---
+Engineer.
+`);
+
+      runGit(repoDir, 'init');
+      runGit(repoDir, 'config', 'user.email', 'test@example.com');
+      runGit(repoDir, 'config', 'user.name', 'Test User');
+      runGit(repoDir, 'add', '.');
+      runGit(repoDir, 'commit', '-m', 'initial import');
+
+      const proc = Bun.spawn(
+        ['bun', 'run', 'src/cli.ts', 'sync', '--repo', repoDir, '--no-pull', '--watch', '--interval', '1', '--bogus', 'value'],
+        {
+          cwd: repoRoot,
+          env: { ...process.env, HOME: tempHome },
+          stdout: 'pipe',
+          stderr: 'pipe',
+        },
+      );
+
+      const earlyExit = await Promise.race([
+        proc.exited.then(code => ({ exited: true as const, code })),
+        Bun.sleep(400).then(() => ({ exited: false as const })),
+      ]);
+      expect(earlyExit.exited).toBe(false);
+
+      proc.kill();
+      const [stdout, stderr] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+        proc.exited,
+      ]);
+
+      expect(stdout).toContain('Watching for changes every 1s');
+      expect(stderr).toContain('Warning: unknown flag --bogus (ignored)');
+      expect(stderr).not.toContain('unknown flag --watch');
+      expect(stderr).not.toContain('unknown flag --interval');
     } finally {
       rmSync(repoDir, { recursive: true, force: true });
     }
@@ -665,7 +721,7 @@ Engineer.
       expect(earlyExit.exited).toBe(false);
 
       proc.kill();
-      const [stdout, stderr, exitCode] = await Promise.all([
+      const [stdout, stderr] = await Promise.all([
         new Response(proc.stdout).text(),
         new Response(proc.stderr).text(),
         proc.exited,
@@ -674,7 +730,6 @@ Engineer.
       expect(stdout).toContain('Watching for changes every 1s');
       expect(stderr).not.toContain('unknown flag --watch');
       expect(stderr).not.toContain('unknown flag --interval');
-      expect(exitCode).not.toBe(0);
     } finally {
       rmSync(repoDir, { recursive: true, force: true });
     }

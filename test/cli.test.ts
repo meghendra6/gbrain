@@ -5,43 +5,16 @@ import { tmpdir } from 'os';
 import { operations } from '../src/core/operations.ts';
 
 const repoRoot = new URL('..', import.meta.url).pathname;
+const repoRootUrl = new URL('..', import.meta.url).href;
 const cliSource = readFileSync(new URL('../src/cli.ts', import.meta.url), 'utf-8');
 const initSource = readFileSync(new URL('../src/commands/init.ts', import.meta.url), 'utf-8');
 const originalEnv = { ...process.env };
 let tempHome: string;
 
-function captureConsole() {
-  const logs: string[] = [];
-  const errors: string[] = [];
-  const originalLog = console.log;
-  const originalError = console.error;
-
-  console.log = ((...args: unknown[]) => {
-    logs.push(args.map(arg => String(arg)).join(' '));
-  }) as typeof console.log;
-  console.error = ((...args: unknown[]) => {
-    errors.push(args.map(arg => String(arg)).join(' '));
-  }) as typeof console.error;
-
-  return {
-    logs,
-    errors,
-    restore() {
-      console.log = originalLog;
-      console.error = originalError;
-    },
-  };
-}
-
 function writeUserConfig(config: Record<string, unknown>) {
   const dir = join(tempHome, '.mbrain');
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'config.json'), JSON.stringify(config, null, 2));
-}
-
-async function restoreActualModule(pathname: string, specifier: string) {
-  const actual = await import(new URL(`${specifier}?restore=${Date.now()}-${Math.random()}`, import.meta.url).href);
-  mock.module(pathname, () => actual);
 }
 
 function runGit(cwd: string, ...args: string[]) {
@@ -152,57 +125,93 @@ describe('CLI version', () => {
 
 describe('CLI dispatch integration', () => {
   test('runInit postgres bootstrap uses createConnectedEngine so db.getConnection remains available', async () => {
-    const capture = captureConsole();
-    const engineFactoryPath = new URL('../src/core/engine-factory.ts', import.meta.url).pathname;
-    const dbPath = new URL('../src/core/db.ts', import.meta.url).pathname;
-    const fakeSql: any = async (strings: TemplateStringsArray) => {
-      const text = Array.from(strings).join('');
-      if (text.includes("SELECT extname FROM pg_extension")) return [{ extname: 'vector' }];
-      return [];
-    };
+    const scriptPath = join(tempHome, 'postgres-init-child.ts');
+    writeFileSync(scriptPath, `
+      import { readFileSync } from 'fs';
+      import { join } from 'path';
+      import { mock } from 'bun:test';
 
-    const fakeEngine = {
-      connect: async () => undefined,
-      initSchema: async () => undefined,
-      getStats: async () => ({ page_count: 0 }),
-      disconnect: async () => undefined,
-    };
+      const repoRootUrl = ${JSON.stringify(repoRootUrl)};
+      const engineFactoryPath = new URL('src/core/engine-factory.ts', repoRootUrl).pathname;
+      const dbPath = new URL('src/core/db.ts', repoRootUrl).pathname;
+      const fakeSql = async (strings) => {
+        const text = Array.from(strings).join('');
+        if (text.includes("SELECT extname FROM pg_extension")) return [{ extname: 'vector' }];
+        return [];
+      };
 
-    mock.module(engineFactoryPath, () => ({
-      createEngine: async () => {
-        throw new Error('unexpected createEngine');
-      },
-      createEngineFromConfig: () => {
-        throw new Error('createEngineFromConfig should not be used for postgres init');
-      },
-      createConnectedEngine: async (config: Record<string, unknown>) => {
-        expect(config.engine).toBe('postgres');
-        return fakeEngine;
-      },
-      toEngineConfig: (config: Record<string, unknown>) => config,
-    }));
+      let createConnectedEngineCalls = 0;
+      const fakeEngine = {
+        connect: async () => undefined,
+        initSchema: async () => undefined,
+        getStats: async () => ({ page_count: 0 }),
+        disconnect: async () => undefined,
+      };
 
-    mock.module(dbPath, () => ({
-      getConnection: () => fakeSql,
-      disconnect: async () => undefined,
-    }));
+      mock.module(engineFactoryPath, () => ({
+        createEngine: async () => {
+          throw new Error('unexpected createEngine');
+        },
+        createEngineFromConfig: () => {
+          throw new Error('createEngineFromConfig should not be used for postgres init');
+        },
+        createConnectedEngine: async (config) => {
+          if (config.engine !== 'postgres') {
+            throw new Error('expected postgres engine config');
+          }
+          createConnectedEngineCalls += 1;
+          return fakeEngine;
+        },
+        toEngineConfig: (config) => config,
+      }));
 
-    try {
-      const modulePath = new URL(`../src/commands/init.ts?postgres-init=${Date.now()}`, import.meta.url).href;
-      const { runInit } = await import(modulePath);
-      await runInit(['--url', 'postgresql://user:pass@localhost:5432/mbrain', '--json']);
-    } finally {
-      await restoreActualModule(engineFactoryPath, '../src/core/engine-factory.ts');
-      await restoreActualModule(dbPath, '../src/core/db.ts');
-      capture.restore();
-    }
+      mock.module(dbPath, () => ({
+        getConnection: () => fakeSql,
+        disconnect: async () => undefined,
+      }));
 
-    const { loadConfig } = await import('../src/core/config.ts');
-    expect(loadConfig()).toMatchObject({
-      engine: 'postgres',
-      database_url: 'postgresql://user:pass@localhost:5432/mbrain',
+      const logs = [];
+      const originalLog = console.log;
+      console.log = (...args) => {
+        logs.push(args.map(arg => String(arg)).join(' '));
+      };
+
+      try {
+        const { runInit } = await import(new URL(\`src/commands/init.ts?postgres-init=\${Date.now()}\`, repoRootUrl).href);
+        await runInit(['--url', 'postgresql://user:pass@localhost:5432/mbrain', '--json']);
+      } finally {
+        console.log = originalLog;
+      }
+
+      if (createConnectedEngineCalls !== 1) {
+        throw new Error(\`expected createConnectedEngine once, got \${createConnectedEngineCalls}\`);
+      }
+
+      const config = JSON.parse(readFileSync(join(process.env.HOME, '.mbrain', 'config.json'), 'utf-8'));
+      if (config.engine !== 'postgres') {
+        throw new Error(\`expected postgres engine in config, got \${config.engine}\`);
+      }
+      if (config.database_url !== 'postgresql://user:pass@localhost:5432/mbrain') {
+        throw new Error('unexpected database_url in saved config');
+      }
+      if (!logs.some(line => line.includes('"engine":"postgres"'))) {
+        throw new Error('expected json init output to mention postgres engine');
+      }
+    `);
+
+    const proc = Bun.spawn(['bun', 'run', scriptPath], {
+      cwd: repoRoot,
+      env: { ...process.env, HOME: tempHome },
+      stdout: 'pipe',
+      stderr: 'pipe',
     });
-    expect(capture.logs.some(line => line.includes('"engine":"postgres"'))).toBe(true);
+    const stdout = await new Response(proc.stdout).text();
+    const stderr = await new Response(proc.stderr).text();
+    const exitCode = await proc.exited;
+
+    expect(exitCode).toBe(0);
+    expect(stderr).toBe('');
+    expect(stdout).toBe('');
   });
 
   test('--version outputs version', async () => {

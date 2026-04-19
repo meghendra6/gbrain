@@ -10,6 +10,8 @@ test('task operations are registered with CLI hints', () => {
   const refresh = operations.find((operation) => operation.name === 'refresh_task_working_set');
   const trace = operations.find((operation) => operation.name === 'record_retrieval_trace');
   const traces = operations.find((operation) => operation.name === 'list_task_traces');
+  const attempts = operations.find((operation) => operation.name === 'list_task_attempts');
+  const decisions = operations.find((operation) => operation.name === 'list_task_decisions');
   const attempt = operations.find((operation) => operation.name === 'record_attempt');
   const decision = operations.find((operation) => operation.name === 'record_decision');
 
@@ -21,6 +23,8 @@ test('task operations are registered with CLI hints', () => {
   expect(refresh?.cliHints?.name).toBe('task-working-set');
   expect(trace?.cliHints?.name).toBe('task-trace');
   expect(traces?.cliHints?.name).toBe('task-traces');
+  expect(attempts?.cliHints?.name).toBe('task-attempts');
+  expect(decisions?.cliHints?.name).toBe('task-decisions');
   expect(attempt?.cliHints?.name).toBe('task-attempt');
   expect(decision?.cliHints?.name).toBe('task-decision');
 });
@@ -321,6 +325,104 @@ test('list_task_traces forwards task and limit filters and formats rows', async 
   expect(output).toContain('trace-1');
   expect(output).toContain('resume path assembled');
   expect(output).toContain('task_thread -> working_set -> attempts');
+});
+
+test('list_task_attempts forwards task and limit filters and formats rows', async () => {
+  const attempts = operations.find((operation) => operation.name === 'list_task_attempts');
+  if (!attempts) throw new Error('list_task_attempts operation is missing');
+
+  const calls: Array<Record<string, unknown>> = [];
+  const result = await attempts.handler({
+    engine: {
+      getTaskThread: async () => ({
+        id: 'task-1',
+        scope: 'work',
+        title: 'Phase 1 MVP',
+        goal: 'Ship operational memory',
+        status: 'blocked',
+        repo_path: '/repo',
+        branch_name: 'docs/mbrain-redesign-doc-set',
+        current_summary: 'Need attempt history surface',
+        created_at: new Date('2026-04-19T00:00:00.000Z'),
+        updated_at: new Date('2026-04-19T00:05:00.000Z'),
+      }),
+      listTaskAttempts: async (taskId: string, filters?: Record<string, unknown>) => {
+        calls.push({ taskId, ...filters });
+        return [
+          {
+            id: 'attempt-1',
+            task_id: 'task-1',
+            summary: 'Tried raw-source-only reconstruction',
+            outcome: 'failed',
+            applicability_context: { branch: 'docs/mbrain-redesign-doc-set' },
+            evidence: ['resume drifted'],
+            created_at: new Date('2026-04-19T00:06:00.000Z'),
+          },
+        ];
+      },
+    } as any,
+    config: {} as any,
+    logger: console,
+    dryRun: false,
+  }, {
+    task_id: 'task-1',
+    limit: 5,
+  });
+
+  expect(calls).toEqual([{ taskId: 'task-1', limit: 5 }]);
+  const output = formatResult('list_task_attempts', result, { limit: 5 });
+  expect(output).toContain('attempt-1');
+  expect(output).toContain('failed');
+  expect(output).toContain('Tried raw-source-only reconstruction');
+});
+
+test('list_task_decisions forwards task and limit filters and formats rows', async () => {
+  const decisions = operations.find((operation) => operation.name === 'list_task_decisions');
+  if (!decisions) throw new Error('list_task_decisions operation is missing');
+
+  const calls: Array<Record<string, unknown>> = [];
+  const result = await decisions.handler({
+    engine: {
+      getTaskThread: async () => ({
+        id: 'task-1',
+        scope: 'work',
+        title: 'Phase 1 MVP',
+        goal: 'Ship operational memory',
+        status: 'blocked',
+        repo_path: '/repo',
+        branch_name: 'docs/mbrain-redesign-doc-set',
+        current_summary: 'Need decision history surface',
+        created_at: new Date('2026-04-19T00:00:00.000Z'),
+        updated_at: new Date('2026-04-19T00:05:00.000Z'),
+      }),
+      listTaskDecisions: async (taskId: string, filters?: Record<string, unknown>) => {
+        calls.push({ taskId, ...filters });
+        return [
+          {
+            id: 'decision-1',
+            task_id: 'task-1',
+            summary: 'Keep task memory canonical in DB',
+            rationale: 'Resume should not reconstruct from raw notes',
+            consequences: ['resume stays cheap'],
+            validity_context: { branch: 'docs/mbrain-redesign-doc-set' },
+            created_at: new Date('2026-04-19T00:06:00.000Z'),
+          },
+        ];
+      },
+    } as any,
+    config: {} as any,
+    logger: console,
+    dryRun: false,
+  }, {
+    task_id: 'task-1',
+    limit: 5,
+  });
+
+  expect(calls).toEqual([{ taskId: 'task-1', limit: 5 }]);
+  const output = formatResult('list_task_decisions', result, { limit: 5 });
+  expect(output).toContain('decision-1');
+  expect(output).toContain('Keep task memory canonical in DB');
+  expect(output).toContain('Resume should not reconstruct from raw notes');
 });
 
 test('start_task seeds an empty working set', async () => {

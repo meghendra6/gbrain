@@ -282,6 +282,30 @@ export function formatResult(
       }
       return rows;
     }
+    case 'list_task_attempts': {
+      const attempts = result as any[];
+      if (attempts.length === 0) return 'No attempts.\n';
+      const rows = attempts.map(attempt =>
+        `${attempt.id}\t${attempt.outcome}\t${attempt.created_at?.toString().slice(0, 19) || '?'}\t${attempt.summary}`,
+      ).join('\n') + '\n';
+      const requestedLimit = (params.limit as number) ?? 10;
+      if (attempts.length >= requestedLimit) {
+        return rows + `\n(result may be truncated at ${requestedLimit}; pass --limit N or -n N to change)\n`;
+      }
+      return rows;
+    }
+    case 'list_task_decisions': {
+      const decisions = result as any[];
+      if (decisions.length === 0) return 'No decisions.\n';
+      const rows = decisions.map(decision =>
+        `${decision.id}\t${decision.created_at?.toString().slice(0, 19) || '?'}\t${decision.summary}\t${decision.rationale}`,
+      ).join('\n') + '\n';
+      const requestedLimit = (params.limit as number) ?? 10;
+      if (decisions.length >= requestedLimit) {
+        return rows + `\n(result may be truncated at ${requestedLimit}; pass --limit N or -n N to change)\n`;
+      }
+      return rows;
+    }
     case 'search':
     case 'query': {
       const results = result as any[];
@@ -1067,6 +1091,40 @@ const list_task_traces: Operation = {
   cliHints: { name: 'task-traces', positional: ['task_id'], aliases: { n: 'limit' } },
 };
 
+const list_task_attempts: Operation = {
+  name: 'list_task_attempts',
+  description: 'List recorded attempts for one task thread.',
+  params: {
+    task_id: { type: 'string', required: true, description: 'Task thread id' },
+    limit: { type: 'number', description: 'Max results (default 10)' },
+  },
+  handler: async (ctx, p) => {
+    const taskId = String(p.task_id);
+    await requireTaskThread(ctx.engine, taskId);
+    return ctx.engine.listTaskAttempts(taskId, {
+      limit: (p.limit as number) ?? 10,
+    });
+  },
+  cliHints: { name: 'task-attempts', positional: ['task_id'], aliases: { n: 'limit' } },
+};
+
+const list_task_decisions: Operation = {
+  name: 'list_task_decisions',
+  description: 'List recorded decisions for one task thread.',
+  params: {
+    task_id: { type: 'string', required: true, description: 'Task thread id' },
+    limit: { type: 'number', description: 'Max results (default 10)' },
+  },
+  handler: async (ctx, p) => {
+    const taskId = String(p.task_id);
+    await requireTaskThread(ctx.engine, taskId);
+    return ctx.engine.listTaskDecisions(taskId, {
+      limit: (p.limit as number) ?? 10,
+    });
+  },
+  cliHints: { name: 'task-decisions', positional: ['task_id'], aliases: { n: 'limit' } },
+};
+
 const refresh_task_working_set: Operation = {
   name: 'refresh_task_working_set',
   description: 'Refresh a task working set snapshot and advance its verification timestamp.',
@@ -1445,7 +1503,7 @@ export const operations: Operation[] = [
   // Resolution & chunks
   resolve_slugs, get_chunks,
   // Operational memory
-  list_tasks, start_task, update_task, resume_task, get_task_working_set, record_retrieval_trace, list_task_traces, refresh_task_working_set, record_attempt, record_decision,
+  list_tasks, start_task, update_task, resume_task, get_task_working_set, record_retrieval_trace, list_task_traces, list_task_attempts, list_task_decisions, refresh_task_working_set, record_attempt, record_decision,
   // Ingest log
   log_ingest, get_ingest_log,
   // Files

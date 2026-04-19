@@ -3,16 +3,120 @@ import { formatResult, OperationError, operations } from '../src/core/operations
 
 test('task operations are registered with CLI hints', () => {
   const start = operations.find((operation) => operation.name === 'start_task');
+  const list = operations.find((operation) => operation.name === 'list_tasks');
   const resume = operations.find((operation) => operation.name === 'resume_task');
+  const show = operations.find((operation) => operation.name === 'get_task_working_set');
   const refresh = operations.find((operation) => operation.name === 'refresh_task_working_set');
   const attempt = operations.find((operation) => operation.name === 'record_attempt');
   const decision = operations.find((operation) => operation.name === 'record_decision');
 
   expect(start?.cliHints?.name).toBe('task-start');
+  expect(list?.cliHints?.name).toBe('task-list');
   expect(resume?.cliHints?.name).toBe('task-resume');
+  expect(show?.cliHints?.name).toBe('task-show');
   expect(refresh?.cliHints?.name).toBe('task-working-set');
   expect(attempt?.cliHints?.name).toBe('task-attempt');
   expect(decision?.cliHints?.name).toBe('task-decision');
+});
+
+test('list_tasks forwards filters and formatResult renders task rows', async () => {
+  const list = operations.find((operation) => operation.name === 'list_tasks');
+  if (!list) throw new Error('list_tasks operation is missing');
+
+  const calls: Array<Record<string, unknown> | undefined> = [];
+  const tasks = await list.handler({
+    engine: {
+      listTaskThreads: async (filters?: Record<string, unknown>) => {
+        calls.push(filters);
+        return [
+          {
+            id: 'task-1',
+            scope: 'work',
+            title: 'Phase 1 MVP',
+            goal: 'Ship operational memory',
+            status: 'blocked',
+            repo_path: '/repo',
+            branch_name: 'docs/mbrain-redesign-doc-set',
+            current_summary: 'Need read surface',
+            created_at: new Date('2026-04-19T00:00:00.000Z'),
+            updated_at: new Date('2026-04-19T00:05:00.000Z'),
+          },
+        ];
+      },
+    } as any,
+    config: {} as any,
+    logger: console,
+    dryRun: false,
+  }, {
+    status: 'blocked',
+    limit: 5,
+  });
+
+  expect(calls).toEqual([{ scope: undefined, status: 'blocked', limit: 5 }]);
+  const output = formatResult('list_tasks', tasks, { limit: 5 });
+  expect(output).toContain('task-1');
+  expect(output).toContain('blocked');
+  expect(output).toContain('Phase 1 MVP');
+});
+
+test('get_task_working_set returns canonical task state', async () => {
+  const show = operations.find((operation) => operation.name === 'get_task_working_set');
+  if (!show) throw new Error('get_task_working_set operation is missing');
+
+  const result = await show.handler({
+    engine: {
+      getTaskThread: async () => ({
+        id: 'task-1',
+        scope: 'work',
+        title: 'Phase 1 MVP',
+        goal: 'Ship operational memory',
+        status: 'blocked',
+        repo_path: '/repo',
+        branch_name: 'docs/mbrain-redesign-doc-set',
+        current_summary: 'Need task list and task show',
+        created_at: new Date('2026-04-19T00:00:00.000Z'),
+        updated_at: new Date('2026-04-19T00:05:00.000Z'),
+      }),
+      getTaskWorkingSet: async () => ({
+        task_id: 'task-1',
+        active_paths: ['src/core/operations.ts'],
+        active_symbols: ['list_tasks', 'get_task_working_set'],
+        blockers: ['task read surface missing'],
+        open_questions: ['should task show include attempts later'],
+        next_steps: ['add read operations'],
+        verification_notes: ['resume still canonical'],
+        last_verified_at: new Date('2026-04-19T00:04:00.000Z'),
+        updated_at: new Date('2026-04-19T00:05:00.000Z'),
+      }),
+    } as any,
+    config: {} as any,
+    logger: console,
+    dryRun: false,
+  }, {
+    task_id: 'task-1',
+  });
+
+  const output = formatResult('get_task_working_set', result);
+  expect(output).toContain('Phase 1 MVP');
+  expect(output).toContain('list_tasks');
+  expect(output).toContain('should task show include attempts later');
+  expect(output).toContain('2026-04-19T00:04:00.000Z');
+});
+
+test('get_task_working_set rejects unknown task ids with a stable error', async () => {
+  const show = operations.find((operation) => operation.name === 'get_task_working_set');
+  if (!show) throw new Error('get_task_working_set operation is missing');
+
+  await expect(show.handler({
+    engine: {
+      getTaskThread: async () => null,
+    } as any,
+    config: {} as any,
+    logger: console,
+    dryRun: false,
+  }, {
+    task_id: 'missing-task',
+  })).rejects.toMatchObject({ code: 'task_not_found' });
 });
 
 test('start_task seeds an empty working set', async () => {

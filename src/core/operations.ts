@@ -258,6 +258,18 @@ export function formatResult(
       }
       return rows;
     }
+    case 'list_tasks': {
+      const tasks = result as any[];
+      if (tasks.length === 0) return 'No tasks.\n';
+      const rows = tasks.map(task =>
+        `${task.id}\t${task.status}\t${task.scope}\t${task.title}`,
+      ).join('\n') + '\n';
+      const requestedLimit = (params.limit as number) ?? 20;
+      if (tasks.length >= requestedLimit) {
+        return rows + `\n(result may be truncated at ${requestedLimit}; pass --limit N or -n N to change)\n`;
+      }
+      return rows;
+    }
     case 'search':
     case 'query': {
       const results = result as any[];
@@ -351,6 +363,24 @@ export function formatResult(
         `Decisions: ${(resume.active_decisions || []).join(', ') || 'none'}`,
         `Latest trace route: ${(resume.latest_trace_route || []).join(' -> ') || 'none'}`,
         `State: ${resume.stale ? 'stale' : 'fresh'}`,
+      ].join('\n') + '\n';
+    }
+    case 'get_task_working_set': {
+      const state = result as any;
+      const task = state.thread;
+      const workingSet = state.working_set;
+      return [
+        `${task.title} [${task.status}]`,
+        `Scope: ${task.scope}`,
+        `Goal: ${task.goal}`,
+        `Summary: ${task.current_summary}`,
+        `Active paths: ${(workingSet?.active_paths || []).join(', ') || 'none'}`,
+        `Active symbols: ${(workingSet?.active_symbols || []).join(', ') || 'none'}`,
+        `Blockers: ${(workingSet?.blockers || []).join(', ') || 'none'}`,
+        `Open questions: ${(workingSet?.open_questions || []).join(', ') || 'none'}`,
+        `Next steps: ${(workingSet?.next_steps || []).join(', ') || 'none'}`,
+        `Verification notes: ${(workingSet?.verification_notes || []).join(', ') || 'none'}`,
+        `Last verified: ${workingSet?.last_verified_at ? new Date(workingSet.last_verified_at).toISOString() : 'never'}`,
       ].join('\n') + '\n';
     }
     default:
@@ -830,6 +860,28 @@ const get_chunks: Operation = {
 
 // --- Operational Memory ---
 
+const list_tasks: Operation = {
+  name: 'list_tasks',
+  description: 'List task threads from canonical operational memory.',
+  params: {
+    scope: { type: 'string', description: 'Filter by task scope', enum: ['work', 'personal', 'mixed'] },
+    status: {
+      type: 'string',
+      description: 'Filter by task status',
+      enum: ['active', 'paused', 'blocked', 'completed', 'abandoned'],
+    },
+    limit: { type: 'number', description: 'Max results (default 20)' },
+  },
+  handler: async (ctx, p) => {
+    return ctx.engine.listTaskThreads({
+      scope: p.scope as any,
+      status: p.status as any,
+      limit: (p.limit as number) ?? 20,
+    });
+  },
+  cliHints: { name: 'task-list', aliases: { n: 'limit' } },
+};
+
 const start_task: Operation = {
   name: 'start_task',
   description: 'Create a new operational-memory task thread.',
@@ -884,6 +936,23 @@ const resume_task: Operation = {
     return buildTaskResumeCard(ctx.engine, p.task_id as string);
   },
   cliHints: { name: 'task-resume', positional: ['task_id'] },
+};
+
+const get_task_working_set: Operation = {
+  name: 'get_task_working_set',
+  description: 'Get the canonical task thread and working-set state for one task.',
+  params: {
+    task_id: { type: 'string', required: true, description: 'Task thread id' },
+  },
+  handler: async (ctx, p) => {
+    const thread = await requireTaskThread(ctx.engine, String(p.task_id));
+    const workingSet = await ctx.engine.getTaskWorkingSet(String(p.task_id));
+    return {
+      thread,
+      working_set: workingSet,
+    };
+  },
+  cliHints: { name: 'task-show', positional: ['task_id'] },
 };
 
 const refresh_task_working_set: Operation = {
@@ -1264,7 +1333,7 @@ export const operations: Operation[] = [
   // Resolution & chunks
   resolve_slugs, get_chunks,
   // Operational memory
-  start_task, resume_task, refresh_task_working_set, record_attempt, record_decision,
+  list_tasks, start_task, resume_task, get_task_working_set, refresh_task_working_set, record_attempt, record_decision,
   // Ingest log
   log_ingest, get_ingest_log,
   // Files

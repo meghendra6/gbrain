@@ -66,8 +66,9 @@ Expected:
 
 - `task-memory-schema`, `task-memory-engine`, `task-memory-service`, and `task-memory-operations` all pass.
 - SQLite and PGLite persist task-memory records across reconnects.
+- Phase 1 task-resume parity runs through `test/phase0-contract-parity.test.ts`, including the `task resume semantics` coverage.
 - Postgres task-memory persistence runs when `DATABASE_URL` is configured.
-- If `DATABASE_URL` is missing, the Postgres task-memory persistence check reports an explicit skip reason instead of silently dropping coverage.
+- If `DATABASE_URL` is missing, the Postgres task-memory persistence and parity checks report explicit skip reasons instead of silently dropping coverage.
 
 ---
 

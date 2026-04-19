@@ -8,6 +8,7 @@ import type { BrainEngine } from '../src/core/engine.ts';
 import { ensurePageChunks } from '../src/core/page-chunks.ts';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { PostgresEngine } from '../src/core/postgres-engine.ts';
+import { buildTaskResumeCard } from '../src/core/services/task-memory-service.ts';
 import { SQLiteEngine } from '../src/core/sqlite-engine.ts';
 import type { PageType } from '../src/core/types.ts';
 
@@ -42,6 +43,20 @@ type WorkflowSnapshot = {
     source: string;
     summary: string;
   }>>;
+};
+
+type TaskResumeSnapshot = {
+  title: string;
+  status: string;
+  active_paths: string[];
+  active_symbols: string[];
+  blockers: string[];
+  open_questions: string[];
+  next_steps: string[];
+  failed_attempts: string[];
+  active_decisions: string[];
+  latest_trace_route: string[];
+  stale: boolean;
 };
 
 const FIXTURE_PAGES = [
@@ -218,6 +233,81 @@ async function collectWorkflowSnapshot(engine: SharedWorkflowEngine): Promise<Wo
   };
 }
 
+async function seedTaskResumeScenario(engine: BrainEngine, taskId: string): Promise<TaskResumeSnapshot> {
+  await engine.createTaskThread({
+    id: taskId,
+    scope: 'work',
+    title: 'Phase 1 MVP',
+    goal: 'Ship operational memory',
+    status: 'blocked',
+    repo_path: '/repo',
+    branch_name: 'docs/mbrain-redesign-doc-set',
+    current_summary: 'Shared operations exist, parity coverage is landing',
+  });
+
+  await engine.upsertTaskWorkingSet({
+    task_id: taskId,
+    active_paths: ['src/core/operations.ts'],
+    active_symbols: ['operations', 'buildTaskResumeCard'],
+    blockers: ['phase1 parity coverage missing'],
+    open_questions: ['should resume include retrieval trace ids'],
+    next_steps: ['add parity coverage'],
+    verification_notes: ['working set refreshed against current branch'],
+    last_verified_at: new Date('2026-04-19T01:00:00.000Z'),
+  });
+
+  await engine.recordTaskAttempt({
+    id: `${taskId}-attempt-failed`,
+    task_id: taskId,
+    summary: 'Skipped parity coverage in initial Phase 1 pass',
+    outcome: 'failed',
+    applicability_context: { surface: 'phase1' },
+    evidence: ['reviewer found missing parity test'],
+  });
+  await engine.recordTaskAttempt({
+    id: `${taskId}-attempt-partial`,
+    task_id: taskId,
+    summary: 'Shipped task resume without refresh operation',
+    outcome: 'partial',
+    applicability_context: { surface: 'phase1' },
+    evidence: ['resume output existed but freshness could not advance'],
+  });
+
+  await engine.recordTaskDecision({
+    id: `${taskId}-decision-1`,
+    task_id: taskId,
+    summary: 'Keep task working set canonical in the database',
+    rationale: 'Resume must read persisted state before raw-source expansion',
+    consequences: ['freshness and parity can be tested at the contract boundary'],
+    validity_context: { phase: 'phase1' },
+  });
+
+  await engine.putRetrievalTrace({
+    id: `${taskId}-trace-1`,
+    task_id: taskId,
+    scope: 'work',
+    route: ['task_thread', 'working_set', 'attempts', 'decisions'],
+    source_refs: [`task-thread:${taskId}`],
+    verification: ['working set refreshed'],
+    outcome: 'resume path assembled',
+  });
+
+  const resume = await buildTaskResumeCard(engine, taskId);
+  return {
+    title: resume.title,
+    status: resume.status,
+    active_paths: resume.active_paths,
+    active_symbols: resume.active_symbols,
+    blockers: resume.blockers,
+    open_questions: resume.open_questions,
+    next_steps: resume.next_steps,
+    failed_attempts: resume.failed_attempts,
+    active_decisions: resume.active_decisions,
+    latest_trace_route: resume.latest_trace_route,
+    stale: resume.stale,
+  };
+}
+
 function quoteIdentifier(identifier: string): string {
   return `"${identifier.replaceAll('"', '""')}"`;
 }
@@ -280,6 +370,26 @@ describe('phase0 contract parity', () => {
     expect(pgliteEnvelope.publicContract.checkUpdate.status).toBe('unsupported');
   });
 
+  test('sqlite and pglite agree on task resume semantics', async () => {
+    const sqliteResume = await seedTaskResumeScenario(sqlite, 'sqlite-task-1');
+    const pgliteResume = await seedTaskResumeScenario(pglite, 'pglite-task-1');
+
+    expect(sqliteResume).toEqual({
+      title: 'Phase 1 MVP',
+      status: 'blocked',
+      active_paths: ['src/core/operations.ts'],
+      active_symbols: ['operations', 'buildTaskResumeCard'],
+      blockers: ['phase1 parity coverage missing'],
+      open_questions: ['should resume include retrieval trace ids'],
+      next_steps: ['add parity coverage'],
+      failed_attempts: ['Skipped parity coverage in initial Phase 1 pass'],
+      active_decisions: ['Keep task working set canonical in the database'],
+      latest_trace_route: ['task_thread', 'working_set', 'attempts', 'decisions'],
+      stale: false,
+    });
+    expect(pgliteResume).toEqual(sqliteResume);
+  });
+
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
     test.skip('postgres parity skipped: DATABASE_URL is not configured', () => {});
@@ -311,6 +421,36 @@ describe('phase0 contract parity', () => {
 
       expect(postgresSnapshot).toEqual(EXPECTED_SNAPSHOT);
       expect(postgresSnapshot).toEqual(sqliteSnapshot);
+    } finally {
+      await engine.disconnect().catch(() => undefined);
+      await admin.unsafe(`DROP SCHEMA IF EXISTS ${quoteIdentifier(schemaName)} CASCADE`).catch(() => undefined);
+      await admin.end({ timeout: 0 });
+    }
+  });
+
+  test('postgres matches the same task resume semantics', async () => {
+    const schemaName = `phase1_task_resume_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+    const admin = postgres(databaseUrl, {
+      connect_timeout: 10,
+      idle_timeout: 1,
+      max: 1,
+      types: { bigint: postgres.BigInt },
+    });
+    const engine = new PostgresEngine();
+
+    try {
+      await admin.unsafe(`CREATE SCHEMA ${quoteIdentifier(schemaName)}`);
+      await engine.connect({
+        engine: 'postgres',
+        database_url: buildSchemaScopedDatabaseUrl(databaseUrl, schemaName),
+        poolSize: 1,
+      });
+      await engine.initSchema();
+
+      const postgresResume = await seedTaskResumeScenario(engine, 'postgres-task-1');
+      const sqliteResume = await seedTaskResumeScenario(sqlite, 'sqlite-task-2');
+
+      expect(postgresResume).toEqual(sqliteResume);
     } finally {
       await engine.disconnect().catch(() => undefined);
       await admin.unsafe(`DROP SCHEMA IF EXISTS ${quoteIdentifier(schemaName)} CASCADE`).catch(() => undefined);

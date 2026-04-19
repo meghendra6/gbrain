@@ -40,6 +40,20 @@ Expected:
 - sqlite/local mode does not pretend to support cloud file storage
 - pglite local-path mode should follow the same honest contract reporting
 
+## Phase 0 parity verification
+
+Run:
+
+```bash
+bun test test/phase0-contract-parity.test.ts
+```
+
+Expected:
+
+- SQLite and PGLite pass unconditionally against the same shared workflow fixture.
+- Postgres runs when `DATABASE_URL` is configured.
+- Missing Postgres coverage is reported as an explicit skip reason, not as a silent reduction in the supported surface.
+
 ---
 
 ## 2. Skillpack Loaded

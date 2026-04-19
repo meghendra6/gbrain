@@ -120,17 +120,19 @@ async function backfillImportedEmbeddings(engine: NonNullable<typeof engine>, sl
 }
 
 async function runKeywordSearchWorkload(engine: NonNullable<typeof engine>): Promise<Phase0WorkloadResult> {
+  const definition = PHASE0_WORKLOADS.find((workload) => workload.name === 'keyword_search');
   const durations = await measureSearchWorkload(async (query) => {
     await engine.searchKeyword(query, { limit: 5 });
-  }, PHASE0_WORKLOADS.find((workload) => workload.name === 'keyword_search')?.queries ?? []);
+  }, definition?.queries ?? [], definition?.samples);
 
   return measuredMsResult('keyword_search', durations);
 }
 
 async function runHybridSearchWorkload(engine: NonNullable<typeof engine>): Promise<Phase0WorkloadResult> {
+  const definition = PHASE0_WORKLOADS.find((workload) => workload.name === 'hybrid_search');
   const durations = await measureSearchWorkload(async (query) => {
     await hybridSearch(engine, query, { limit: 5 });
-  }, PHASE0_WORKLOADS.find((workload) => workload.name === 'hybrid_search')?.queries ?? []);
+  }, definition?.queries ?? [], definition?.samples);
 
   return measuredMsResult('hybrid_search', durations);
 }
@@ -149,9 +151,12 @@ async function runStatsHealthWorkload(engine: NonNullable<typeof engine>): Promi
   return measuredMsResult('stats_health', durations);
 }
 
-async function measureSearchWorkload(run: (query: string) => Promise<void>, queries: string[]): Promise<number[]> {
+async function measureSearchWorkload(
+  run: (query: string) => Promise<void>,
+  queries: string[],
+  samples = 5,
+): Promise<number[]> {
   const durations: number[] = [];
-  const samples = 5;
 
   for (let i = 0; i < samples; i++) {
     for (const query of queries) {

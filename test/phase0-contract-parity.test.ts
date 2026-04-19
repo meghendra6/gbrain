@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import postgres from 'postgres';
+import { buildExecutionEnvelope } from '../src/core/execution-envelope.ts';
 import type { BrainEngine } from '../src/core/engine.ts';
 import { ensurePageChunks } from '../src/core/page-chunks.ts';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
@@ -255,6 +256,28 @@ describe('phase0 contract parity', () => {
     expect(sqliteSnapshot).toEqual(EXPECTED_SNAPSHOT);
     expect(pgliteSnapshot).toEqual(EXPECTED_SNAPSHOT);
     expect(sqliteSnapshot).toEqual(pgliteSnapshot);
+  });
+
+  test('sqlite and pglite expose the same unsupported Phase 0 contract surfaces', () => {
+    const sqliteEnvelope = buildExecutionEnvelope({
+      engine: 'sqlite',
+      database_path: join(root, 'brain.db'),
+      offline: true,
+      embedding_provider: 'local',
+      query_rewrite_provider: 'heuristic',
+    });
+    const pgliteEnvelope = buildExecutionEnvelope({
+      engine: 'pglite',
+      database_path: join(root, 'brain.pglite'),
+      offline: false,
+      embedding_provider: 'local',
+      query_rewrite_provider: 'heuristic',
+    });
+
+    expect(sqliteEnvelope.publicContract.files.status).toBe('unsupported');
+    expect(sqliteEnvelope.publicContract.checkUpdate.status).toBe('unsupported');
+    expect(pgliteEnvelope.publicContract.files.status).toBe('unsupported');
+    expect(pgliteEnvelope.publicContract.checkUpdate.status).toBe('unsupported');
   });
 
   const databaseUrl = process.env.DATABASE_URL;

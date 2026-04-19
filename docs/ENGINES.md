@@ -4,7 +4,7 @@
 
 Every MBrain operation goes through `BrainEngine`. The engine is the contract between "what the brain can do" and "how it's stored." Swap the engine, keep everything else.
 
-v0 ships `PostgresEngine` backed by Supabase. The interface is designed so a `SQLiteEngine`, `DuckDBEngine`, or `TursoEngine` could slot in without touching the CLI, MCP server, skills, or any consumer code.
+`PostgresEngine` remains the full cloud-backed path. `SQLiteEngine` and `PGLiteEngine` are current local-path contract engines, and the same interface is designed so a `DuckDBEngine` or `TursoEngine` could slot in without touching the CLI, MCP server, skills, or any consumer code.
 
 ## Why this matters
 
@@ -18,7 +18,7 @@ Different users have different constraints:
 | Researcher | Analytics, bulk exports, embeddings | DuckDBEngine (someday) |
 | Edge/mobile | Offline-first, sync later | SQLiteEngine + sync (someday) |
 
-The engine interface means we don't have to choose. Ship Postgres now while the Phase 0 contract keeps SQLite and PGLite honest, local-path options.
+The engine interface means we do not have to choose a single storage story. Postgres remains the full cloud path, while SQLite and PGLite already cover honest local-path usage and still leave room for more engines later.
 
 ## The interface
 
@@ -187,9 +187,11 @@ Every method in `BrainEngine`. The full interface. No optional methods, no featu
 | Concurrent access | Connection pooling | Single writer | SQLite limitation |
 | Hosting | Supabase, self-hosted, Docker | Local file | |
 
-## Future engine ideas
+## Current local paths and future engine ideas
 
-**SQLiteEngine** (most requested). See `docs/SQLITE_ENGINE.md` for the full plan. Single file, no server, git-friendly. Uses FTS5 for keyword search, sqlite-vss or vec0 for vector search. Great for open source users who want zero infrastructure.
+**SQLiteEngine.** Current Phase 0 local-path engine. See `docs/SQLITE_ENGINE.md` for the implementation plan, parity work, and local-first trade-offs. Single file, no server, git-friendly.
+
+**PGLiteEngine.** Current embedded-Postgres local-path engine. It keeps local execution on-device while preserving more Postgres semantics than SQLite.
 
 **TursoEngine.** libSQL (SQLite fork) with embedded replicas and HTTP edge access. Would give SQLite's simplicity with cloud sync. Interesting for mobile/edge use cases.
 

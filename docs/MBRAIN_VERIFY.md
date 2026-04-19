@@ -70,6 +70,21 @@ Expected:
 - Postgres task-memory persistence runs when `DATABASE_URL` is configured.
 - If `DATABASE_URL` is missing, the Postgres task-memory persistence and parity checks report explicit skip reasons instead of silently dropping coverage.
 
+## Phase 1 operational-memory benchmark
+
+Run:
+
+```bash
+bun run bench:phase1 --json
+```
+
+Expected:
+
+- the report includes `task_resume`, `attempt_history`, `decision_history`, and `resume_projection`
+- latency workloads report positive `p50_ms` and `p95_ms`
+- `resume_projection.success_rate` is `100` on the published fixture workload
+- the benchmark stays local and uses the same sqlite execution envelope as the Phase 0 baseline runner
+
 ---
 
 ## 2. Skillpack Loaded

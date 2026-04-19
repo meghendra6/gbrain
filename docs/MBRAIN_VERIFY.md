@@ -87,6 +87,17 @@ Expected:
 - `acceptance.phase1_status` stays `pending_baseline` until a comparable repeated-work baseline exists for the primary improvement threshold
 - the benchmark stays local and uses the same sqlite execution envelope as the Phase 0 baseline runner
 
+To evaluate the full primary-improvement threshold once you have a comparable prior benchmark:
+
+```bash
+bun run bench:phase1 --json --baseline path/to/previous-phase1-benchmark.json
+```
+
+Expected:
+
+- `acceptance.phase1_status` becomes `pass` or `fail` instead of `pending_baseline`
+- the baseline must use the same engine and include a comparable `task_resume` latency measurement
+
 ---
 
 ## 2. Skillpack Loaded

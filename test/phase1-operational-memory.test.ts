@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { spawnSync } from 'bun';
+import { mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
 
 describe('phase1 operational-memory benchmark', () => {
   test('--help prints usage', () => {
@@ -69,5 +72,48 @@ describe('phase1 operational-memory benchmark', () => {
     expect(pendingCheck.status).toBe('pending_baseline');
     expect(typeof pendingCheck.reason).toBe('string');
     expect(pendingCheck.reason.length).toBeGreaterThan(0);
+  });
+
+  test('--baseline enables full phase1 acceptance evaluation', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mbrain-phase1-baseline-'));
+    const baselinePath = join(dir, 'baseline.json');
+
+    try {
+      writeFileSync(baselinePath, JSON.stringify({
+        generated_at: '2026-04-19T00:00:00.000Z',
+        engine: 'sqlite',
+        workloads: [
+          { name: 'task_resume', status: 'measured', unit: 'ms', p50_ms: 1.2, p95_ms: 1.5 },
+          { name: 'attempt_history', status: 'measured', unit: 'ms', p50_ms: 0.03, p95_ms: 0.04 },
+          { name: 'decision_history', status: 'measured', unit: 'ms', p50_ms: 0.03, p95_ms: 0.04 },
+          { name: 'resume_projection', status: 'measured', unit: 'percent', success_rate: 100 },
+        ],
+      }, null, 2));
+
+      const proc = spawnSync([
+        'bun',
+        'run',
+        'scripts/bench/phase1-operational-memory.ts',
+        '--json',
+        '--baseline',
+        baselinePath,
+      ], {
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+
+      expect(proc.exitCode).toBe(0);
+      const payload = JSON.parse(new TextDecoder().decode(proc.stdout));
+      expect(payload.acceptance.phase1_status).toBe('pass');
+
+      const primaryCheck = payload.acceptance.checks.find(
+        (check: any) => check.name === 'primary_improvement_threshold',
+      );
+      expect(primaryCheck.status).toBe('pass');
+      expect(typeof primaryCheck.actual).toBe('number');
+      expect(primaryCheck.actual).toBeGreaterThanOrEqual(10);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { mkdtempSync, rmSync } from 'fs';
+import { mkdtempSync, readFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { performance } from 'perf_hooks';
@@ -19,10 +19,12 @@ import {
   type Phase1WorkloadResult,
 } from './phase1-workloads.ts';
 
-const args = new Set(process.argv.slice(2));
+const rawArgs = process.argv.slice(2);
+const args = new Set(rawArgs);
+const baselinePath = getFlagValue(rawArgs, '--baseline');
 
 if (args.has('--help')) {
-  console.log('Usage: bun run scripts/bench/phase1-operational-memory.ts [--json]');
+  console.log('Usage: bun run scripts/bench/phase1-operational-memory.ts [--json] [--baseline <path>]');
   process.exit(0);
 }
 
@@ -53,7 +55,7 @@ try {
     generated_at: new Date().toISOString(),
     engine: config.engine,
     workloads,
-    acceptance: evaluateAcceptance(workloads),
+    acceptance: evaluateAcceptance(workloads, config.engine, baselinePath ? loadBaseline(baselinePath) : null),
   };
 
   if (jsonOutput) {
@@ -179,7 +181,11 @@ function formatMeasuredMs(value: number): number {
   return Math.max(0.001, roundTo(value, 3));
 }
 
-function evaluateAcceptance(workloads: Phase1WorkloadResult[]): Phase1AcceptanceReport {
+function evaluateAcceptance(
+  workloads: Phase1WorkloadResult[],
+  engine: string,
+  baseline: Phase1BenchmarkPayload | null,
+): Phase1AcceptanceReport {
   const checks: Phase1AcceptanceCheck[] = [];
 
   const taskResume = getLatencyWorkload(workloads, 'task_resume');
@@ -230,22 +236,18 @@ function evaluateAcceptance(workloads: Phase1WorkloadResult[]): Phase1Acceptance
     },
   });
 
-  checks.push({
-    name: 'primary_improvement_threshold',
-    status: 'pending_baseline',
-    threshold: {
-      operator: '>=',
-      value: PHASE1_ACCEPTANCE_THRESHOLDS.primary_improvement_threshold_pct,
-      unit: 'percent',
-    },
-    reason: PHASE1_PENDING_BASELINE_REASON,
-  });
+  checks.push(buildPrimaryImprovementCheck(taskResume, engine, baseline));
 
   const readiness_status = checks.every((check) => check.status !== 'fail') ? 'pass' : 'fail';
-  const phase1_status = readiness_status === 'fail' ? 'fail' : 'pending_baseline';
-  const summary = readiness_status === 'fail'
-    ? 'Phase 1 readiness failed one or more local guardrails.'
-    : `Phase 1 readiness passes the local guardrails, but full phase acceptance remains pending: ${PHASE1_PENDING_BASELINE_REASON}`;
+  const primaryCheck = checks.find((check) => check.name === 'primary_improvement_threshold');
+  const phase1_status = readiness_status === 'fail'
+    ? 'fail'
+    : primaryCheck?.status === 'pass'
+      ? 'pass'
+      : primaryCheck?.status === 'fail'
+        ? 'fail'
+        : 'pending_baseline';
+  const summary = buildAcceptanceSummary(readiness_status, phase1_status, primaryCheck?.reason);
 
   return {
     thresholds: PHASE1_ACCEPTANCE_THRESHOLDS,
@@ -254,6 +256,81 @@ function evaluateAcceptance(workloads: Phase1WorkloadResult[]): Phase1Acceptance
     checks,
     summary,
   };
+}
+
+interface Phase1BenchmarkPayload {
+  engine: string;
+  workloads: Phase1WorkloadResult[];
+}
+
+function buildPrimaryImprovementCheck(
+  taskResume: Extract<Phase1WorkloadResult, { name: 'task_resume' }>,
+  engine: string,
+  baseline: Phase1BenchmarkPayload | null,
+): Phase1AcceptanceCheck {
+  const threshold = {
+    operator: '>=' as const,
+    value: PHASE1_ACCEPTANCE_THRESHOLDS.primary_improvement_threshold_pct,
+    unit: 'percent' as const,
+  };
+
+  if (!baseline) {
+    return {
+      name: 'primary_improvement_threshold',
+      status: 'pending_baseline',
+      threshold,
+      reason: PHASE1_PENDING_BASELINE_REASON,
+    };
+  }
+
+  if (baseline.engine !== engine) {
+    return {
+      name: 'primary_improvement_threshold',
+      status: 'fail',
+      threshold,
+      reason: `Baseline engine mismatch: expected ${engine}, received ${baseline.engine}.`,
+    };
+  }
+
+  const baselineTaskResume = baseline.workloads.find((workload) => workload.name === 'task_resume');
+  if (!baselineTaskResume || baselineTaskResume.unit !== 'ms' || baselineTaskResume.p95_ms <= 0) {
+    return {
+      name: 'primary_improvement_threshold',
+      status: 'fail',
+      threshold,
+      reason: 'Baseline payload is missing a comparable task_resume p95 measurement.',
+    };
+  }
+
+  const improvementPct = roundTo(
+    ((baselineTaskResume.p95_ms - taskResume.p95_ms) / baselineTaskResume.p95_ms) * 100,
+    2,
+  );
+
+  return {
+    name: 'primary_improvement_threshold',
+    status: improvementPct >= PHASE1_ACCEPTANCE_THRESHOLDS.primary_improvement_threshold_pct ? 'pass' : 'fail',
+    actual: improvementPct,
+    threshold,
+    reason: `Compared against baseline task_resume p95 ${baselineTaskResume.p95_ms}ms.`,
+  };
+}
+
+function buildAcceptanceSummary(
+  readinessStatus: Extract<Phase1AcceptanceReport['readiness_status'], 'pass' | 'fail'>,
+  phase1Status: Phase1AcceptanceReport['phase1_status'],
+  primaryReason?: string,
+): string {
+  if (readinessStatus === 'fail') {
+    return 'Phase 1 readiness failed one or more local guardrails.';
+  }
+  if (phase1Status === 'pass') {
+    return 'Phase 1 readiness passes local guardrails and clears the primary improvement threshold against the supplied baseline.';
+  }
+  if (phase1Status === 'fail') {
+    return `Phase 1 readiness passes local guardrails, but full phase acceptance failed: ${primaryReason ?? 'the primary improvement threshold was not met.'}`;
+  }
+  return `Phase 1 readiness passes the local guardrails, but full phase acceptance remains pending: ${primaryReason ?? PHASE1_PENDING_BASELINE_REASON}`;
 }
 
 function getLatencyWorkload(
@@ -276,6 +353,16 @@ function getCorrectnessWorkload(
     throw new Error(`Missing correctness workload: ${name}`);
   }
   return workload;
+}
+
+function loadBaseline(path: string): Phase1BenchmarkPayload {
+  return JSON.parse(readFileSync(path, 'utf-8')) as Phase1BenchmarkPayload;
+}
+
+function getFlagValue(args: string[], flag: string): string | undefined {
+  const index = args.indexOf(flag);
+  if (index === -1) return undefined;
+  return args[index + 1];
 }
 
 function roundTo(value: number, digits: number): number {

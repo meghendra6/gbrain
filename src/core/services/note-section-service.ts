@@ -1,4 +1,5 @@
-import type { NoteManifestEntry, NoteSectionEntryInput, PageInput } from '../types.ts';
+import type { BrainEngine } from '../engine.ts';
+import type { NoteManifestEntry, NoteSectionEntry, NoteSectionEntryInput, Page, PageInput } from '../types.ts';
 import { slugifyPath } from '../sync.ts';
 import { importContentHash } from '../utils.ts';
 import { DEFAULT_NOTE_MANIFEST_SCOPE_ID } from './note-manifest-service.ts';
@@ -66,6 +67,38 @@ export function buildNoteSectionEntries(input: BuildNoteSectionEntriesInput): No
   });
 }
 
+export async function rebuildNoteSectionEntries(
+  engine: BrainEngine,
+  input: { scope_id?: string; page_slug?: string } = {},
+): Promise<NoteSectionEntry[]> {
+  const scopeId = input.scope_id ?? DEFAULT_NOTE_MANIFEST_SCOPE_ID;
+  const pages = input.page_slug
+    ? [await requirePage(engine, input.page_slug)]
+    : await listAllPages(engine);
+
+  const rebuilt: NoteSectionEntry[] = [];
+  for (const page of pages) {
+    const manifest = await engine.getNoteManifestEntry(scopeId, page.slug);
+    if (!manifest) continue;
+
+    const entries = await engine.replaceNoteSectionEntries(
+      scopeId,
+      page.slug,
+      buildNoteSectionEntries({
+        scope_id: scopeId,
+        page_id: page.id,
+        page_slug: page.slug,
+        page_path: manifest.path,
+        page,
+        manifest,
+      }),
+    );
+    rebuilt.push(...entries);
+  }
+
+  return rebuilt;
+}
+
 function joinCanonicalBody(compiledTruth: string, timeline: string): string {
   if (!timeline.trim()) return compiledTruth;
   return `${compiledTruth}\n\n---\n\n${timeline}`;
@@ -123,4 +156,26 @@ function uniqueStrings(values: string[]): string[] {
   }
 
   return result;
+}
+
+async function requirePage(engine: BrainEngine, slug: string): Promise<Page> {
+  const page = await engine.getPage(slug);
+  if (!page) {
+    throw new Error(`Page not found: ${slug}`);
+  }
+  return page;
+}
+
+async function listAllPages(engine: BrainEngine, batchSize = 500): Promise<Page[]> {
+  const pages: Page[] = [];
+
+  for (let offset = 0; ; offset += batchSize) {
+    const batch = await engine.listPages({ limit: batchSize, offset });
+    pages.push(...batch);
+    if (batch.length < batchSize) {
+      break;
+    }
+  }
+
+  return pages;
 }

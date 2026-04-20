@@ -12,6 +12,7 @@ import { serializeMarkdown } from './markdown.ts';
 import { hybridSearch } from './search/hybrid.ts';
 import { expandQuery } from './search/expansion.ts';
 import { DEFAULT_NOTE_MANIFEST_SCOPE_ID, rebuildNoteManifestEntries } from './services/note-manifest-service.ts';
+import { rebuildNoteSectionEntries } from './services/note-section-service.ts';
 import { buildTaskResumeCard } from './services/task-memory-service.ts';
 import * as db from './db.ts';
 import { getUnsupportedCapabilityReason } from './offline-profile.ts';
@@ -341,6 +342,43 @@ export function formatResult(
       return [
         `Rebuilt ${rebuild.rebuilt} note manifest entr${rebuild.rebuilt === 1 ? 'y' : 'ies'}.`,
         `Slugs: ${(rebuild.slugs || []).join(', ') || 'none'}`,
+      ].join('\n') + '\n';
+    }
+    case 'get_note_section_entry': {
+      const entry = result as any;
+      return [
+        `${entry.heading_text} [depth ${entry.depth}]`,
+        `Section: ${entry.section_id}`,
+        `Page: ${entry.page_slug}`,
+        `Path: ${entry.page_path}`,
+        `Scope: ${entry.scope_id}`,
+        `Heading path: ${(entry.heading_path || []).join(' / ') || 'none'}`,
+        `Parent: ${entry.parent_section_id || 'none'}`,
+        `Line range: ${entry.line_start}-${entry.line_end}`,
+        `Wiki links: ${(entry.outgoing_wikilinks || []).join(', ') || 'none'}`,
+        `URLs: ${(entry.outgoing_urls || []).join(', ') || 'none'}`,
+        `Source refs: ${(entry.source_refs || []).join(', ') || 'none'}`,
+        `Extractor: ${entry.extractor_version}`,
+        `Last indexed: ${new Date(entry.last_indexed_at).toISOString()}`,
+      ].join('\n') + '\n';
+    }
+    case 'list_note_section_entries': {
+      const entries = result as any[];
+      if (entries.length === 0) return 'No note section entries.\n';
+      const rows = entries.map((entry) =>
+        `${entry.section_id}\t${entry.line_start}-${entry.line_end}\t${entry.heading_text}`,
+      ).join('\n') + '\n';
+      const requestedLimit = (params.limit as number) ?? 50;
+      if (entries.length >= requestedLimit) {
+        return rows + `\n(result may be truncated at ${requestedLimit}; pass --limit N or -n N to change)\n`;
+      }
+      return rows;
+    }
+    case 'rebuild_note_sections': {
+      const rebuild = result as any;
+      return [
+        `Rebuilt ${rebuild.rebuilt} note section entr${rebuild.rebuilt === 1 ? 'y' : 'ies'}.`,
+        `Sections: ${(rebuild.section_ids || []).join(', ') || 'none'}`,
       ].join('\n') + '\n';
     }
     case 'search':
@@ -1148,6 +1186,87 @@ const rebuild_note_manifest: Operation = {
   cliHints: { name: 'manifest-rebuild' },
 };
 
+const get_note_section_entry: Operation = {
+  name: 'get_note_section_entry',
+  description: 'Get one derived note-section entry by scope and section id.',
+  params: {
+    section_id: { type: 'string', required: true, description: 'Durable section id.' },
+    scope_id: { type: 'string', description: 'Section scope id (default: workspace:default)' },
+  },
+  handler: async (ctx, p) => {
+    const scopeId = String(p.scope_id ?? DEFAULT_NOTE_MANIFEST_SCOPE_ID);
+    const sectionId = String(p.section_id);
+    const entry = await ctx.engine.getNoteSectionEntry(scopeId, sectionId);
+    if (!entry) {
+      throw new OperationError(
+        'page_not_found',
+        `Section not found: ${sectionId}`,
+        'Run section-rebuild for the page, or verify the section id.',
+      );
+    }
+    return entry;
+  },
+  cliHints: { name: 'section-get', positional: ['section_id'] },
+};
+
+const list_note_section_entries: Operation = {
+  name: 'list_note_section_entries',
+  description: 'List derived note-section entries for structural inspection.',
+  params: {
+    page_slug: { type: 'string', required: true, description: 'Canonical page slug' },
+    scope_id: { type: 'string', description: 'Section scope id (default: workspace:default)' },
+    limit: { type: 'number', description: 'Max results (default 50)' },
+  },
+  handler: async (ctx, p) => {
+    return ctx.engine.listNoteSectionEntries({
+      scope_id: String(p.scope_id ?? DEFAULT_NOTE_MANIFEST_SCOPE_ID),
+      page_slug: String(p.page_slug),
+      limit: (p.limit as number) ?? 50,
+    });
+  },
+  cliHints: { name: 'section-list', positional: ['page_slug'], aliases: { n: 'limit' } },
+};
+
+const rebuild_note_sections: Operation = {
+  name: 'rebuild_note_sections',
+  description: 'Rebuild derived note-section rows from canonical page state.',
+  params: {
+    page_slug: { type: 'string', description: 'Optional slug to rebuild a single page' },
+    scope_id: { type: 'string', description: 'Section scope id (default: workspace:default)' },
+  },
+  mutating: true,
+  handler: async (ctx, p) => {
+    const scopeId = String(p.scope_id ?? DEFAULT_NOTE_MANIFEST_SCOPE_ID);
+    const pageSlug = typeof p.page_slug === 'string' ? p.page_slug : undefined;
+
+    if (ctx.dryRun) {
+      return { dry_run: true, action: 'rebuild_note_sections', scope_id: scopeId, page_slug: pageSlug ?? null };
+    }
+
+    try {
+      const entries = await rebuildNoteSectionEntries(ctx.engine, {
+        scope_id: scopeId,
+        page_slug: pageSlug,
+      });
+      return {
+        scope_id: scopeId,
+        rebuilt: entries.length,
+        section_ids: entries.map((entry) => entry.section_id),
+      };
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith('Page not found:')) {
+        throw new OperationError(
+          'page_not_found',
+          error.message,
+          'Check the slug or omit it to rebuild all section entries.',
+        );
+      }
+      throw error;
+    }
+  },
+  cliHints: { name: 'section-rebuild' },
+};
+
 const record_retrieval_trace: Operation = {
   name: 'record_retrieval_trace',
   description: 'Record a retrieval trace for a task-scoped operational-memory flow.',
@@ -1621,6 +1740,8 @@ export const operations: Operation[] = [
   resolve_slugs, get_chunks,
   // Note manifest
   get_note_manifest_entry, list_note_manifest_entries, rebuild_note_manifest,
+  // Note sections
+  get_note_section_entry, list_note_section_entries, rebuild_note_sections,
   // Operational memory
   list_tasks, start_task, update_task, resume_task, get_task_working_set, record_retrieval_trace, list_task_traces, list_task_attempts, list_task_decisions, refresh_task_working_set, record_attempt, record_decision,
   // Ingest log

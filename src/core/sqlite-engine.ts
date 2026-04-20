@@ -252,6 +252,33 @@ CREATE INDEX IF NOT EXISTS idx_note_manifest_scope_slug
 CREATE INDEX IF NOT EXISTS idx_note_manifest_scope_indexed
   ON note_manifest_entries(scope_id, last_indexed_at DESC);
 
+CREATE TABLE IF NOT EXISTS note_section_entries (
+  scope_id TEXT NOT NULL,
+  page_id INTEGER NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+  page_slug TEXT NOT NULL,
+  page_path TEXT NOT NULL,
+  section_id TEXT NOT NULL,
+  parent_section_id TEXT,
+  heading_slug TEXT NOT NULL,
+  heading_path TEXT NOT NULL DEFAULT '[]',
+  heading_text TEXT NOT NULL,
+  depth INTEGER NOT NULL,
+  line_start INTEGER NOT NULL,
+  line_end INTEGER NOT NULL,
+  section_text TEXT NOT NULL,
+  outgoing_wikilinks TEXT NOT NULL DEFAULT '[]',
+  outgoing_urls TEXT NOT NULL DEFAULT '[]',
+  source_refs TEXT NOT NULL DEFAULT '[]',
+  content_hash TEXT NOT NULL,
+  extractor_version TEXT NOT NULL,
+  last_indexed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  PRIMARY KEY (scope_id, section_id)
+);
+CREATE INDEX IF NOT EXISTS idx_note_sections_scope_page
+  ON note_section_entries(scope_id, page_slug, line_start);
+CREATE INDEX IF NOT EXISTS idx_note_sections_scope_indexed
+  ON note_section_entries(scope_id, last_indexed_at DESC);
+
 CREATE TABLE IF NOT EXISTS access_tokens (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -1536,6 +1563,36 @@ export class SQLiteEngine implements BrainEngine {
               ON note_manifest_entries(scope_id, slug);
             CREATE INDEX IF NOT EXISTS idx_note_manifest_scope_indexed
               ON note_manifest_entries(scope_id, last_indexed_at DESC);
+          `);
+          break;
+        case 10:
+          this.database.exec(`
+            CREATE TABLE IF NOT EXISTS note_section_entries (
+              scope_id TEXT NOT NULL,
+              page_id INTEGER NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+              page_slug TEXT NOT NULL,
+              page_path TEXT NOT NULL,
+              section_id TEXT NOT NULL,
+              parent_section_id TEXT,
+              heading_slug TEXT NOT NULL,
+              heading_path TEXT NOT NULL DEFAULT '[]',
+              heading_text TEXT NOT NULL,
+              depth INTEGER NOT NULL,
+              line_start INTEGER NOT NULL,
+              line_end INTEGER NOT NULL,
+              section_text TEXT NOT NULL,
+              outgoing_wikilinks TEXT NOT NULL DEFAULT '[]',
+              outgoing_urls TEXT NOT NULL DEFAULT '[]',
+              source_refs TEXT NOT NULL DEFAULT '[]',
+              content_hash TEXT NOT NULL,
+              extractor_version TEXT NOT NULL,
+              last_indexed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+              PRIMARY KEY (scope_id, section_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_note_sections_scope_page
+              ON note_section_entries(scope_id, page_slug, line_start);
+            CREATE INDEX IF NOT EXISTS idx_note_sections_scope_indexed
+              ON note_section_entries(scope_id, last_indexed_at DESC);
           `);
           break;
       }

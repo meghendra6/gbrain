@@ -120,6 +120,56 @@ export interface NoteManifestFilters {
   limit?: number;
 }
 
+export interface NoteSectionEntry {
+  scope_id: string;
+  page_id: number;
+  page_slug: string;
+  page_path: string;
+  section_id: string;
+  parent_section_id: string | null;
+  heading_slug: string;
+  heading_path: string[];
+  heading_text: string;
+  depth: number;
+  line_start: number;
+  line_end: number;
+  section_text: string;
+  outgoing_wikilinks: string[];
+  outgoing_urls: string[];
+  source_refs: string[];
+  content_hash: string;
+  extractor_version: string;
+  last_indexed_at: Date;
+}
+
+export interface NoteSectionEntryInput {
+  scope_id: string;
+  page_id: number;
+  page_slug: string;
+  page_path: string;
+  section_id: string;
+  parent_section_id: string | null;
+  heading_slug: string;
+  heading_path: string[];
+  heading_text: string;
+  depth: number;
+  line_start: number;
+  line_end: number;
+  section_text: string;
+  outgoing_wikilinks: string[];
+  outgoing_urls: string[];
+  source_refs: string[];
+  content_hash: string;
+  extractor_version: string;
+}
+
+export interface NoteSectionFilters {
+  scope_id?: string;
+  page_slug?: string;
+  section_id?: string;
+  limit?: number;
+}
+
 // Chunks
 export interface Chunk {
   id: number;

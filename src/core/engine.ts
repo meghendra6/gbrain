@@ -3,6 +3,9 @@ import type {
   NoteManifestEntry,
   NoteManifestEntryInput,
   NoteManifestFilters,
+  NoteSectionEntry,
+  NoteSectionEntryInput,
+  NoteSectionFilters,
   Chunk, ChunkInput,
   SearchResult, SearchOpts,
   Link, GraphNode,
@@ -107,6 +110,16 @@ export interface BrainEngine {
   getNoteManifestEntry(scopeId: string, slug: string): Promise<NoteManifestEntry | null>;
   listNoteManifestEntries(filters?: NoteManifestFilters): Promise<NoteManifestEntry[]>;
   deleteNoteManifestEntry(scopeId: string, slug: string): Promise<void>;
+
+  // Note sections
+  replaceNoteSectionEntries(
+    scopeId: string,
+    pageSlug: string,
+    entries: NoteSectionEntryInput[],
+  ): Promise<NoteSectionEntry[]>;
+  getNoteSectionEntry(scopeId: string, sectionId: string): Promise<NoteSectionEntry | null>;
+  listNoteSectionEntries(filters?: NoteSectionFilters): Promise<NoteSectionEntry[]>;
+  deleteNoteSectionEntries(scopeId: string, pageSlug: string): Promise<void>;
 
   // Sync
   updateSlug(oldSlug: string, newSlug: string): Promise<void>;

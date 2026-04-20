@@ -226,6 +226,37 @@ CREATE INDEX IF NOT EXISTS idx_note_manifest_scope_indexed
   ON note_manifest_entries(scope_id, last_indexed_at DESC);
 
 -- ============================================================
+-- note_section_entries: deterministic section-level extraction cache
+-- ============================================================
+CREATE TABLE IF NOT EXISTS note_section_entries (
+  scope_id           TEXT NOT NULL,
+  page_id            INTEGER NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+  page_slug          TEXT NOT NULL,
+  page_path          TEXT NOT NULL,
+  section_id         TEXT NOT NULL,
+  parent_section_id  TEXT,
+  heading_slug       TEXT NOT NULL,
+  heading_path       JSONB NOT NULL DEFAULT '[]',
+  heading_text       TEXT NOT NULL,
+  depth              INTEGER NOT NULL,
+  line_start         INTEGER NOT NULL,
+  line_end           INTEGER NOT NULL,
+  section_text       TEXT NOT NULL,
+  outgoing_wikilinks JSONB NOT NULL DEFAULT '[]',
+  outgoing_urls      JSONB NOT NULL DEFAULT '[]',
+  source_refs        JSONB NOT NULL DEFAULT '[]',
+  content_hash       TEXT NOT NULL,
+  extractor_version  TEXT NOT NULL,
+  last_indexed_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (scope_id, section_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_note_sections_scope_page
+  ON note_section_entries(scope_id, page_slug, line_start);
+CREATE INDEX IF NOT EXISTS idx_note_sections_scope_indexed
+  ON note_section_entries(scope_id, last_indexed_at DESC);
+
+-- ============================================================
 -- config: brain-level settings
 -- ============================================================
 CREATE TABLE IF NOT EXISTS config (

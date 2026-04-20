@@ -15,6 +15,7 @@ import {
   buildStructuralContextAtlasEntry,
   getStructuralContextAtlasEntry,
   listStructuralContextAtlasEntries,
+  selectStructuralContextAtlasEntry,
 } from './services/context-atlas-service.ts';
 import {
   buildStructuralContextMapEntry,
@@ -486,6 +487,26 @@ export function formatResult(
         return rows + `\n(result may be truncated at ${requestedLimit}; pass --limit N or -n N to change)\n`;
       }
       return rows;
+    }
+    case 'select_context_atlas_entry': {
+      const selection = result as any;
+      if (!selection.entry) {
+        return [
+          'No context atlas entry selected.',
+          `Reason: ${selection.reason}`,
+          `Candidates: ${selection.candidate_count}`,
+        ].join('\n') + '\n';
+      }
+      const atlas = selection.entry;
+      return [
+        `Selected context atlas: ${atlas.id}`,
+        `Reason: ${selection.reason}`,
+        `Candidates: ${selection.candidate_count}`,
+        `Map: ${atlas.map_id}`,
+        `Scope: ${atlas.scope_id}`,
+        `Freshness: ${atlas.freshness}`,
+        `Budget hint: ${atlas.budget_hint}`,
+      ].join('\n') + '\n';
     }
     case 'search':
     case 'query': {
@@ -1543,6 +1564,26 @@ const list_context_atlas_entries: Operation = {
   cliHints: { name: 'atlas-list', aliases: { n: 'limit' } },
 };
 
+const select_context_atlas_entry: Operation = {
+  name: 'select_context_atlas_entry',
+  description: 'Select the best persisted atlas registry entry for a scope.',
+  params: {
+    scope_id: { type: 'string', description: 'Atlas scope id (default: workspace:default)' },
+    kind: { type: 'string', description: 'Optional atlas kind filter' },
+    max_budget_hint: { type: 'number', description: 'Optional maximum allowed budget hint' },
+    allow_stale: { type: 'boolean', description: 'Allow stale atlas entries when no fresh match exists' },
+  },
+  handler: async (ctx, p) => {
+    return selectStructuralContextAtlasEntry(ctx.engine, {
+      scope_id: String(p.scope_id ?? DEFAULT_NOTE_MANIFEST_SCOPE_ID),
+      kind: p.kind as string | undefined,
+      max_budget_hint: typeof p.max_budget_hint === 'number' ? p.max_budget_hint : undefined,
+      allow_stale: p.allow_stale === true,
+    });
+  },
+  cliHints: { name: 'atlas-select' },
+};
+
 const record_retrieval_trace: Operation = {
   name: 'record_retrieval_trace',
   description: 'Record a retrieval trace for a task-scoped operational-memory flow.',
@@ -2023,7 +2064,7 @@ export const operations: Operation[] = [
   // Persisted context maps
   build_context_map, get_context_map_entry, list_context_map_entries,
   // Context atlas registry
-  build_context_atlas, get_context_atlas_entry, list_context_atlas_entries,
+  build_context_atlas, get_context_atlas_entry, list_context_atlas_entries, select_context_atlas_entry,
   // Operational memory
   list_tasks, start_task, update_task, resume_task, get_task_working_set, record_retrieval_trace, list_task_traces, list_task_attempts, list_task_decisions, refresh_task_working_set, record_attempt, record_decision,
   // Ingest log

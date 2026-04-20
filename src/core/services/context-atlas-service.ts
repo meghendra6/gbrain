@@ -1,5 +1,11 @@
 import type { BrainEngine } from '../engine.ts';
-import type { ContextAtlasEntry, ContextAtlasFilters, ContextMapEntry } from '../types.ts';
+import type {
+  ContextAtlasEntry,
+  ContextAtlasFilters,
+  ContextAtlasSelection,
+  ContextAtlasSelectionInput,
+  ContextMapEntry,
+} from '../types.ts';
 import {
   buildStructuralContextMapEntry,
   getStructuralContextMapEntry,
@@ -59,6 +65,57 @@ export async function listStructuralContextAtlasEntries(
   return Promise.all(entries.map((entry) => annotateAtlasFreshness(engine, entry)));
 }
 
+export async function selectStructuralContextAtlasEntry(
+  engine: BrainEngine,
+  input: ContextAtlasSelectionInput = {},
+): Promise<ContextAtlasSelection> {
+  const scopeId = input.scope_id ?? DEFAULT_NOTE_MANIFEST_SCOPE_ID;
+  const entries = await listStructuralContextAtlasEntries(engine, {
+    scope_id: scopeId,
+    kind: input.kind,
+    limit: 100,
+  });
+
+  if (entries.length === 0) {
+    return {
+      entry: null,
+      reason: 'no_match',
+      candidate_count: 0,
+    };
+  }
+
+  const freshnessEligible = input.allow_stale
+    ? entries
+    : entries.filter((entry) => entry.freshness === 'fresh');
+
+  if (freshnessEligible.length === 0) {
+    return {
+      entry: null,
+      reason: 'no_fresh_match',
+      candidate_count: entries.length,
+    };
+  }
+
+  const budgetEligible = typeof input.max_budget_hint === 'number'
+    ? freshnessEligible.filter((entry) => entry.budget_hint <= input.max_budget_hint!)
+    : freshnessEligible;
+
+  if (budgetEligible.length === 0) {
+    return {
+      entry: null,
+      reason: 'no_budget_fit',
+      candidate_count: entries.length,
+    };
+  }
+
+  const [entry] = [...budgetEligible].sort(compareAtlasEntries);
+  return {
+    entry,
+    reason: entry.freshness === 'fresh' ? 'selected_fresh_match' : 'selected_stale_match',
+    candidate_count: entries.length,
+  };
+}
+
 async function annotateAtlasFreshness(
   engine: BrainEngine,
   entry: ContextAtlasEntry,
@@ -99,4 +156,10 @@ function deriveEntryPoints(entry: ContextMapEntry): string[] {
     .map((node) => String(node.node_id))
     .sort((left, right) => left.localeCompare(right))
     .slice(0, ATLAS_ENTRYPOINT_LIMIT);
+}
+
+function compareAtlasEntries(left: ContextAtlasEntry, right: ContextAtlasEntry): number {
+  const generatedDelta = new Date(right.generated_at).getTime() - new Date(left.generated_at).getTime();
+  if (generatedDelta !== 0) return generatedDelta;
+  return left.id.localeCompare(right.id);
 }

@@ -238,6 +238,19 @@ export interface ContextAtlasFilters {
   limit?: number;
 }
 
+export interface ContextAtlasSelectionInput {
+  scope_id?: string;
+  kind?: string;
+  max_budget_hint?: number;
+  allow_stale?: boolean;
+}
+
+export interface ContextAtlasSelection {
+  entry: ContextAtlasEntry | null;
+  reason: string;
+  candidate_count: number;
+}
+
 // Chunks
 export interface Chunk {
   id: number;

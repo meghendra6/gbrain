@@ -266,6 +266,24 @@ Expected:
 - `acceptance.readiness_status` reports `pass` or `fail` from the local guardrails
 - `acceptance.phase2_status` matches the local guardrail outcome without requiring an external baseline artifact
 
+## Phase 2 context-atlas selection
+
+Run:
+
+```bash
+bun test test/context-atlas-service.test.ts test/context-atlas-operations.test.ts test/phase2-context-atlas-select.test.ts
+bun test test/cli.test.ts -t "atlas-select --help"
+bun run bench:phase2-context-atlas-select --json
+```
+
+Expected:
+
+- selection returns deterministic outcomes for fresh, stale, and over-budget cases
+- `atlas-select` stays available through the shared operation surface
+- benchmark reports `context_atlas_select` and `context_atlas_select_correctness`
+- `acceptance.readiness_status` reports `pass` or `fail` from the local guardrails
+- `acceptance.phase2_status` matches the local guardrail outcome without introducing an external baseline artifact
+
 ---
 
 ## 2. Skillpack Loaded

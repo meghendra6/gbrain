@@ -10,6 +10,7 @@ import {
   buildStructuralContextAtlasEntry,
   getStructuralContextAtlasEntry,
   listStructuralContextAtlasEntries,
+  selectStructuralContextAtlasEntry,
   workspaceContextAtlasId,
 } from '../src/core/services/context-atlas-service.ts';
 
@@ -107,6 +108,98 @@ test('context-atlas service mirrors context-map staleness until atlas rebuild', 
 
     const refreshed = await getStructuralContextAtlasEntry(engine, id);
     expect(refreshed?.freshness).toBe('fresh');
+  } finally {
+    await engine.disconnect();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('context-atlas service selects entries with deterministic freshness and budget rules', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mbrain-context-atlas-select-'));
+  const databasePath = join(dir, 'brain.db');
+  const engine = new SQLiteEngine();
+
+  try {
+    await engine.connect({ engine: 'sqlite', database_path: databasePath });
+    await engine.initSchema();
+
+    const currentMap = await buildStructuralContextMapEntry(engine);
+    const currentSourceSetHash = currentMap.source_set_hash;
+
+    await engine.upsertContextMapEntry({
+      id: 'context-map:workspace:workspace:default:project:fresh',
+      scope_id: 'workspace:default',
+      kind: 'project',
+      title: 'Fresh Project Map',
+      build_mode: 'structural',
+      status: 'ready',
+      source_set_hash: currentSourceSetHash,
+      extractor_version: 'phase2-context-map-v1',
+      node_count: 1,
+      edge_count: 0,
+      community_count: 0,
+      graph_json: { nodes: [], edges: [] },
+    });
+    await engine.upsertContextMapEntry({
+      id: 'context-map:workspace:workspace:default:project:stale',
+      scope_id: 'workspace:default',
+      kind: 'project',
+      title: 'Stale Project Map',
+      build_mode: 'structural',
+      status: 'stale',
+      source_set_hash: 'stale-project',
+      extractor_version: 'phase2-context-map-v1',
+      node_count: 1,
+      edge_count: 0,
+      community_count: 0,
+      graph_json: { nodes: [], edges: [] },
+    });
+
+    await engine.upsertContextAtlasEntry({
+      id: 'context-atlas:project:workspace:default:fresh',
+      map_id: 'context-map:workspace:workspace:default:project:fresh',
+      scope_id: 'workspace:default',
+      kind: 'project',
+      title: 'Fresh Project Atlas',
+      freshness: 'fresh',
+      entrypoints: ['page:systems/mbrain'],
+      budget_hint: 4,
+    });
+    await engine.upsertContextAtlasEntry({
+      id: 'context-atlas:project:workspace:default:stale',
+      map_id: 'context-map:workspace:workspace:default:project:stale',
+      scope_id: 'workspace:default',
+      kind: 'project',
+      title: 'Stale Project Atlas',
+      freshness: 'stale',
+      entrypoints: ['page:concepts/note-manifest'],
+      budget_hint: 2,
+    });
+
+    const freshOnly = await selectStructuralContextAtlasEntry(engine, {
+      scope_id: 'workspace:default',
+      kind: 'project',
+    });
+    expect(freshOnly.reason).toBe('selected_fresh_match');
+    expect(freshOnly.candidate_count).toBe(2);
+    expect(freshOnly.entry?.id).toBe('context-atlas:project:workspace:default:fresh');
+
+    const overBudget = await selectStructuralContextAtlasEntry(engine, {
+      scope_id: 'workspace:default',
+      kind: 'project',
+      max_budget_hint: 2,
+    });
+    expect(overBudget.reason).toBe('no_budget_fit');
+    expect(overBudget.entry).toBeNull();
+
+    const staleAllowed = await selectStructuralContextAtlasEntry(engine, {
+      scope_id: 'workspace:default',
+      kind: 'project',
+      max_budget_hint: 2,
+      allow_stale: true,
+    });
+    expect(staleAllowed.reason).toBe('selected_stale_match');
+    expect(staleAllowed.entry?.id).toBe('context-atlas:project:workspace:default:stale');
   } finally {
     await engine.disconnect();
     rmSync(dir, { recursive: true, force: true });

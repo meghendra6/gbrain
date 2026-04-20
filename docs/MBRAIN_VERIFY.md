@@ -207,12 +207,13 @@ Expected:
 Run:
 
 ```bash
-bun test test/context-map-schema.test.ts test/context-map-service.test.ts test/context-map-operations.test.ts test/phase2-context-map.test.ts
+bun test test/context-map-schema.test.ts test/context-map-engine.test.ts test/context-map-service.test.ts test/context-map-operations.test.ts test/phase2-context-map.test.ts
 ```
 
 Expected:
 
 - context-map schema and persisted builder coverage pass on the local sqlite/pglite path
+- engine CRUD persists context-map rows across reopen
 - `map-build`, `map-get`, and `map-list` stay available through the shared operation surface
 - persisted workspace maps are rebuildable from existing manifest and section rows
 

@@ -4,6 +4,7 @@ import { buildFrontmatterSearchText, parseMarkdown } from './markdown.ts';
 import { chunkText } from './chunkers/recursive.ts';
 import { estimateTokenCount } from './embedding.ts';
 import { buildNoteManifestEntry } from './services/note-manifest-service.ts';
+import { buildNoteSectionEntries } from './services/note-section-service.ts';
 import { slugifyPath } from './sync.ts';
 import type { ChunkInput } from './types.ts';
 import { importContentHash, validateSlug } from './utils.ts';
@@ -76,7 +77,7 @@ export async function importFromContent(
 
     await tx.deleteChunks(slug);
     await tx.upsertChunks(slug, chunks);
-    await tx.upsertNoteManifestEntry(buildNoteManifestEntry({
+    const manifest = await tx.upsertNoteManifestEntry(buildNoteManifestEntry({
       page_id: storedPage.id,
       slug: storedPage.slug,
       path: manifestPath,
@@ -91,6 +92,25 @@ export async function importFromContent(
         content_hash: storedPage.content_hash,
       },
     }));
+    await tx.replaceNoteSectionEntries(
+      manifest.scope_id,
+      manifest.slug,
+      buildNoteSectionEntries({
+        scope_id: manifest.scope_id,
+        page_id: storedPage.id,
+        page_slug: storedPage.slug,
+        page_path: manifest.path,
+        page: {
+          type: storedPage.type,
+          title: storedPage.title,
+          compiled_truth: storedPage.compiled_truth,
+          timeline: storedPage.timeline,
+          frontmatter: storedPage.frontmatter,
+          content_hash: storedPage.content_hash,
+        },
+        manifest,
+      }),
+    );
   });
 
   return { slug, status: 'imported', chunks: chunks.length };

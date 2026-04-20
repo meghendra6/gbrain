@@ -4,6 +4,7 @@ import type {
   PageType,
   NoteManifestEntry,
   NoteManifestHeading,
+  NoteSectionEntry,
   Chunk,
   SearchResult,
   TaskAttempt,
@@ -130,6 +131,30 @@ export function rowToNoteManifestEntry(row: Record<string, unknown>): NoteManife
     outgoing_urls: parseJsonStringArray(row.outgoing_urls),
     source_refs: parseJsonStringArray(row.source_refs),
     heading_index: parseNoteManifestHeadings(row.heading_index),
+    content_hash: row.content_hash as string,
+    extractor_version: row.extractor_version as string,
+    last_indexed_at: new Date(row.last_indexed_at as string),
+  };
+}
+
+export function rowToNoteSectionEntry(row: Record<string, unknown>): NoteSectionEntry {
+  return {
+    scope_id: row.scope_id as string,
+    page_id: Number(row.page_id),
+    page_slug: row.page_slug as string,
+    page_path: row.page_path as string,
+    section_id: row.section_id as string,
+    parent_section_id: row.parent_section_id == null ? null : String(row.parent_section_id),
+    heading_slug: row.heading_slug as string,
+    heading_path: parseJsonStringArray(row.heading_path),
+    heading_text: row.heading_text as string,
+    depth: Number(row.depth),
+    line_start: Number(row.line_start),
+    line_end: Number(row.line_end),
+    section_text: row.section_text as string,
+    outgoing_wikilinks: parseJsonStringArray(row.outgoing_wikilinks),
+    outgoing_urls: parseJsonStringArray(row.outgoing_urls),
+    source_refs: parseJsonStringArray(row.source_refs),
     content_hash: row.content_hash as string,
     extractor_version: row.extractor_version as string,
     last_indexed_at: new Date(row.last_indexed_at as string),

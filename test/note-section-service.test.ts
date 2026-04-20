@@ -38,7 +38,10 @@ describe('note section service', () => {
       page_slug: 'concepts/section-projection',
       page_path: 'concepts/section-projection.md',
       page,
-      manifest,
+      manifest: {
+        ...manifest,
+        last_indexed_at: new Date('2026-04-20T08:00:00.000Z'),
+      },
     });
 
     expect(sections.map((entry) => entry.section_id)).toEqual([

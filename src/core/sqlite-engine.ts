@@ -15,6 +15,9 @@ import type {
   NoteManifestEntryInput,
   NoteManifestFilters,
   NoteManifestHeading,
+  NoteSectionEntry,
+  NoteSectionEntryInput,
+  NoteSectionFilters,
   Chunk, ChunkInput,
   SearchResult, SearchOpts,
   Link, GraphNode,
@@ -1353,6 +1356,107 @@ export class SQLiteEngine implements BrainEngine {
     );
   }
 
+  async replaceNoteSectionEntries(
+    scopeId: string,
+    pageSlug: string,
+    entries: NoteSectionEntryInput[],
+  ): Promise<NoteSectionEntry[]> {
+    const normalizedSlug = validateSlug(pageSlug);
+    this.database.run(
+      `DELETE FROM note_section_entries WHERE scope_id = ? AND page_slug = ?`,
+      [scopeId, normalizedSlug],
+    );
+
+    const insert = this.database.query(`
+      INSERT INTO note_section_entries (
+        scope_id, page_id, page_slug, page_path, section_id, parent_section_id, heading_slug,
+        heading_path, heading_text, depth, line_start, line_end, section_text,
+        outgoing_wikilinks, outgoing_urls, source_refs, content_hash, extractor_version, last_indexed_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const timestamp = nowIso();
+
+    for (const entry of entries) {
+      insert.run([
+        scopeId,
+        entry.page_id,
+        validateSlug(entry.page_slug),
+        entry.page_path,
+        entry.section_id,
+        entry.parent_section_id,
+        entry.heading_slug,
+        JSON.stringify(entry.heading_path ?? []),
+        entry.heading_text,
+        entry.depth,
+        entry.line_start,
+        entry.line_end,
+        entry.section_text,
+        JSON.stringify(entry.outgoing_wikilinks ?? []),
+        JSON.stringify(entry.outgoing_urls ?? []),
+        JSON.stringify(entry.source_refs ?? []),
+        entry.content_hash,
+        entry.extractor_version,
+        timestamp,
+      ]);
+    }
+
+    return this.listNoteSectionEntries({
+      scope_id: scopeId,
+      page_slug: normalizedSlug,
+      limit: Math.max(entries.length, 1),
+    });
+  }
+
+  async getNoteSectionEntry(scopeId: string, sectionId: string): Promise<NoteSectionEntry | null> {
+    const row = this.database.query(`
+      SELECT scope_id, page_id, page_slug, page_path, section_id, parent_section_id, heading_slug,
+             heading_path, heading_text, depth, line_start, line_end, section_text,
+             outgoing_wikilinks, outgoing_urls, source_refs, content_hash, extractor_version, last_indexed_at
+      FROM note_section_entries
+      WHERE scope_id = ? AND section_id = ?
+    `).get(scopeId, sectionId) as Record<string, unknown> | null;
+    return row ? rowToNoteSectionEntry(row) : null;
+  }
+
+  async listNoteSectionEntries(filters?: NoteSectionFilters): Promise<NoteSectionEntry[]> {
+    const limit = filters?.limit ?? 100;
+    const clauses: string[] = [];
+    const params: unknown[] = [];
+
+    if (filters?.scope_id) {
+      clauses.push('scope_id = ?');
+      params.push(filters.scope_id);
+    }
+    if (filters?.page_slug) {
+      clauses.push('page_slug = ?');
+      params.push(validateSlug(filters.page_slug));
+    }
+    if (filters?.section_id) {
+      clauses.push('section_id = ?');
+      params.push(filters.section_id);
+    }
+
+    params.push(limit);
+    const whereClause = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+    const rows = this.database.query(`
+      SELECT scope_id, page_id, page_slug, page_path, section_id, parent_section_id, heading_slug,
+             heading_path, heading_text, depth, line_start, line_end, section_text,
+             outgoing_wikilinks, outgoing_urls, source_refs, content_hash, extractor_version, last_indexed_at
+      FROM note_section_entries
+      ${whereClause}
+      ORDER BY page_slug ASC, line_start ASC, section_id ASC
+      LIMIT ?
+    `).all(...params) as Record<string, unknown>[];
+    return rows.map(rowToNoteSectionEntry);
+  }
+
+  async deleteNoteSectionEntries(scopeId: string, pageSlug: string): Promise<void> {
+    this.database.run(
+      `DELETE FROM note_section_entries WHERE scope_id = ? AND page_slug = ?`,
+      [scopeId, validateSlug(pageSlug)],
+    );
+  }
+
   async updateSlug(oldSlug: string, newSlug: string): Promise<void> {
     this.database.run(`UPDATE pages SET slug = ?, updated_at = ? WHERE slug = ? OR lower(slug) = ?`, [
       validateSlug(newSlug),
@@ -2030,6 +2134,30 @@ function rowToNoteManifestEntry(row: Record<string, unknown>): NoteManifestEntry
     outgoing_urls: parseJsonArray(row.outgoing_urls),
     source_refs: parseJsonArray(row.source_refs),
     heading_index: parseNoteManifestHeadingArray(row.heading_index),
+    content_hash: String(row.content_hash),
+    extractor_version: String(row.extractor_version),
+    last_indexed_at: new Date(String(row.last_indexed_at)),
+  };
+}
+
+function rowToNoteSectionEntry(row: Record<string, unknown>): NoteSectionEntry {
+  return {
+    scope_id: String(row.scope_id),
+    page_id: Number(row.page_id),
+    page_slug: String(row.page_slug),
+    page_path: String(row.page_path),
+    section_id: String(row.section_id),
+    parent_section_id: row.parent_section_id == null ? null : String(row.parent_section_id),
+    heading_slug: String(row.heading_slug),
+    heading_path: parseJsonArray(row.heading_path),
+    heading_text: String(row.heading_text),
+    depth: Number(row.depth),
+    line_start: Number(row.line_start),
+    line_end: Number(row.line_end),
+    section_text: String(row.section_text),
+    outgoing_wikilinks: parseJsonArray(row.outgoing_wikilinks),
+    outgoing_urls: parseJsonArray(row.outgoing_urls),
+    source_refs: parseJsonArray(row.source_refs),
     content_hash: String(row.content_hash),
     extractor_version: String(row.extractor_version),
     last_indexed_at: new Date(String(row.last_indexed_at)),

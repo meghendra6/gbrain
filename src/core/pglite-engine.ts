@@ -14,6 +14,9 @@ import type {
   NoteManifestEntry,
   NoteManifestEntryInput,
   NoteManifestFilters,
+  NoteSectionEntry,
+  NoteSectionEntryInput,
+  NoteSectionFilters,
   Chunk, ChunkInput,
   SearchResult, SearchOpts,
   Link, GraphNode,
@@ -43,6 +46,7 @@ import {
   rowToPage,
   rowToChunk,
   rowToNoteManifestEntry,
+  rowToNoteSectionEntry,
   rowToSearchResult,
   rowToRetrievalTrace,
   rowToTaskAttempt,
@@ -1077,6 +1081,109 @@ export class PGLiteEngine implements BrainEngine {
     await this.db.query(
       `DELETE FROM note_manifest_entries WHERE scope_id = $1 AND slug = $2`,
       [scopeId, validateSlug(slug)],
+    );
+  }
+
+  async replaceNoteSectionEntries(
+    scopeId: string,
+    pageSlug: string,
+    entries: NoteSectionEntryInput[],
+  ): Promise<NoteSectionEntry[]> {
+    const normalizedSlug = validateSlug(pageSlug);
+    await this.db.query(
+      `DELETE FROM note_section_entries WHERE scope_id = $1 AND page_slug = $2`,
+      [scopeId, normalizedSlug],
+    );
+
+    const timestamp = new Date().toISOString();
+    for (const entry of entries) {
+      await this.db.query(
+        `INSERT INTO note_section_entries (
+          scope_id, page_id, page_slug, page_path, section_id, parent_section_id, heading_slug,
+          heading_path, heading_text, depth, line_start, line_end, section_text,
+          outgoing_wikilinks, outgoing_urls, source_refs, content_hash, extractor_version, last_indexed_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12, $13, $14::jsonb, $15::jsonb, $16::jsonb, $17, $18, $19)`,
+        [
+          scopeId,
+          entry.page_id,
+          validateSlug(entry.page_slug),
+          entry.page_path,
+          entry.section_id,
+          entry.parent_section_id ?? null,
+          entry.heading_slug,
+          JSON.stringify(entry.heading_path ?? []),
+          entry.heading_text,
+          entry.depth,
+          entry.line_start,
+          entry.line_end,
+          entry.section_text,
+          JSON.stringify(entry.outgoing_wikilinks ?? []),
+          JSON.stringify(entry.outgoing_urls ?? []),
+          JSON.stringify(entry.source_refs ?? []),
+          entry.content_hash,
+          entry.extractor_version,
+          timestamp,
+        ],
+      );
+    }
+
+    return this.listNoteSectionEntries({
+      scope_id: scopeId,
+      page_slug: normalizedSlug,
+      limit: Math.max(entries.length, 1),
+    });
+  }
+
+  async getNoteSectionEntry(scopeId: string, sectionId: string): Promise<NoteSectionEntry | null> {
+    const { rows } = await this.db.query(
+      `SELECT scope_id, page_id, page_slug, page_path, section_id, parent_section_id, heading_slug,
+              heading_path, heading_text, depth, line_start, line_end, section_text,
+              outgoing_wikilinks, outgoing_urls, source_refs, content_hash, extractor_version, last_indexed_at
+       FROM note_section_entries
+       WHERE scope_id = $1 AND section_id = $2`,
+      [scopeId, sectionId],
+    );
+    if (rows.length === 0) return null;
+    return rowToNoteSectionEntry(rows[0] as Record<string, unknown>);
+  }
+
+  async listNoteSectionEntries(filters?: NoteSectionFilters): Promise<NoteSectionEntry[]> {
+    const limit = filters?.limit ?? 100;
+    const params: unknown[] = [];
+    const clauses: string[] = [];
+
+    if (filters?.scope_id) {
+      params.push(filters.scope_id);
+      clauses.push(`scope_id = $${params.length}`);
+    }
+    if (filters?.page_slug) {
+      params.push(validateSlug(filters.page_slug));
+      clauses.push(`page_slug = $${params.length}`);
+    }
+    if (filters?.section_id) {
+      params.push(filters.section_id);
+      clauses.push(`section_id = $${params.length}`);
+    }
+
+    params.push(limit);
+    const whereClause = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+    const { rows } = await this.db.query(
+      `SELECT scope_id, page_id, page_slug, page_path, section_id, parent_section_id, heading_slug,
+              heading_path, heading_text, depth, line_start, line_end, section_text,
+              outgoing_wikilinks, outgoing_urls, source_refs, content_hash, extractor_version, last_indexed_at
+       FROM note_section_entries
+       ${whereClause}
+       ORDER BY page_slug ASC, line_start ASC, section_id ASC
+       LIMIT $${params.length}`,
+      params,
+    );
+    return (rows as Record<string, unknown>[]).map(rowToNoteSectionEntry);
+  }
+
+  async deleteNoteSectionEntries(scopeId: string, pageSlug: string): Promise<void> {
+    await this.db.query(
+      `DELETE FROM note_section_entries WHERE scope_id = $1 AND page_slug = $2`,
+      [scopeId, validateSlug(pageSlug)],
     );
   }
 

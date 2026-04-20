@@ -344,6 +344,29 @@ export interface WorkspaceSystemCardResult {
   card: WorkspaceSystemCard | null;
 }
 
+export interface WorkspaceProjectCard {
+  card_kind: 'workspace_project';
+  project_slug: string;
+  title: string;
+  path: string;
+  repo?: string;
+  status?: string;
+  related_systems: string[];
+  summary_lines: string[];
+}
+
+export interface WorkspaceProjectCardInput {
+  map_id?: string;
+  scope_id?: string;
+  kind?: string;
+}
+
+export interface WorkspaceProjectCardResult {
+  selection_reason: string;
+  candidate_count: number;
+  card: WorkspaceProjectCard | null;
+}
+
 // Chunks
 export interface Chunk {
   id: number;

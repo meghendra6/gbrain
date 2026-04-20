@@ -356,6 +356,24 @@ Expected:
 - `acceptance.readiness_status` reports `pass` or `fail` from the local guardrails
 - `acceptance.phase2_status` matches the local guardrail outcome without introducing an external baseline artifact
 
+## Phase 2 workspace-project-card
+
+Run:
+
+```bash
+bun test test/workspace-project-card-service.test.ts test/workspace-project-card-operations.test.ts test/phase2-workspace-project-card.test.ts
+bun test test/cli.test.ts -t "workspace-project-card --help"
+bun run bench:phase2-workspace-project-card --json
+```
+
+Expected:
+
+- workspace-project-card tests pass
+- `workspace-project-card` stays available through the shared operation surface
+- benchmark reports `workspace_project_card` and `workspace_project_card_correctness`
+- `acceptance.readiness_status` reports `pass` or `fail` from the local guardrails
+- `acceptance.phase2_status` matches the local guardrail outcome without introducing an external baseline artifact
+
 ---
 
 ## 2. Skillpack Loaded

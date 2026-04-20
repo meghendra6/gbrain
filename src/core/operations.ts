@@ -20,6 +20,7 @@ import {
 import { getStructuralContextAtlasOverview } from './services/context-atlas-overview-service.ts';
 import { getStructuralContextAtlasReport } from './services/context-atlas-report-service.ts';
 import { getStructuralContextMapReport } from './services/context-map-report-service.ts';
+import { getWorkspaceProjectCard } from './services/workspace-project-card-service.ts';
 import { getWorkspaceSystemCard } from './services/workspace-system-card-service.ts';
 import {
   buildStructuralContextMapEntry,
@@ -596,6 +597,29 @@ export function formatResult(
         `Test: ${card.test_command || 'unavailable'}`,
         'Entry points:',
         ...(card.entry_points || []).map((item: any) => `- ${item.name} | ${item.path} | ${item.purpose}`),
+      ].join('\n') + '\n';
+    }
+    case 'get_workspace_project_card': {
+      const resultValue = result as any;
+      if (!resultValue.card) {
+        return [
+          'No workspace project card available.',
+          `Reason: ${resultValue.selection_reason}`,
+          `Candidates: ${resultValue.candidate_count}`,
+        ].join('\n') + '\n';
+      }
+      const card = resultValue.card;
+      return [
+        `${card.title} [workspace_project]`,
+        `Project: ${card.project_slug}`,
+        `Path: ${card.path}`,
+        `Reason: ${resultValue.selection_reason}`,
+        `Candidates: ${resultValue.candidate_count}`,
+        ...(card.summary_lines || []),
+        `Repo: ${card.repo || 'unavailable'}`,
+        `Status: ${card.status || 'unavailable'}`,
+        'Related systems:',
+        ...(card.related_systems || []).map((item: any) => `- ${item}`),
       ].join('\n') + '\n';
     }
     case 'search':
@@ -1754,6 +1778,24 @@ const get_workspace_system_card: Operation = {
   cliHints: { name: 'workspace-system-card' },
 };
 
+const get_workspace_project_card: Operation = {
+  name: 'get_workspace_project_card',
+  description: 'Render a compact workspace project card from the current context-map report.',
+  params: {
+    map_id: { type: 'string', description: 'Optional context map id for a direct read' },
+    scope_id: { type: 'string', description: 'Map scope id (default: workspace:default)' },
+    kind: { type: 'string', description: 'Optional map kind filter when map_id is omitted' },
+  },
+  handler: async (ctx, p) => {
+    return getWorkspaceProjectCard(ctx.engine, {
+      map_id: typeof p.map_id === 'string' ? p.map_id : undefined,
+      scope_id: String(p.scope_id ?? DEFAULT_NOTE_MANIFEST_SCOPE_ID),
+      kind: p.kind as string | undefined,
+    });
+  },
+  cliHints: { name: 'workspace-project-card' },
+};
+
 const record_retrieval_trace: Operation = {
   name: 'record_retrieval_trace',
   description: 'Record a retrieval trace for a task-scoped operational-memory flow.',
@@ -2232,7 +2274,7 @@ export const operations: Operation[] = [
   // Structural graph
   get_note_structural_neighbors, find_note_structural_path,
   // Persisted context maps
-  build_context_map, get_context_map_entry, list_context_map_entries, get_context_map_report, get_workspace_system_card,
+  build_context_map, get_context_map_entry, list_context_map_entries, get_context_map_report, get_workspace_system_card, get_workspace_project_card,
   // Context atlas registry
   build_context_atlas, get_context_atlas_entry, list_context_atlas_entries, select_context_atlas_entry, get_context_atlas_overview, get_context_atlas_report,
   // Operational memory

@@ -141,6 +141,37 @@ Expected:
 - `acceptance.phase2_status` matches the local guardrail outcome without requiring an external baseline artifact
 - the benchmark stays local and uses the same sqlite execution envelope as the earlier phase runners
 
+## Phase 2 note-sections verification
+
+Run:
+
+```bash
+bun test test/note-section-schema.test.ts test/note-section-service.test.ts test/note-section-engine.test.ts test/note-section-operations.test.ts test/phase2-note-sections.test.ts
+```
+
+Expected:
+
+- note-section schema and extraction coverage pass on the local sqlite/pglite path
+- canonical note writes refresh deterministic section rows immediately
+- `section-get`, `section-list`, and `section-rebuild` stay available through the shared operation surface
+
+## Phase 2 note-sections benchmark
+
+Run:
+
+```bash
+bun run bench:phase2-sections --json
+```
+
+Expected:
+
+- the report includes `section_get`, `section_list`, `section_rebuild`, and `section_projection`
+- latency workloads report positive `p50_ms` and `p95_ms`
+- `section_projection.success_rate` is `100` on the published fixture workload
+- `acceptance.readiness_status` reports `pass` or `fail` from the local guardrails
+- `acceptance.phase2_status` matches the local guardrail outcome without requiring an external baseline artifact
+- the benchmark stays local and uses the same sqlite execution envelope as the earlier phase runners
+
 ---
 
 ## 2. Skillpack Loaded

@@ -90,7 +90,7 @@ async function expectManifest(engine: BrainEngine, slug: string, path: string) {
   expect(entry).not.toBeNull();
   expect(entry?.path).toBe(path);
   expect(entry?.aliases).toEqual(['Engine Index']);
-  expect(entry?.tags).toEqual(['phase2', 'engine']);
+  expect(entry?.tags).toEqual(['engine', 'phase2']);
   expect(entry?.outgoing_wikilinks).toEqual(['systems/mbrain']);
   expect(entry?.outgoing_urls).toEqual(['https://example.com/engine']);
   expect(entry?.source_refs).toEqual(['User, direct message, 2026-04-20 03:00 PM KST']);

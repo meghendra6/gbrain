@@ -23,7 +23,7 @@ export function buildNoteManifestEntry(input: BuildNoteManifestEntryInput): Note
   const slug = slugifyPath(input.slug);
   const path = normalizeManifestPath(input.path);
   const page = input.page;
-  const tags = uniqueStrings(input.tags ?? []);
+  const tags = canonicalizeTags(input.tags ?? []);
   const body = joinCanonicalBody(page.compiled_truth, page.timeline ?? '');
 
   return {
@@ -192,6 +192,10 @@ function uniqueStrings(values: string[]): string[] {
   }
 
   return result;
+}
+
+function canonicalizeTags(values: string[]): string[] {
+  return uniqueStrings(values).sort((left, right) => left.localeCompare(right));
 }
 
 async function requirePage(engine: BrainEngine, slug: string): Promise<Page> {

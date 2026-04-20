@@ -41,7 +41,7 @@ describe('note manifest service', () => {
     expect(entry.path).toBe('concepts/note-manifest.md');
     expect(entry.page_type).toBe('concept');
     expect(entry.aliases).toEqual(['Context Manifest', 'Structural Index']);
-    expect(entry.tags).toEqual(['phase2', 'manifest']);
+    expect(entry.tags).toEqual(['manifest', 'phase2']);
     expect(entry.outgoing_wikilinks).toEqual(['people/sarah-chen', 'systems/mbrain']);
     expect(entry.outgoing_urls).toEqual(['https://example.com/docs']);
     expect(entry.source_refs).toEqual([
@@ -82,5 +82,23 @@ describe('note manifest service', () => {
 
     expect(first.content_hash).toBe(second.content_hash);
     expect(first.content_hash).not.toBe(changed.content_hash);
+  });
+
+  test('buildNoteManifestEntry canonicalizes tag order for deterministic rebuilds', () => {
+    const entry = buildNoteManifestEntry({
+      page_id: 9,
+      slug: 'concepts/tag-order',
+      path: 'concepts/tag-order.md',
+      tags: ['phase2', 'manifest', 'phase2'],
+      page: {
+        type: 'concept',
+        title: 'Tag Order',
+        compiled_truth: '# Heading',
+        timeline: '',
+        frontmatter: {},
+      },
+    });
+
+    expect(entry.tags).toEqual(['manifest', 'phase2']);
   });
 });

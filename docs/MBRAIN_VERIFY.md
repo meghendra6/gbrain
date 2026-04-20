@@ -172,6 +172,36 @@ Expected:
 - `acceptance.phase2_status` matches the local guardrail outcome without requiring an external baseline artifact
 - the benchmark stays local and uses the same sqlite execution envelope as the earlier phase runners
 
+## Phase 2 structural-paths verification
+
+Run:
+
+```bash
+bun test test/note-structural-graph-service.test.ts test/note-structural-graph-operations.test.ts test/phase2-structural-paths.test.ts
+```
+
+Expected:
+
+- deterministic structural neighbors and path coverage pass
+- the operation surface exposes `section-neighbors` and `section-path`
+- the benchmark reports local guardrail status for graph build, neighbors, and path lookup
+
+## Phase 2 structural-paths benchmark
+
+Run:
+
+```bash
+bun run bench:phase2-structural-paths --json
+```
+
+Expected:
+
+- the report includes `structural_graph_build`, `structural_neighbors`, `structural_path`, and `structural_path_correctness`
+- latency workloads report positive `p50_ms` and `p95_ms`
+- `structural_path_correctness.success_rate` is `100`
+- `acceptance.readiness_status` reports `pass` or `fail` from the local guardrails
+- `acceptance.phase2_status` matches the local guardrail outcome without requiring an external baseline artifact
+
 ---
 
 ## 2. Skillpack Loaded

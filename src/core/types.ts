@@ -369,6 +369,29 @@ export interface WorkspaceProjectCardResult {
   card: WorkspaceProjectCard | null;
 }
 
+export interface WorkspaceOrientationBundle {
+  bundle_kind: 'workspace_orientation';
+  title: string;
+  map_id: string;
+  status: string;
+  summary_lines: string[];
+  recommended_reads: ContextMapReportRead[];
+  system_card: WorkspaceSystemCard | null;
+  project_card: WorkspaceProjectCard | null;
+}
+
+export interface WorkspaceOrientationBundleInput {
+  map_id?: string;
+  scope_id?: string;
+  kind?: string;
+}
+
+export interface WorkspaceOrientationBundleResult {
+  selection_reason: string;
+  candidate_count: number;
+  bundle: WorkspaceOrientationBundle | null;
+}
+
 // Chunks
 export interface Chunk {
   id: number;

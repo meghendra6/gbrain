@@ -374,6 +374,24 @@ Expected:
 - `acceptance.readiness_status` reports `pass` or `fail` from the local guardrails
 - `acceptance.phase2_status` matches the local guardrail outcome without introducing an external baseline artifact
 
+## Phase 2 workspace-orientation-bundle
+
+Run:
+
+```bash
+bun test test/workspace-orientation-bundle-service.test.ts test/workspace-orientation-bundle-operations.test.ts test/phase2-workspace-orientation-bundle.test.ts
+bun test test/cli.test.ts -t "workspace-orientation --help"
+bun run bench:phase2-workspace-orientation-bundle --json
+```
+
+Expected:
+
+- workspace-orientation-bundle tests pass
+- `workspace-orientation` stays available through the shared operation surface
+- benchmark reports `workspace_orientation_bundle` and `workspace_orientation_bundle_correctness`
+- `acceptance.readiness_status` reports `pass` or `fail` from the local guardrails
+- `acceptance.phase2_status` matches the local guardrail outcome without introducing an external baseline artifact
+
 ---
 
 ## 2. Skillpack Loaded

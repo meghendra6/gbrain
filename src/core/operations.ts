@@ -12,6 +12,7 @@ import { serializeMarkdown } from './markdown.ts';
 import { hybridSearch } from './search/hybrid.ts';
 import { expandQuery } from './search/expansion.ts';
 import { DEFAULT_NOTE_MANIFEST_SCOPE_ID, rebuildNoteManifestEntries } from './services/note-manifest-service.ts';
+import { findStructuralPath, getStructuralNeighbors } from './services/note-structural-graph-service.ts';
 import { rebuildNoteSectionEntries } from './services/note-section-service.ts';
 import { buildTaskResumeCard } from './services/task-memory-service.ts';
 import * as db from './db.ts';
@@ -379,6 +380,28 @@ export function formatResult(
       return [
         `Rebuilt ${rebuild.rebuilt} note section entr${rebuild.rebuilt === 1 ? 'y' : 'ies'}.`,
         `Sections: ${(rebuild.section_ids || []).join(', ') || 'none'}`,
+      ].join('\n') + '\n';
+    }
+    case 'get_note_structural_neighbors': {
+      const edges = result as any[];
+      if (edges.length === 0) return 'No structural neighbors.\n';
+      const rows = edges.map((edge) =>
+        `${edge.edge_kind}\t${edge.from_node_id}\t${edge.to_node_id}`,
+      ).join('\n') + '\n';
+      const requestedLimit = (params.limit as number) ?? 20;
+      if (edges.length >= requestedLimit) {
+        return rows + `\n(result may be truncated at ${requestedLimit}; pass --limit N or -n N to change)\n`;
+      }
+      return rows;
+    }
+    case 'find_note_structural_path': {
+      const path = result as any;
+      if (!path || !Array.isArray(path.node_ids) || path.node_ids.length === 0) {
+        return 'No structural path found.\n';
+      }
+      return [
+        `Hop count: ${path.hop_count}`,
+        `Nodes: ${(path.node_ids || []).join(' -> ')}`,
       ].join('\n') + '\n';
     }
     case 'search':
@@ -1267,6 +1290,66 @@ const rebuild_note_sections: Operation = {
   cliHints: { name: 'section-rebuild' },
 };
 
+const get_note_structural_neighbors: Operation = {
+  name: 'get_note_structural_neighbors',
+  description: 'List deterministic structural neighbors for a page or section node.',
+  params: {
+    node_id: { type: 'string', required: true, description: 'page:<slug> or section:<section_id>' },
+    scope_id: { type: 'string', description: 'Structural scope id (default: workspace:default)' },
+    limit: { type: 'number', description: 'Max results (default 20)' },
+  },
+  handler: async (ctx, p) => {
+    try {
+      return await getStructuralNeighbors(ctx.engine, String(p.node_id), {
+        scope_id: String(p.scope_id ?? DEFAULT_NOTE_MANIFEST_SCOPE_ID),
+        limit: (p.limit as number) ?? 20,
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith('Invalid structural node id:')) {
+        throw new OperationError('invalid_params', error.message);
+      }
+      if (error instanceof Error && error.message.startsWith('Structural node not found:')) {
+        throw new OperationError('page_not_found', error.message);
+      }
+      throw error;
+    }
+  },
+  cliHints: { name: 'section-neighbors', positional: ['node_id'], aliases: { n: 'limit' } },
+};
+
+const find_note_structural_path: Operation = {
+  name: 'find_note_structural_path',
+  description: 'Find a bounded deterministic structural path between two nodes.',
+  params: {
+    from_node_id: { type: 'string', required: true, description: 'Start node id' },
+    to_node_id: { type: 'string', required: true, description: 'Target node id' },
+    scope_id: { type: 'string', description: 'Structural scope id (default: workspace:default)' },
+    max_depth: { type: 'number', description: 'Maximum hop count (default 6)' },
+  },
+  handler: async (ctx, p) => {
+    try {
+      return await findStructuralPath(
+        ctx.engine,
+        String(p.from_node_id),
+        String(p.to_node_id),
+        {
+          scope_id: String(p.scope_id ?? DEFAULT_NOTE_MANIFEST_SCOPE_ID),
+          max_depth: (p.max_depth as number) ?? 6,
+        },
+      );
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith('Invalid structural node id:')) {
+        throw new OperationError('invalid_params', error.message);
+      }
+      if (error instanceof Error && error.message.startsWith('Structural node not found:')) {
+        throw new OperationError('page_not_found', error.message);
+      }
+      throw error;
+    }
+  },
+  cliHints: { name: 'section-path', positional: ['from_node_id', 'to_node_id'] },
+};
+
 const record_retrieval_trace: Operation = {
   name: 'record_retrieval_trace',
   description: 'Record a retrieval trace for a task-scoped operational-memory flow.',
@@ -1742,6 +1825,8 @@ export const operations: Operation[] = [
   get_note_manifest_entry, list_note_manifest_entries, rebuild_note_manifest,
   // Note sections
   get_note_section_entry, list_note_section_entries, rebuild_note_sections,
+  // Structural graph
+  get_note_structural_neighbors, find_note_structural_path,
   // Operational memory
   list_tasks, start_task, update_task, resume_task, get_task_working_set, record_retrieval_trace, list_task_traces, list_task_attempts, list_task_decisions, refresh_task_working_set, record_attempt, record_decision,
   // Ingest log

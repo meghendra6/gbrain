@@ -50,6 +50,41 @@ test('precision lookup route service resolves an exact canonical page', async ()
   }
 });
 
+test('precision lookup route service resolves an exact canonical page by path', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mbrain-precision-route-path-'));
+  const databasePath = join(dir, 'brain.db');
+  const engine = new SQLiteEngine();
+
+  try {
+    await engine.connect({ engine: 'sqlite', database_path: databasePath });
+    await engine.initSchema();
+
+    await importFromContent(engine, 'systems/mbrain', [
+      '---',
+      'type: system',
+      'title: MBrain',
+      '---',
+      '# Overview',
+      'Coordinates structural extraction.',
+      '[Source: User, direct message, 2026-04-22 12:10 PM KST]',
+    ].join('\n'), { path: 'systems/mbrain.md' });
+
+    const result = await getPrecisionLookupRoute(engine, {
+      path: 'systems/mbrain.md',
+    });
+
+    expect(result.selection_reason).toBe('direct_path_match');
+    expect(result.candidate_count).toBe(1);
+    expect(result.route?.target_kind).toBe('page');
+    expect(result.route?.slug).toBe('systems/mbrain');
+    expect(result.route?.path).toBe('systems/mbrain.md');
+    expect(result.route?.summary_lines).toContain('Precision lookup is anchored to exact canonical path systems/mbrain.md.');
+  } finally {
+    await engine.disconnect();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('precision lookup route service resolves an exact canonical section with narrow supporting reads', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'mbrain-precision-route-section-'));
   const databasePath = join(dir, 'brain.db');

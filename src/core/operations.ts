@@ -2139,12 +2139,14 @@ const get_precision_lookup_route: Operation = {
   params: {
     scope_id: { type: 'string', description: 'Canonical note scope id (default: workspace:default)' },
     slug: { type: 'string', description: 'Exact canonical page slug' },
+    path: { type: 'string', description: 'Exact canonical note path' },
     section_id: { type: 'string', description: 'Exact canonical section id' },
   },
   handler: async (ctx, p) => {
     return getPrecisionLookupRoute(ctx.engine, {
       scope_id: String(p.scope_id ?? DEFAULT_NOTE_MANIFEST_SCOPE_ID),
       slug: typeof p.slug === 'string' ? p.slug : undefined,
+      path: typeof p.path === 'string' ? p.path : undefined,
       section_id: typeof p.section_id === 'string' ? p.section_id : undefined,
     });
   },
@@ -2178,7 +2180,9 @@ const select_retrieval_route: Operation = {
       throw new OperationError('invalid_params', 'broad_synthesis intent requires query.');
     }
     if (intent === 'precision_lookup' && typeof p.slug !== 'string' && typeof p.section_id !== 'string') {
-      throw new OperationError('invalid_params', 'precision_lookup intent requires slug or section_id.');
+      if (typeof p.path !== 'string') {
+        throw new OperationError('invalid_params', 'precision_lookup intent requires slug, path, or section_id.');
+      }
     }
     if (p.persist_trace === true && typeof p.task_id !== 'string') {
       throw new OperationError('invalid_params', 'persist_trace requires task_id.');
@@ -2194,6 +2198,7 @@ const select_retrieval_route: Operation = {
       query: typeof p.query === 'string' ? p.query : undefined,
       limit: typeof p.limit === 'number' ? p.limit : undefined,
       slug: typeof p.slug === 'string' ? p.slug : undefined,
+      path: typeof p.path === 'string' ? p.path : undefined,
       section_id: typeof p.section_id === 'string' ? p.section_id : undefined,
     });
   },

@@ -92,10 +92,11 @@ async function selectPrecisionLookupRoute(
   input: RetrievalRouteSelectorInput,
 ): Promise<RetrievalRouteSelectorResult> {
   const result = await getPrecisionLookupRoute(engine, {
-    scope_id: input.scope_id,
-    slug: input.slug,
-    section_id: input.section_id,
-  });
+      scope_id: input.scope_id,
+      slug: input.slug,
+      path: input.path,
+      section_id: input.section_id,
+    });
   return {
     selected_intent: 'precision_lookup',
     selection_reason: result.selection_reason,

@@ -58,6 +58,18 @@ test('precision lookup route operation returns no-match disclosure and direct ro
     expect((direct as any).selection_reason).toBe('direct_page_match');
     expect((direct as any).route?.route_kind).toBe('precision_lookup');
     expect((direct as any).route?.slug).toBe('systems/mbrain');
+
+    const byPath = await route.handler({
+      engine,
+      config: {} as any,
+      logger: console,
+      dryRun: false,
+    }, {
+      path: 'systems/mbrain.md',
+    });
+
+    expect((byPath as any).selection_reason).toBe('direct_path_match');
+    expect((byPath as any).route?.path).toBe('systems/mbrain.md');
   } finally {
     await engine.disconnect();
     rmSync(dir, { recursive: true, force: true });

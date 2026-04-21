@@ -8,6 +8,7 @@ import type {
   PrecisionLookupRouteResult,
 } from '../types.ts';
 import { DEFAULT_NOTE_MANIFEST_SCOPE_ID } from './note-manifest-service.ts';
+import { listAllNoteManifestEntries } from './structural-entry-pagination.ts';
 
 export async function getPrecisionLookupRoute(
   engine: BrainEngine,
@@ -57,6 +58,23 @@ export async function getPrecisionLookupRoute(
   }
 
   if (!input.slug) {
+    if (input.path) {
+      const page = await findManifestByExactPath(engine, scopeId, input.path);
+      if (!page) {
+        return {
+          selection_reason: 'no_match',
+          candidate_count: 0,
+          route: null,
+        };
+      }
+
+      return {
+        selection_reason: 'direct_path_match',
+        candidate_count: 1,
+        route: buildPageRoute(scopeId, page, input.path),
+      };
+    }
+
     return {
       selection_reason: 'no_match',
       candidate_count: 0,
@@ -87,6 +105,7 @@ export async function getPrecisionLookupRoute(
 function buildPageRoute(
   scopeId: string,
   page: NoteManifestEntry,
+  anchoredPath?: string,
 ): PrecisionLookupRoute {
   return {
     route_kind: 'precision_lookup',
@@ -100,7 +119,9 @@ function buildPageRoute(
       'minimal_supporting_reads',
     ],
     summary_lines: [
-      `Precision lookup is anchored to exact canonical page ${page.slug}.`,
+      anchoredPath
+        ? `Precision lookup is anchored to exact canonical path ${anchoredPath}.`
+        : `Precision lookup is anchored to exact canonical page ${page.slug}.`,
       'Supporting reads kept narrow: 1.',
       'Use the exact canonical artifact before relying on memory summaries.',
     ],
@@ -114,6 +135,15 @@ function buildPageRoute(
       },
     ],
   };
+}
+
+async function findManifestByExactPath(
+  engine: BrainEngine,
+  scopeId: string,
+  path: string,
+): Promise<NoteManifestEntry | null> {
+  const manifests = await listAllNoteManifestEntries(engine, scopeId);
+  return manifests.find((entry) => entry.path === path) ?? null;
 }
 
 function buildSectionRoute(

@@ -512,6 +512,7 @@ export interface PrecisionLookupRoute {
 export interface PrecisionLookupRouteInput {
   scope_id?: string;
   slug?: string;
+  path?: string;
   section_id?: string;
 }
 
@@ -540,6 +541,7 @@ export interface RetrievalRouteSelectorInput {
   query?: string;
   limit?: number;
   slug?: string;
+  path?: string;
   section_id?: string;
 }
 

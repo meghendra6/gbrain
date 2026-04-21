@@ -190,6 +190,15 @@ async function runCorrectnessWorkload(
     passes += 1;
   }
 
+  const byPath = await selectRetrievalRoute(engine, {
+    intent: 'precision_lookup',
+    path: 'systems/mbrain.md',
+  });
+  checks += 1;
+  if (byPath.selection_reason === 'direct_path_match' && byPath.route?.route_kind === 'precision_lookup') {
+    passes += 1;
+  }
+
   const missing = await selectRetrievalRoute(engine, {
     intent: 'precision_lookup',
     slug: 'systems/unknown',

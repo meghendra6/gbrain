@@ -175,6 +175,18 @@ async function runCorrectnessWorkload(
     passes += 1;
   }
 
+  const byPath = await getPrecisionLookupRoute(engine, {
+    path: 'systems/mbrain.md',
+  });
+  checks += 1;
+  if (
+    byPath.selection_reason === 'direct_path_match'
+    && byPath.route?.target_kind === 'page'
+    && byPath.route.path === 'systems/mbrain.md'
+  ) {
+    passes += 1;
+  }
+
   return {
     name: 'precision_lookup_route_correctness',
     status: 'measured',

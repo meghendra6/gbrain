@@ -128,6 +128,15 @@ test('retrieval route selector dispatches precision lookup intent', async () => 
     expect(result.selection_reason).toBe('direct_page_match');
     expect(result.route?.route_kind).toBe('precision_lookup');
     expect((result.route?.payload as any)?.slug).toBe('systems/mbrain');
+
+    const byPath = await selectRetrievalRoute(engine, {
+      intent: 'precision_lookup',
+      path: 'systems/mbrain.md',
+    });
+
+    expect(byPath.selected_intent).toBe('precision_lookup');
+    expect(byPath.selection_reason).toBe('direct_path_match');
+    expect((byPath.route?.payload as any)?.path).toBe('systems/mbrain.md');
   } finally {
     await engine.disconnect();
     rmSync(dir, { recursive: true, force: true });

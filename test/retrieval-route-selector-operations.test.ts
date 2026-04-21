@@ -70,6 +70,19 @@ test('retrieval route selector operation dispatches task and precision intents',
 
     expect((exact as any).selected_intent).toBe('precision_lookup');
     expect((exact as any).route?.route_kind).toBe('precision_lookup');
+
+    const byPath = await route.handler({
+      engine,
+      config: {} as any,
+      logger: console,
+      dryRun: false,
+    }, {
+      intent: 'precision_lookup',
+      path: 'systems/mbrain.md',
+    });
+
+    expect((byPath as any).selected_intent).toBe('precision_lookup');
+    expect((byPath as any).selection_reason).toBe('direct_path_match');
   } finally {
     await engine.disconnect();
     rmSync(dir, { recursive: true, force: true });

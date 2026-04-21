@@ -487,6 +487,40 @@ export interface BroadSynthesisRouteResult {
   route: BroadSynthesisRoute | null;
 }
 
+export interface PrecisionLookupRouteRead {
+  node_id: string;
+  node_kind: 'page' | 'section';
+  label: string;
+  page_slug: string;
+  path: string;
+  section_id?: string;
+}
+
+export interface PrecisionLookupRoute {
+  route_kind: 'precision_lookup';
+  target_kind: 'page' | 'section';
+  slug: string;
+  path: string;
+  title: string;
+  scope_id: string;
+  section_id?: string;
+  retrieval_route: string[];
+  summary_lines: string[];
+  recommended_reads: PrecisionLookupRouteRead[];
+}
+
+export interface PrecisionLookupRouteInput {
+  scope_id?: string;
+  slug?: string;
+  section_id?: string;
+}
+
+export interface PrecisionLookupRouteResult {
+  selection_reason: string;
+  candidate_count: number;
+  route: PrecisionLookupRoute | null;
+}
+
 export interface WorkspaceSystemCard {
   card_kind: 'workspace_system';
   system_slug: string;

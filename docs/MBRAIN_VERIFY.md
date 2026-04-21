@@ -533,6 +533,24 @@ Expected:
 - `acceptance.readiness_status` reports `pass` or `fail` from the local guardrails
 - `acceptance.phase3_status` matches the local guardrail outcome without introducing a baseline artifact
 
+## Phase 3 precision-lookup route
+
+Run:
+
+```bash
+bun test test/precision-lookup-route-service.test.ts test/precision-lookup-route-operations.test.ts test/phase3-precision-lookup-route.test.ts
+bun test test/cli.test.ts -t "precision-lookup-route --help"
+bun run bench:phase3-precision-lookup-route --json
+```
+
+Expected:
+
+- precision-lookup route tests pass
+- `precision-lookup-route` stays available through the shared operation surface
+- benchmark reports `precision_lookup_route` and `precision_lookup_route_correctness`
+- `acceptance.readiness_status` reports `pass` or `fail` from the local guardrails
+- `acceptance.phase3_status` matches the local guardrail outcome without introducing a baseline artifact
+
 ---
 
 ## 2. Skillpack Loaded

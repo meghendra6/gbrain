@@ -26,6 +26,7 @@ import { getStructuralContextMapExplanation } from './services/context-map-expla
 import { findStructuralContextMapPath } from './services/context-map-path-service.ts';
 import { queryStructuralContextMap } from './services/context-map-query-service.ts';
 import { getStructuralContextMapReport } from './services/context-map-report-service.ts';
+import { getPrecisionLookupRoute } from './services/precision-lookup-route-service.ts';
 import { getWorkspaceCorpusCard } from './services/workspace-corpus-card-service.ts';
 import { getWorkspaceOrientationBundle } from './services/workspace-orientation-bundle-service.ts';
 import { getWorkspaceProjectCard } from './services/workspace-project-card-service.ts';
@@ -722,6 +723,28 @@ export function formatResult(
         `Focal node: ${route.focal_node_id || 'none'}`,
         'Matched nodes:',
         ...(route.matched_nodes || []).map((node: any) => `- ${node.node_id} | ${node.label} | score=${node.score}`),
+        'Recommended reads:',
+        ...(route.recommended_reads || []).map((item: any) => `- ${item.node_id} | ${item.label} | ${item.path}`),
+      ].join('\n') + '\n';
+    }
+    case 'get_precision_lookup_route': {
+      const resultValue = result as any;
+      if (!resultValue.route) {
+        return [
+          'No precision lookup route available.',
+          `Reason: ${resultValue.selection_reason}`,
+          `Candidates: ${resultValue.candidate_count}`,
+        ].join('\n') + '\n';
+      }
+      const route = resultValue.route;
+      return [
+        `Precision lookup route: ${route.slug}${route.section_id ? `#${route.section_id}` : ''}`,
+        `Path: ${route.path}`,
+        `Target kind: ${route.target_kind}`,
+        `Reason: ${resultValue.selection_reason}`,
+        `Candidates: ${resultValue.candidate_count}`,
+        ...route.summary_lines,
+        `Retrieval route: ${(route.retrieval_route || []).join(' -> ')}`,
         'Recommended reads:',
         ...(route.recommended_reads || []).map((item: any) => `- ${item.node_id} | ${item.label} | ${item.path}`),
       ].join('\n') + '\n';
@@ -2087,6 +2110,24 @@ const get_broad_synthesis_route: Operation = {
   cliHints: { name: 'broad-synthesis-route', aliases: { n: 'limit' } },
 };
 
+const get_precision_lookup_route: Operation = {
+  name: 'get_precision_lookup_route',
+  description: 'Resolve an exact canonical page or section route for precision lookup intent.',
+  params: {
+    scope_id: { type: 'string', description: 'Canonical note scope id (default: workspace:default)' },
+    slug: { type: 'string', description: 'Exact canonical page slug' },
+    section_id: { type: 'string', description: 'Exact canonical section id' },
+  },
+  handler: async (ctx, p) => {
+    return getPrecisionLookupRoute(ctx.engine, {
+      scope_id: String(p.scope_id ?? DEFAULT_NOTE_MANIFEST_SCOPE_ID),
+      slug: typeof p.slug === 'string' ? p.slug : undefined,
+      section_id: typeof p.section_id === 'string' ? p.section_id : undefined,
+    });
+  },
+  cliHints: { name: 'precision-lookup-route' },
+};
+
 const get_workspace_system_card: Operation = {
   name: 'get_workspace_system_card',
   description: 'Render a compact workspace system card from the current context-map report.',
@@ -2637,7 +2678,7 @@ export const operations: Operation[] = [
   // Structural graph
   get_note_structural_neighbors, find_note_structural_path,
   // Persisted context maps
-  build_context_map, get_context_map_entry, list_context_map_entries, get_context_map_report, get_context_map_explanation, query_context_map, find_context_map_path, get_broad_synthesis_route, get_workspace_system_card, get_workspace_project_card, get_workspace_orientation_bundle, get_workspace_corpus_card,
+  build_context_map, get_context_map_entry, list_context_map_entries, get_context_map_report, get_context_map_explanation, query_context_map, find_context_map_path, get_broad_synthesis_route, get_precision_lookup_route, get_workspace_system_card, get_workspace_project_card, get_workspace_orientation_bundle, get_workspace_corpus_card,
   // Context atlas registry
   build_context_atlas, get_context_atlas_entry, list_context_atlas_entries, select_context_atlas_entry, get_context_atlas_overview, get_context_atlas_report, get_atlas_orientation_card, get_atlas_orientation_bundle,
   // Operational memory

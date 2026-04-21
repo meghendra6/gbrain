@@ -20,6 +20,7 @@ import {
 import { getStructuralContextAtlasOverview } from './services/context-atlas-overview-service.ts';
 import { getStructuralContextAtlasReport } from './services/context-atlas-report-service.ts';
 import { getStructuralContextMapReport } from './services/context-map-report-service.ts';
+import { getWorkspaceCorpusCard } from './services/workspace-corpus-card-service.ts';
 import { getWorkspaceOrientationBundle } from './services/workspace-orientation-bundle-service.ts';
 import { getWorkspaceProjectCard } from './services/workspace-project-card-service.ts';
 import { getWorkspaceSystemCard } from './services/workspace-system-card-service.ts';
@@ -644,6 +645,29 @@ export function formatResult(
         `Project card: ${bundle.project_card?.project_slug || 'none'}`,
         'Recommended reads:',
         ...(bundle.recommended_reads || []).map((item: any) => `- ${item.node_id} | ${item.label} | ${item.path}`),
+      ].join('\n') + '\n';
+    }
+    case 'get_workspace_corpus_card': {
+      const resultValue = result as any;
+      if (!resultValue.card) {
+        return [
+          'No workspace corpus card available.',
+          `Reason: ${resultValue.selection_reason}`,
+          `Candidates: ${resultValue.candidate_count}`,
+        ].join('\n') + '\n';
+      }
+      const card = resultValue.card;
+      return [
+        `${card.title} [workspace_corpus]`,
+        `Map: ${card.map_id}`,
+        `Status: ${card.status}`,
+        `Reason: ${resultValue.selection_reason}`,
+        `Candidates: ${resultValue.candidate_count}`,
+        ...(card.summary_lines || []),
+        'Anchor slugs:',
+        ...(card.anchor_slugs || []).map((item: any) => `- ${item}`),
+        'Recommended reads:',
+        ...(card.recommended_reads || []).map((item: any) => `- ${item.node_id} | ${item.label} | ${item.path}`),
       ].join('\n') + '\n';
     }
     case 'search':
@@ -1838,6 +1862,24 @@ const get_workspace_orientation_bundle: Operation = {
   cliHints: { name: 'workspace-orientation' },
 };
 
+const get_workspace_corpus_card: Operation = {
+  name: 'get_workspace_corpus_card',
+  description: 'Render a compact workspace corpus card from the current orientation bundle.',
+  params: {
+    map_id: { type: 'string', description: 'Optional context map id for a direct read' },
+    scope_id: { type: 'string', description: 'Map scope id (default: workspace:default)' },
+    kind: { type: 'string', description: 'Optional map kind filter when map_id is omitted' },
+  },
+  handler: async (ctx, p) => {
+    return getWorkspaceCorpusCard(ctx.engine, {
+      map_id: typeof p.map_id === 'string' ? p.map_id : undefined,
+      scope_id: String(p.scope_id ?? DEFAULT_NOTE_MANIFEST_SCOPE_ID),
+      kind: p.kind as string | undefined,
+    });
+  },
+  cliHints: { name: 'workspace-corpus-card' },
+};
+
 const record_retrieval_trace: Operation = {
   name: 'record_retrieval_trace',
   description: 'Record a retrieval trace for a task-scoped operational-memory flow.',
@@ -2316,7 +2358,7 @@ export const operations: Operation[] = [
   // Structural graph
   get_note_structural_neighbors, find_note_structural_path,
   // Persisted context maps
-  build_context_map, get_context_map_entry, list_context_map_entries, get_context_map_report, get_workspace_system_card, get_workspace_project_card, get_workspace_orientation_bundle,
+  build_context_map, get_context_map_entry, list_context_map_entries, get_context_map_report, get_workspace_system_card, get_workspace_project_card, get_workspace_orientation_bundle, get_workspace_corpus_card,
   // Context atlas registry
   build_context_atlas, get_context_atlas_entry, list_context_atlas_entries, select_context_atlas_entry, get_context_atlas_overview, get_context_atlas_report,
   // Operational memory

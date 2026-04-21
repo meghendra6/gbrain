@@ -392,6 +392,28 @@ export interface WorkspaceOrientationBundleResult {
   bundle: WorkspaceOrientationBundle | null;
 }
 
+export interface WorkspaceCorpusCard {
+  card_kind: 'workspace_corpus';
+  title: string;
+  map_id: string;
+  status: string;
+  anchor_slugs: string[];
+  recommended_reads: ContextMapReportRead[];
+  summary_lines: string[];
+}
+
+export interface WorkspaceCorpusCardInput {
+  map_id?: string;
+  scope_id?: string;
+  kind?: string;
+}
+
+export interface WorkspaceCorpusCardResult {
+  selection_reason: string;
+  candidate_count: number;
+  card: WorkspaceCorpusCard | null;
+}
+
 // Chunks
 export interface Chunk {
   id: number;

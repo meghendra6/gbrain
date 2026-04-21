@@ -392,6 +392,24 @@ Expected:
 - `acceptance.readiness_status` reports `pass` or `fail` from the local guardrails
 - `acceptance.phase2_status` matches the local guardrail outcome without introducing an external baseline artifact
 
+## Phase 2 workspace-corpus-card
+
+Run:
+
+```bash
+bun test test/workspace-corpus-card-service.test.ts test/workspace-corpus-card-operations.test.ts test/phase2-workspace-corpus-card.test.ts
+bun test test/cli.test.ts -t "workspace-corpus-card --help"
+bun run bench:phase2-workspace-corpus-card --json
+```
+
+Expected:
+
+- workspace-corpus-card tests pass
+- `workspace-corpus-card` stays available through the shared operation surface
+- benchmark reports `workspace_corpus_card` and `workspace_corpus_card_correctness`
+- `acceptance.readiness_status` reports `pass` or `fail` from the local guardrails
+- `acceptance.phase2_status` matches the local guardrail outcome without introducing an external baseline artifact
+
 ---
 
 ## 2. Skillpack Loaded

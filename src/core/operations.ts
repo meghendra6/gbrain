@@ -22,6 +22,7 @@ import { getAtlasOrientationBundle } from './services/atlas-orientation-bundle-s
 import { getStructuralContextAtlasOverview } from './services/context-atlas-overview-service.ts';
 import { getStructuralContextAtlasReport } from './services/context-atlas-report-service.ts';
 import { getStructuralContextMapExplanation } from './services/context-map-explain-service.ts';
+import { queryStructuralContextMap } from './services/context-map-query-service.ts';
 import { getStructuralContextMapReport } from './services/context-map-report-service.ts';
 import { getWorkspaceCorpusCard } from './services/workspace-corpus-card-service.ts';
 import { getWorkspaceOrientationBundle } from './services/workspace-orientation-bundle-service.ts';
@@ -650,6 +651,28 @@ export function formatResult(
         ...(explanation.neighbor_edges || []).map((edge: any) => `- ${edge.edge_kind} | ${edge.from_node_id} -> ${edge.to_node_id}`),
         'Recommended reads:',
         ...(explanation.recommended_reads || []).map((item: any) => `- ${item.node_id} | ${item.label} | ${item.path}`),
+      ].join('\n') + '\n';
+    }
+    case 'query_context_map': {
+      const resultValue = result as any;
+      if (!resultValue.result) {
+        return [
+          'No context map query result available.',
+          `Reason: ${resultValue.selection_reason}`,
+          `Candidates: ${resultValue.candidate_count}`,
+        ].join('\n') + '\n';
+      }
+      const queryResult = resultValue.result;
+      return [
+        `Context map query: ${queryResult.query}`,
+        `Map: ${queryResult.map_id}`,
+        `Reason: ${resultValue.selection_reason}`,
+        `Candidates: ${resultValue.candidate_count}`,
+        ...queryResult.summary_lines,
+        'Matched nodes:',
+        ...(queryResult.matched_nodes || []).map((node: any) => `- ${node.node_id} | ${node.label} | score=${node.score}`),
+        'Recommended reads:',
+        ...(queryResult.recommended_reads || []).map((item: any) => `- ${item.node_id} | ${item.label} | ${item.path}`),
       ].join('\n') + '\n';
     }
     case 'get_workspace_system_card': {
@@ -1945,6 +1968,28 @@ const get_context_map_explanation: Operation = {
   cliHints: { name: 'map-explain' },
 };
 
+const query_context_map: Operation = {
+  name: 'query_context_map',
+  description: 'Run a bounded structural query over one persisted context map.',
+  params: {
+    map_id: { type: 'string', description: 'Optional context map id for a direct read' },
+    scope_id: { type: 'string', description: 'Map scope id (default: workspace:default)' },
+    kind: { type: 'string', description: 'Optional map kind filter when map_id is omitted' },
+    query: { type: 'string', required: true, description: 'Plain-text structural query string' },
+    limit: { type: 'number', description: 'Max matched nodes to return (default 5)' },
+  },
+  handler: async (ctx, p) => {
+    return queryStructuralContextMap(ctx.engine, {
+      map_id: typeof p.map_id === 'string' ? p.map_id : undefined,
+      scope_id: String(p.scope_id ?? DEFAULT_NOTE_MANIFEST_SCOPE_ID),
+      kind: p.kind as string | undefined,
+      query: String(p.query),
+      limit: typeof p.limit === 'number' ? p.limit : undefined,
+    });
+  },
+  cliHints: { name: 'map-query', aliases: { n: 'limit' } },
+};
+
 const get_workspace_system_card: Operation = {
   name: 'get_workspace_system_card',
   description: 'Render a compact workspace system card from the current context-map report.',
@@ -2495,7 +2540,7 @@ export const operations: Operation[] = [
   // Structural graph
   get_note_structural_neighbors, find_note_structural_path,
   // Persisted context maps
-  build_context_map, get_context_map_entry, list_context_map_entries, get_context_map_report, get_context_map_explanation, get_workspace_system_card, get_workspace_project_card, get_workspace_orientation_bundle, get_workspace_corpus_card,
+  build_context_map, get_context_map_entry, list_context_map_entries, get_context_map_report, get_context_map_explanation, query_context_map, get_workspace_system_card, get_workspace_project_card, get_workspace_orientation_bundle, get_workspace_corpus_card,
   // Context atlas registry
   build_context_atlas, get_context_atlas_entry, list_context_atlas_entries, select_context_atlas_entry, get_context_atlas_overview, get_context_atlas_report, get_atlas_orientation_card, get_atlas_orientation_bundle,
   // Operational memory

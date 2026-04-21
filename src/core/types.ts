@@ -366,6 +366,47 @@ export interface ContextMapExplanationResult {
   explanation: ContextMapExplanation | null;
 }
 
+export interface ContextMapQueryMatch {
+  node_id: string;
+  node_kind: 'page' | 'section';
+  label: string;
+  page_slug: string;
+  score: number;
+}
+
+export interface ContextMapQueryRead {
+  node_id: string;
+  node_kind: 'page' | 'section';
+  label: string;
+  page_slug: string;
+  path: string;
+  section_id?: string;
+}
+
+export interface ContextMapQueryResultPayload {
+  query_kind: 'structural';
+  map_id: string;
+  query: string;
+  status: string;
+  summary_lines: string[];
+  matched_nodes: ContextMapQueryMatch[];
+  recommended_reads: ContextMapQueryRead[];
+}
+
+export interface ContextMapQueryInput {
+  map_id?: string;
+  scope_id?: string;
+  kind?: string;
+  query: string;
+  limit?: number;
+}
+
+export interface ContextMapQueryResult {
+  selection_reason: string;
+  candidate_count: number;
+  result: ContextMapQueryResultPayload | null;
+}
+
 export interface WorkspaceSystemCard {
   card_kind: 'workspace_system';
   system_slug: string;

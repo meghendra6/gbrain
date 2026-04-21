@@ -479,6 +479,24 @@ Expected:
 - `acceptance.readiness_status` reports `pass` or `fail` from the local guardrails
 - `acceptance.phase3_status` matches the local guardrail outcome without introducing a baseline artifact
 
+## Phase 3 context-map query
+
+Run:
+
+```bash
+bun test test/context-map-query-service.test.ts test/context-map-query-operations.test.ts test/phase3-context-map-query.test.ts
+bun test test/cli.test.ts -t "map-query --help"
+bun run bench:phase3-context-map-query --json
+```
+
+Expected:
+
+- context-map query tests pass
+- `map-query` stays available through the shared operation surface
+- benchmark reports `context_map_query` and `context_map_query_correctness`
+- `acceptance.readiness_status` reports `pass` or `fail` from the local guardrails
+- `acceptance.phase3_status` matches the local guardrail outcome without introducing a baseline artifact
+
 ---
 
 ## 2. Skillpack Loaded

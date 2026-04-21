@@ -117,6 +117,9 @@ test('retrieval route selector dispatches precision lookup intent', async () => 
       '---',
       '# Overview',
       'Coordinates structural extraction.',
+      '',
+      '## Runtime',
+      'Owns exact retrieval routing.',
     ].join('\n'), { path: 'systems/mbrain.md' });
 
     const result = await selectRetrievalRoute(engine, {
@@ -137,6 +140,16 @@ test('retrieval route selector dispatches precision lookup intent', async () => 
     expect(byPath.selected_intent).toBe('precision_lookup');
     expect(byPath.selection_reason).toBe('direct_path_match');
     expect((byPath.route?.payload as any)?.path).toBe('systems/mbrain.md');
+
+    const bySectionPath = await selectRetrievalRoute(engine, {
+      intent: 'precision_lookup',
+      path: 'systems/mbrain.md#overview/runtime',
+    });
+
+    expect(bySectionPath.selected_intent).toBe('precision_lookup');
+    expect(bySectionPath.selection_reason).toBe('direct_section_path_match');
+    expect((bySectionPath.route?.payload as any)?.target_kind).toBe('section');
+    expect((bySectionPath.route?.payload as any)?.path).toBe('systems/mbrain.md#overview/runtime');
   } finally {
     await engine.disconnect();
     rmSync(dir, { recursive: true, force: true });

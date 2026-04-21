@@ -136,6 +136,54 @@ test('precision lookup route service resolves an exact canonical section with na
   }
 });
 
+test('precision lookup route service resolves an exact canonical section by anchored path', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mbrain-precision-route-section-path-'));
+  const databasePath = join(dir, 'brain.db');
+  const engine = new SQLiteEngine();
+
+  try {
+    await engine.connect({ engine: 'sqlite', database_path: databasePath });
+    await engine.initSchema();
+
+    await importFromContent(engine, 'systems/mbrain', [
+      '---',
+      'type: system',
+      'title: MBrain',
+      '---',
+      '# Overview',
+      'Coordinates structural extraction.',
+      '',
+      '## Runtime',
+      'Owns exact retrieval routing.',
+      '[Source: User, direct message, 2026-04-22 12:20 PM KST]',
+    ].join('\n'), { path: 'systems/mbrain.md' });
+
+    const [, runtime] = await engine.listNoteSectionEntries({
+      scope_id: 'workspace:default',
+      page_slug: 'systems/mbrain',
+      limit: 10,
+    });
+    if (!runtime) {
+      throw new Error('runtime section fixture was not indexed');
+    }
+
+    const result = await getPrecisionLookupRoute(engine, {
+      path: 'systems/mbrain.md#overview/runtime',
+    });
+
+    expect(result.selection_reason).toBe('direct_section_path_match');
+    expect(result.candidate_count).toBe(1);
+    expect(result.route?.target_kind).toBe('section');
+    expect(result.route?.slug).toBe('systems/mbrain');
+    expect(result.route?.section_id).toBe(runtime.section_id);
+    expect(result.route?.path).toBe('systems/mbrain.md#overview/runtime');
+    expect(result.route?.summary_lines).toContain('Precision lookup is anchored to exact canonical section path systems/mbrain.md#overview/runtime.');
+  } finally {
+    await engine.disconnect();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('precision lookup route service degrades explicitly when the exact artifact is missing', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'mbrain-precision-route-missing-'));
   const databasePath = join(dir, 'brain.db');

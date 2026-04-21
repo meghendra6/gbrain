@@ -2139,7 +2139,7 @@ const get_precision_lookup_route: Operation = {
   params: {
     scope_id: { type: 'string', description: 'Canonical note scope id (default: workspace:default)' },
     slug: { type: 'string', description: 'Exact canonical page slug' },
-    path: { type: 'string', description: 'Exact canonical note path' },
+    path: { type: 'string', description: 'Exact canonical note path, optionally with #section/path fragment' },
     section_id: { type: 'string', description: 'Exact canonical section id' },
   },
   handler: async (ctx, p) => {

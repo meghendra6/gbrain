@@ -8,7 +8,10 @@ import type {
   PrecisionLookupRouteResult,
 } from '../types.ts';
 import { DEFAULT_NOTE_MANIFEST_SCOPE_ID } from './note-manifest-service.ts';
-import { listAllNoteManifestEntries } from './structural-entry-pagination.ts';
+import {
+  listAllNoteManifestEntries,
+  listAllNoteSectionEntries,
+} from './structural-entry-pagination.ts';
 
 export async function getPrecisionLookupRoute(
   engine: BrainEngine,
@@ -17,31 +20,18 @@ export async function getPrecisionLookupRoute(
   const scopeId = input.scope_id ?? DEFAULT_NOTE_MANIFEST_SCOPE_ID;
 
   if (input.section_id) {
-    const [section] = await engine.listNoteSectionEntries({
-      scope_id: scopeId,
-      section_id: input.section_id,
-      limit: 1,
-    });
-    if (!section) {
-      return {
-        selection_reason: 'no_match',
-        candidate_count: 0,
-        route: null,
-      };
-    }
-    if (input.slug && input.slug !== section.page_slug) {
-      return {
-        selection_reason: 'no_match',
-        candidate_count: 0,
-        route: null,
-      };
+    const section = await findSectionById(engine, scopeId, input.section_id, input.slug);
+    return buildSectionMatchResult(engine, scopeId, section, 'direct_section_match');
+  }
+
+  if (input.path) {
+    const anchored = parseAnchoredSectionPath(input.path);
+    if (anchored) {
+      const section = await findSectionByAnchoredPath(engine, scopeId, anchored, input.slug);
+      return buildSectionMatchResult(engine, scopeId, section, 'direct_section_path_match', input.path);
     }
 
-    const [page] = await engine.listNoteManifestEntries({
-      scope_id: scopeId,
-      slug: section.page_slug,
-      limit: 1,
-    });
+    const page = await findManifestByExactPath(engine, scopeId, input.path);
     if (!page) {
       return {
         selection_reason: 'no_match',
@@ -50,31 +40,22 @@ export async function getPrecisionLookupRoute(
       };
     }
 
+    if (input.slug && input.slug !== page.slug) {
+      return {
+        selection_reason: 'no_match',
+        candidate_count: 0,
+        route: null,
+      };
+    }
+
     return {
-      selection_reason: 'direct_section_match',
+      selection_reason: 'direct_path_match',
       candidate_count: 1,
-      route: buildSectionRoute(scopeId, page, section),
+      route: buildPageRoute(scopeId, page, input.path),
     };
   }
 
   if (!input.slug) {
-    if (input.path) {
-      const page = await findManifestByExactPath(engine, scopeId, input.path);
-      if (!page) {
-        return {
-          selection_reason: 'no_match',
-          candidate_count: 0,
-          route: null,
-        };
-      }
-
-      return {
-        selection_reason: 'direct_path_match',
-        candidate_count: 1,
-        route: buildPageRoute(scopeId, page, input.path),
-      };
-    }
-
     return {
       selection_reason: 'no_match',
       candidate_count: 0,
@@ -146,16 +127,105 @@ async function findManifestByExactPath(
   return manifests.find((entry) => entry.path === path) ?? null;
 }
 
+async function findSectionById(
+  engine: BrainEngine,
+  scopeId: string,
+  sectionId: string,
+  slug?: string,
+): Promise<NoteSectionEntry | null> {
+  const [section] = await engine.listNoteSectionEntries({
+    scope_id: scopeId,
+    section_id: sectionId,
+    limit: 1,
+  });
+  if (!section) return null;
+  if (slug && slug !== section.page_slug) return null;
+  return section;
+}
+
+interface AnchoredSectionPath {
+  page_path: string;
+  fragment: string;
+}
+
+function parseAnchoredSectionPath(path: string): AnchoredSectionPath | null {
+  const separatorIndex = path.indexOf('#');
+  if (separatorIndex === -1) {
+    return null;
+  }
+
+  const pagePath = path.slice(0, separatorIndex);
+  const fragment = path.slice(separatorIndex + 1).replace(/^\/+|\/+$/g, '');
+  if (!pagePath || !fragment) {
+    return null;
+  }
+
+  return {
+    page_path: pagePath,
+    fragment,
+  };
+}
+
+async function findSectionByAnchoredPath(
+  engine: BrainEngine,
+  scopeId: string,
+  anchored: AnchoredSectionPath,
+  slug?: string,
+): Promise<NoteSectionEntry | null> {
+  const sections = await listAllNoteSectionEntries(engine, scopeId);
+  return sections.find((entry) => {
+    if (entry.page_path !== anchored.page_path) return false;
+    if (slug && entry.page_slug !== slug) return false;
+    return entry.heading_path.join('/') === anchored.fragment;
+  }) ?? null;
+}
+
+async function buildSectionMatchResult(
+  engine: BrainEngine,
+  scopeId: string,
+  section: NoteSectionEntry | null,
+  selectionReason: 'direct_section_match' | 'direct_section_path_match',
+  anchoredPath?: string,
+): Promise<PrecisionLookupRouteResult> {
+  if (!section) {
+    return {
+      selection_reason: 'no_match',
+      candidate_count: 0,
+      route: null,
+    };
+  }
+
+  const [page] = await engine.listNoteManifestEntries({
+    scope_id: scopeId,
+    slug: section.page_slug,
+    limit: 1,
+  });
+  if (!page) {
+    return {
+      selection_reason: 'no_match',
+      candidate_count: 0,
+      route: null,
+    };
+  }
+
+  return {
+    selection_reason: selectionReason,
+    candidate_count: 1,
+    route: buildSectionRoute(scopeId, page, section, anchoredPath),
+  };
+}
+
 function buildSectionRoute(
   scopeId: string,
   page: NoteManifestEntry,
   section: NoteSectionEntry,
+  anchoredPath?: string,
 ): PrecisionLookupRoute {
   return {
     route_kind: 'precision_lookup',
     target_kind: 'section',
     slug: page.slug,
-    path: section.page_path,
+    path: anchoredPath ?? section.page_path,
     title: section.heading_text,
     scope_id: scopeId,
     section_id: section.section_id,
@@ -164,7 +234,9 @@ function buildSectionRoute(
       'minimal_supporting_reads',
     ],
     summary_lines: [
-      `Precision lookup is anchored to exact canonical section ${section.heading_text}.`,
+      anchoredPath
+        ? `Precision lookup is anchored to exact canonical section path ${anchoredPath}.`
+        : `Precision lookup is anchored to exact canonical section ${section.heading_text}.`,
       'Supporting reads kept narrow: 2.',
       'Use the exact canonical artifact before relying on memory summaries.',
     ],
@@ -174,7 +246,7 @@ function buildSectionRoute(
         node_kind: 'section',
         label: section.heading_text,
         page_slug: section.page_slug,
-        path: section.page_path,
+        path: anchoredPath ?? section.page_path,
         section_id: section.section_id,
       },
       {

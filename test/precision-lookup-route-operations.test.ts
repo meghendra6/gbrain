@@ -44,6 +44,9 @@ test('precision lookup route operation returns no-match disclosure and direct ro
       '---',
       '# Overview',
       'Coordinates structural extraction.',
+      '',
+      '## Runtime',
+      'Owns exact retrieval routing.',
     ].join('\n'), { path: 'systems/mbrain.md' });
 
     const direct = await route.handler({
@@ -70,6 +73,19 @@ test('precision lookup route operation returns no-match disclosure and direct ro
 
     expect((byPath as any).selection_reason).toBe('direct_path_match');
     expect((byPath as any).route?.path).toBe('systems/mbrain.md');
+
+    const bySectionPath = await route.handler({
+      engine,
+      config: {} as any,
+      logger: console,
+      dryRun: false,
+    }, {
+      path: 'systems/mbrain.md#overview/runtime',
+    });
+
+    expect((bySectionPath as any).selection_reason).toBe('direct_section_path_match');
+    expect((bySectionPath as any).route?.target_kind).toBe('section');
+    expect((bySectionPath as any).route?.path).toBe('systems/mbrain.md#overview/runtime');
   } finally {
     await engine.disconnect();
     rmSync(dir, { recursive: true, force: true });

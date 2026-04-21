@@ -3,14 +3,16 @@
 ## Goal
 
 Extend the published note-corpus precision lookup route so callers can resolve an
-exact canonical artifact by repo-relative Markdown path, not only by slug or
-section id.
+exact canonical artifact by repo-relative Markdown path, including an anchored
+section fragment such as `systems/mbrain.md#overview/runtime`, not only by slug
+or section id.
 
 ## Scope
 
-- exact note-manifest path match only
+- exact note-manifest page path match
+- exact note-section anchored path match via existing `heading_path`
 - additive extension to `precision-lookup-route`
-- reuse existing manifest pagination rather than new engine filters
+- reuse existing structural pagination rather than new engine filters
 
 ## Non-Goals
 
@@ -21,5 +23,7 @@ section id.
 ## Acceptance
 
 - service resolves an exact canonical page by `path`
+- service resolves an exact canonical section by anchored `path`
 - operation exposes the same behavior
-- benchmark still passes and now covers the path case
+- retrieval-route selector exposes the same behavior
+- benchmarks still pass and now cover page-path and section-path cases

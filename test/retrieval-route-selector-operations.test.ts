@@ -59,6 +59,7 @@ test('retrieval route selector operation dispatches task and precision intents',
       '',
       '## Runtime',
       'Owns exact retrieval routing.',
+      '[Source: User, direct message, 2026-04-22 12:30 PM KST]',
     ].join('\n'), { path: 'systems/mbrain.md' });
 
     const exact = await route.handler({
@@ -100,6 +101,20 @@ test('retrieval route selector operation dispatches task and precision intents',
     expect((bySectionPath as any).selected_intent).toBe('precision_lookup');
     expect((bySectionPath as any).selection_reason).toBe('direct_section_path_match');
     expect((bySectionPath as any).route?.payload?.target_kind).toBe('section');
+
+    const bySourceRef = await route.handler({
+      engine,
+      config: {} as any,
+      logger: console,
+      dryRun: false,
+    }, {
+      intent: 'precision_lookup',
+      source_ref: 'User, direct message, 2026-04-22 12:30 PM KST',
+    });
+
+    expect((bySourceRef as any).selected_intent).toBe('precision_lookup');
+    expect((bySourceRef as any).selection_reason).toBe('direct_source_ref_section_match');
+    expect((bySourceRef as any).route?.payload?.target_kind).toBe('section');
   } finally {
     await engine.disconnect();
     rmSync(dir, { recursive: true, force: true });

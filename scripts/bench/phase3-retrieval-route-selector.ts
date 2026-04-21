@@ -124,6 +124,7 @@ async function seedFixtures(engine: BrainEngine): Promise<void> {
     '',
     '## Runtime',
     'Owns exact retrieval routing.',
+    '[Source: User, direct message, 2026-04-22 12:30 PM KST]',
   ].join('\n'), { path: 'systems/mbrain.md' });
   await importFromContent(engine, 'concepts/note-manifest', [
     '---',
@@ -208,6 +209,15 @@ async function runCorrectnessWorkload(
   });
   checks += 1;
   if (bySectionPath.selection_reason === 'direct_section_path_match' && bySectionPath.route?.route_kind === 'precision_lookup') {
+    passes += 1;
+  }
+
+  const bySourceRef = await selectRetrievalRoute(engine, {
+    intent: 'precision_lookup',
+    source_ref: 'User, direct message, 2026-04-22 12:30 PM KST',
+  });
+  checks += 1;
+  if (bySourceRef.selection_reason === 'direct_source_ref_section_match' && bySourceRef.route?.route_kind === 'precision_lookup') {
     passes += 1;
   }
 

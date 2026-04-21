@@ -47,6 +47,7 @@ test('precision lookup route operation returns no-match disclosure and direct ro
       '',
       '## Runtime',
       'Owns exact retrieval routing.',
+      '[Source: User, direct message, 2026-04-22 12:30 PM KST]',
     ].join('\n'), { path: 'systems/mbrain.md' });
 
     const direct = await route.handler({
@@ -86,6 +87,19 @@ test('precision lookup route operation returns no-match disclosure and direct ro
     expect((bySectionPath as any).selection_reason).toBe('direct_section_path_match');
     expect((bySectionPath as any).route?.target_kind).toBe('section');
     expect((bySectionPath as any).route?.path).toBe('systems/mbrain.md#overview/runtime');
+
+    const bySourceRef = await route.handler({
+      engine,
+      config: {} as any,
+      logger: console,
+      dryRun: false,
+    }, {
+      source_ref: 'User, direct message, 2026-04-22 12:30 PM KST',
+    });
+
+    expect((bySourceRef as any).selection_reason).toBe('direct_source_ref_section_match');
+    expect((bySourceRef as any).route?.target_kind).toBe('section');
+    expect((bySourceRef as any).route?.path).toBe('systems/mbrain.md#overview/runtime');
   } finally {
     await engine.disconnect();
     rmSync(dir, { recursive: true, force: true });

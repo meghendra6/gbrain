@@ -120,6 +120,7 @@ test('retrieval route selector dispatches precision lookup intent', async () => 
       '',
       '## Runtime',
       'Owns exact retrieval routing.',
+      '[Source: User, direct message, 2026-04-22 12:30 PM KST]',
     ].join('\n'), { path: 'systems/mbrain.md' });
 
     const result = await selectRetrievalRoute(engine, {
@@ -150,6 +151,16 @@ test('retrieval route selector dispatches precision lookup intent', async () => 
     expect(bySectionPath.selection_reason).toBe('direct_section_path_match');
     expect((bySectionPath.route?.payload as any)?.target_kind).toBe('section');
     expect((bySectionPath.route?.payload as any)?.path).toBe('systems/mbrain.md#overview/runtime');
+
+    const bySourceRef = await selectRetrievalRoute(engine, {
+      intent: 'precision_lookup',
+      source_ref: 'User, direct message, 2026-04-22 12:30 PM KST',
+    });
+
+    expect(bySourceRef.selected_intent).toBe('precision_lookup');
+    expect(bySourceRef.selection_reason).toBe('direct_source_ref_section_match');
+    expect((bySourceRef.route?.payload as any)?.target_kind).toBe('section');
+    expect((bySourceRef.route?.payload as any)?.path).toBe('systems/mbrain.md#overview/runtime');
   } finally {
     await engine.disconnect();
     rmSync(dir, { recursive: true, force: true });

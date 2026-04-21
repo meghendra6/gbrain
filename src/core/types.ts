@@ -514,6 +514,7 @@ export interface PrecisionLookupRouteInput {
   slug?: string;
   path?: string;
   section_id?: string;
+  source_ref?: string;
 }
 
 export interface PrecisionLookupRouteResult {
@@ -543,6 +544,7 @@ export interface RetrievalRouteSelectorInput {
   slug?: string;
   path?: string;
   section_id?: string;
+  source_ref?: string;
 }
 
 export interface RetrievalRouteSelectorResult {

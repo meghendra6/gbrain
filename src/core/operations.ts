@@ -2141,6 +2141,7 @@ const get_precision_lookup_route: Operation = {
     slug: { type: 'string', description: 'Exact canonical page slug' },
     path: { type: 'string', description: 'Exact canonical note path, optionally with #section/path fragment' },
     section_id: { type: 'string', description: 'Exact canonical section id' },
+    source_ref: { type: 'string', description: 'Exact extracted source reference string' },
   },
   handler: async (ctx, p) => {
     return getPrecisionLookupRoute(ctx.engine, {
@@ -2148,6 +2149,7 @@ const get_precision_lookup_route: Operation = {
       slug: typeof p.slug === 'string' ? p.slug : undefined,
       path: typeof p.path === 'string' ? p.path : undefined,
       section_id: typeof p.section_id === 'string' ? p.section_id : undefined,
+      source_ref: typeof p.source_ref === 'string' ? p.source_ref : undefined,
     });
   },
   cliHints: { name: 'precision-lookup-route' },
@@ -2166,7 +2168,9 @@ const select_retrieval_route: Operation = {
     query: { type: 'string', description: 'Query string for broad_synthesis intent' },
     limit: { type: 'number', description: 'Optional broad_synthesis match limit' },
     slug: { type: 'string', description: 'Exact slug for precision_lookup intent' },
+    path: { type: 'string', description: 'Exact path for precision_lookup intent, optionally with #section/path fragment' },
     section_id: { type: 'string', description: 'Exact section id for precision_lookup intent' },
+    source_ref: { type: 'string', description: 'Exact extracted source reference string for precision_lookup intent' },
   },
   handler: async (ctx, p) => {
     const intent = String(p.intent);
@@ -2180,8 +2184,8 @@ const select_retrieval_route: Operation = {
       throw new OperationError('invalid_params', 'broad_synthesis intent requires query.');
     }
     if (intent === 'precision_lookup' && typeof p.slug !== 'string' && typeof p.section_id !== 'string') {
-      if (typeof p.path !== 'string') {
-        throw new OperationError('invalid_params', 'precision_lookup intent requires slug, path, or section_id.');
+      if (typeof p.path !== 'string' && typeof p.source_ref !== 'string') {
+        throw new OperationError('invalid_params', 'precision_lookup intent requires slug, path, section_id, or source_ref.');
       }
     }
     if (p.persist_trace === true && typeof p.task_id !== 'string') {
@@ -2200,6 +2204,7 @@ const select_retrieval_route: Operation = {
       slug: typeof p.slug === 'string' ? p.slug : undefined,
       path: typeof p.path === 'string' ? p.path : undefined,
       section_id: typeof p.section_id === 'string' ? p.section_id : undefined,
+      source_ref: typeof p.source_ref === 'string' ? p.source_ref : undefined,
     });
   },
   cliHints: { name: 'retrieval-route' },

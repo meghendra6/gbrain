@@ -199,6 +199,18 @@ async function runCorrectnessWorkload(
     passes += 1;
   }
 
+  const bySourceRef = await getPrecisionLookupRoute(engine, {
+    source_ref: 'User, direct message, 2026-04-22 12:00 PM KST',
+  });
+  checks += 1;
+  if (
+    bySourceRef.selection_reason === 'direct_source_ref_section_match'
+    && bySourceRef.route?.target_kind === 'section'
+    && bySourceRef.route.path === 'systems/mbrain.md#overview/runtime'
+  ) {
+    passes += 1;
+  }
+
   return {
     name: 'precision_lookup_route_correctness',
     status: 'measured',

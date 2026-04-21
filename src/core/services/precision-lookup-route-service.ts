@@ -56,6 +56,10 @@ export async function getPrecisionLookupRoute(
   }
 
   if (!input.slug) {
+    if (input.source_ref) {
+      return buildSourceRefMatchResult(engine, scopeId, input.source_ref);
+    }
+
     return {
       selection_reason: 'no_match',
       candidate_count: 0,
@@ -87,6 +91,7 @@ function buildPageRoute(
   scopeId: string,
   page: NoteManifestEntry,
   anchoredPath?: string,
+  sourceRef?: string,
 ): PrecisionLookupRoute {
   return {
     route_kind: 'precision_lookup',
@@ -102,6 +107,8 @@ function buildPageRoute(
     summary_lines: [
       anchoredPath
         ? `Precision lookup is anchored to exact canonical path ${anchoredPath}.`
+        : sourceRef
+          ? `Precision lookup is anchored to exact canonical source ref ${sourceRef}.`
         : `Precision lookup is anchored to exact canonical page ${page.slug}.`,
       'Supporting reads kept narrow: 1.',
       'Use the exact canonical artifact before relying on memory summaries.',
@@ -184,8 +191,12 @@ async function buildSectionMatchResult(
   engine: BrainEngine,
   scopeId: string,
   section: NoteSectionEntry | null,
-  selectionReason: 'direct_section_match' | 'direct_section_path_match',
+  selectionReason:
+    | 'direct_section_match'
+    | 'direct_section_path_match'
+    | 'direct_source_ref_section_match',
   anchoredPath?: string,
+  sourceRef?: string,
 ): Promise<PrecisionLookupRouteResult> {
   if (!section) {
     return {
@@ -211,7 +222,64 @@ async function buildSectionMatchResult(
   return {
     selection_reason: selectionReason,
     candidate_count: 1,
-    route: buildSectionRoute(scopeId, page, section, anchoredPath),
+    route: buildSectionRoute(scopeId, page, section, anchoredPath, sourceRef),
+  };
+}
+
+async function buildSourceRefMatchResult(
+  engine: BrainEngine,
+  scopeId: string,
+  sourceRef: string,
+): Promise<PrecisionLookupRouteResult> {
+  const sections = (await listAllNoteSectionEntries(engine, scopeId))
+    .filter((entry) => entry.source_refs.includes(sourceRef));
+  if (sections.length === 1) {
+    const section = sections[0];
+    if (!section) {
+      throw new Error('Expected one section match for source_ref lookup');
+    }
+    return buildSectionMatchResult(
+      engine,
+      scopeId,
+      section,
+      'direct_source_ref_section_match',
+      buildAnchoredSectionPath(section),
+      sourceRef,
+    );
+  }
+  if (sections.length > 1) {
+    return {
+      selection_reason: 'ambiguous_source_ref_match',
+      candidate_count: sections.length,
+      route: null,
+    };
+  }
+
+  const pages = (await listAllNoteManifestEntries(engine, scopeId))
+    .filter((entry) => entry.source_refs.includes(sourceRef));
+  if (pages.length === 1) {
+    const page = pages[0];
+    if (!page) {
+      throw new Error('Expected one page match for source_ref lookup');
+    }
+    return {
+      selection_reason: 'direct_source_ref_page_match',
+      candidate_count: 1,
+      route: buildPageRoute(scopeId, page, undefined, sourceRef),
+    };
+  }
+  if (pages.length > 1) {
+    return {
+      selection_reason: 'ambiguous_source_ref_match',
+      candidate_count: pages.length,
+      route: null,
+    };
+  }
+
+  return {
+    selection_reason: 'no_match',
+    candidate_count: 0,
+    route: null,
   };
 }
 
@@ -220,6 +288,7 @@ function buildSectionRoute(
   page: NoteManifestEntry,
   section: NoteSectionEntry,
   anchoredPath?: string,
+  sourceRef?: string,
 ): PrecisionLookupRoute {
   return {
     route_kind: 'precision_lookup',
@@ -234,8 +303,10 @@ function buildSectionRoute(
       'minimal_supporting_reads',
     ],
     summary_lines: [
-      anchoredPath
-        ? `Precision lookup is anchored to exact canonical section path ${anchoredPath}.`
+      sourceRef
+        ? `Precision lookup is anchored to exact canonical source ref ${sourceRef}.`
+        : anchoredPath
+          ? `Precision lookup is anchored to exact canonical section path ${anchoredPath}.`
         : `Precision lookup is anchored to exact canonical section ${section.heading_text}.`,
       'Supporting reads kept narrow: 2.',
       'Use the exact canonical artifact before relying on memory summaries.',
@@ -258,4 +329,8 @@ function buildSectionRoute(
       },
     ],
   };
+}
+
+function buildAnchoredSectionPath(section: NoteSectionEntry): string {
+  return `${section.page_path}#${section.heading_path.join('/')}`;
 }

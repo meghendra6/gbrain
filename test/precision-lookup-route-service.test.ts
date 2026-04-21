@@ -184,6 +184,44 @@ test('precision lookup route service resolves an exact canonical section by anch
   }
 });
 
+test('precision lookup route service resolves a uniquely cited canonical section by source ref', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mbrain-precision-route-source-ref-'));
+  const databasePath = join(dir, 'brain.db');
+  const engine = new SQLiteEngine();
+
+  try {
+    await engine.connect({ engine: 'sqlite', database_path: databasePath });
+    await engine.initSchema();
+
+    await importFromContent(engine, 'systems/mbrain', [
+      '---',
+      'type: system',
+      'title: MBrain',
+      '---',
+      '# Overview',
+      'Coordinates structural extraction.',
+      '',
+      '## Runtime',
+      'Owns exact retrieval routing.',
+      '[Source: User, direct message, 2026-04-22 12:30 PM KST]',
+    ].join('\n'), { path: 'systems/mbrain.md' });
+
+    const result = await getPrecisionLookupRoute(engine, {
+      source_ref: 'User, direct message, 2026-04-22 12:30 PM KST',
+    });
+
+    expect(result.selection_reason).toBe('direct_source_ref_section_match');
+    expect(result.candidate_count).toBe(1);
+    expect(result.route?.target_kind).toBe('section');
+    expect(result.route?.section_id).toBe('systems/mbrain#overview/runtime');
+    expect(result.route?.path).toBe('systems/mbrain.md#overview/runtime');
+    expect(result.route?.summary_lines).toContain('Precision lookup is anchored to exact canonical source ref User, direct message, 2026-04-22 12:30 PM KST.');
+  } finally {
+    await engine.disconnect();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('precision lookup route service degrades explicitly when the exact artifact is missing', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'mbrain-precision-route-missing-'));
   const databasePath = join(dir, 'brain.db');

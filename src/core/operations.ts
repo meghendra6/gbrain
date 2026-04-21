@@ -27,6 +27,7 @@ import { findStructuralContextMapPath } from './services/context-map-path-servic
 import { queryStructuralContextMap } from './services/context-map-query-service.ts';
 import { getStructuralContextMapReport } from './services/context-map-report-service.ts';
 import { getPrecisionLookupRoute } from './services/precision-lookup-route-service.ts';
+import { selectRetrievalRoute } from './services/retrieval-route-selector-service.ts';
 import { getWorkspaceCorpusCard } from './services/workspace-corpus-card-service.ts';
 import { getWorkspaceOrientationBundle } from './services/workspace-orientation-bundle-service.ts';
 import { getWorkspaceProjectCard } from './services/workspace-project-card-service.ts';
@@ -747,6 +748,26 @@ export function formatResult(
         `Retrieval route: ${(route.retrieval_route || []).join(' -> ')}`,
         'Recommended reads:',
         ...(route.recommended_reads || []).map((item: any) => `- ${item.node_id} | ${item.label} | ${item.path}`),
+      ].join('\n') + '\n';
+    }
+    case 'select_retrieval_route': {
+      const resultValue = result as any;
+      if (!resultValue.route) {
+        return [
+          'No retrieval route selected.',
+          `Intent: ${resultValue.selected_intent}`,
+          `Reason: ${resultValue.selection_reason}`,
+          `Candidates: ${resultValue.candidate_count}`,
+        ].join('\n') + '\n';
+      }
+      const route = resultValue.route;
+      return [
+        `Retrieval route: ${resultValue.selected_intent}`,
+        `Route kind: ${route.route_kind}`,
+        `Reason: ${resultValue.selection_reason}`,
+        `Candidates: ${resultValue.candidate_count}`,
+        ...route.summary_lines,
+        `Route steps: ${(route.retrieval_route || []).join(' -> ')}`,
       ].join('\n') + '\n';
     }
     case 'get_workspace_system_card': {
@@ -2128,6 +2149,50 @@ const get_precision_lookup_route: Operation = {
   cliHints: { name: 'precision-lookup-route' },
 };
 
+const select_retrieval_route: Operation = {
+  name: 'select_retrieval_route',
+  description: 'Select one published retrieval route by explicit intent.',
+  params: {
+    intent: { type: 'string', required: true, description: 'One of task_resume, broad_synthesis, precision_lookup' },
+    task_id: { type: 'string', description: 'Task id for task_resume intent' },
+    map_id: { type: 'string', description: 'Optional context map id for broad_synthesis intent' },
+    scope_id: { type: 'string', description: 'Scope id for delegated route selection' },
+    kind: { type: 'string', description: 'Optional map kind filter for broad_synthesis intent' },
+    query: { type: 'string', description: 'Query string for broad_synthesis intent' },
+    limit: { type: 'number', description: 'Optional broad_synthesis match limit' },
+    slug: { type: 'string', description: 'Exact slug for precision_lookup intent' },
+    section_id: { type: 'string', description: 'Exact section id for precision_lookup intent' },
+  },
+  handler: async (ctx, p) => {
+    const intent = String(p.intent);
+    if (intent !== 'task_resume' && intent !== 'broad_synthesis' && intent !== 'precision_lookup') {
+      throw new OperationError('invalid_params', 'intent must be one of task_resume, broad_synthesis, precision_lookup.');
+    }
+    if (intent === 'task_resume' && typeof p.task_id !== 'string') {
+      throw new OperationError('invalid_params', 'task_resume intent requires task_id.');
+    }
+    if (intent === 'broad_synthesis' && typeof p.query !== 'string') {
+      throw new OperationError('invalid_params', 'broad_synthesis intent requires query.');
+    }
+    if (intent === 'precision_lookup' && typeof p.slug !== 'string' && typeof p.section_id !== 'string') {
+      throw new OperationError('invalid_params', 'precision_lookup intent requires slug or section_id.');
+    }
+
+    return selectRetrievalRoute(ctx.engine, {
+      intent,
+      task_id: typeof p.task_id === 'string' ? p.task_id : undefined,
+      map_id: typeof p.map_id === 'string' ? p.map_id : undefined,
+      scope_id: String(p.scope_id ?? DEFAULT_NOTE_MANIFEST_SCOPE_ID),
+      kind: p.kind as string | undefined,
+      query: typeof p.query === 'string' ? p.query : undefined,
+      limit: typeof p.limit === 'number' ? p.limit : undefined,
+      slug: typeof p.slug === 'string' ? p.slug : undefined,
+      section_id: typeof p.section_id === 'string' ? p.section_id : undefined,
+    });
+  },
+  cliHints: { name: 'retrieval-route' },
+};
+
 const get_workspace_system_card: Operation = {
   name: 'get_workspace_system_card',
   description: 'Render a compact workspace system card from the current context-map report.',
@@ -2678,7 +2743,7 @@ export const operations: Operation[] = [
   // Structural graph
   get_note_structural_neighbors, find_note_structural_path,
   // Persisted context maps
-  build_context_map, get_context_map_entry, list_context_map_entries, get_context_map_report, get_context_map_explanation, query_context_map, find_context_map_path, get_broad_synthesis_route, get_precision_lookup_route, get_workspace_system_card, get_workspace_project_card, get_workspace_orientation_bundle, get_workspace_corpus_card,
+  build_context_map, get_context_map_entry, list_context_map_entries, get_context_map_report, get_context_map_explanation, query_context_map, find_context_map_path, get_broad_synthesis_route, get_precision_lookup_route, select_retrieval_route, get_workspace_system_card, get_workspace_project_card, get_workspace_orientation_bundle, get_workspace_corpus_card,
   // Context atlas registry
   build_context_atlas, get_context_atlas_entry, list_context_atlas_entries, select_context_atlas_entry, get_context_atlas_overview, get_context_atlas_report, get_atlas_orientation_card, get_atlas_orientation_bundle,
   // Operational memory

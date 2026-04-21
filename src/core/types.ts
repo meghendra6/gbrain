@@ -521,6 +521,34 @@ export interface PrecisionLookupRouteResult {
   route: PrecisionLookupRoute | null;
 }
 
+export type RetrievalRouteIntent = 'task_resume' | 'broad_synthesis' | 'precision_lookup';
+
+export interface RetrievalRouteSelection {
+  route_kind: RetrievalRouteIntent;
+  retrieval_route: string[];
+  summary_lines: string[];
+  payload: unknown;
+}
+
+export interface RetrievalRouteSelectorInput {
+  intent: RetrievalRouteIntent;
+  task_id?: string;
+  map_id?: string;
+  scope_id?: string;
+  kind?: string;
+  query?: string;
+  limit?: number;
+  slug?: string;
+  section_id?: string;
+}
+
+export interface RetrievalRouteSelectorResult {
+  selected_intent: RetrievalRouteIntent;
+  selection_reason: string;
+  candidate_count: number;
+  route: RetrievalRouteSelection | null;
+}
+
 export interface WorkspaceSystemCard {
   card_kind: 'workspace_system';
   system_slug: string;

@@ -551,6 +551,24 @@ Expected:
 - `acceptance.readiness_status` reports `pass` or `fail` from the local guardrails
 - `acceptance.phase3_status` matches the local guardrail outcome without introducing a baseline artifact
 
+## Phase 3 retrieval-route selector
+
+Run:
+
+```bash
+bun test test/retrieval-route-selector-service.test.ts test/retrieval-route-selector-operations.test.ts test/phase3-retrieval-route-selector.test.ts
+bun test test/cli.test.ts -t "retrieval-route --help"
+bun run bench:phase3-retrieval-route-selector --json
+```
+
+Expected:
+
+- retrieval-route selector tests pass
+- `retrieval-route` stays available through the shared operation surface
+- benchmark reports `retrieval_route_selector` and `retrieval_route_selector_correctness`
+- `acceptance.readiness_status` reports `pass` or `fail` from the local guardrails
+- `acceptance.phase3_status` matches the local guardrail outcome without introducing a baseline artifact
+
 ---
 
 ## 2. Skillpack Loaded

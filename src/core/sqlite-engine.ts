@@ -37,6 +37,9 @@ import type {
   MemoryCandidateSupersessionEntry,
   MemoryCandidateSupersessionInput,
   MemoryCandidateStatusPatch,
+  CanonicalHandoffEntry,
+  CanonicalHandoffEntryInput,
+  CanonicalHandoffFilters,
   ProfileMemoryEntry,
   ProfileMemoryEntryInput,
   ProfileMemoryFilters,
@@ -1843,6 +1846,108 @@ export class SQLiteEngine implements BrainEngine {
     return row ? rowToMemoryCandidateContradictionEntry(row) : null;
   }
 
+  async createCanonicalHandoffEntry(
+    input: CanonicalHandoffEntryInput,
+  ): Promise<CanonicalHandoffEntry | null> {
+    const timestamp = nowIso();
+    let result;
+    try {
+      result = this.database.run(`
+        INSERT INTO canonical_handoff_entries (
+          id, scope_id, candidate_id, target_object_type, target_object_id, source_refs,
+          reviewed_at, review_reason, created_at, updated_at
+        )
+        SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        WHERE EXISTS (
+          SELECT 1
+          FROM memory_candidate_entries
+          WHERE id = ?
+            AND scope_id = ?
+            AND status = 'promoted'
+            AND target_object_type = ?
+            AND target_object_id = ?
+        )
+      `, [
+        input.id,
+        input.scope_id,
+        input.candidate_id,
+        input.target_object_type,
+        input.target_object_id,
+        JSON.stringify(input.source_refs ?? []),
+        toNullableIso(input.reviewed_at),
+        input.review_reason ?? null,
+        timestamp,
+        timestamp,
+        input.candidate_id,
+        input.scope_id,
+        input.target_object_type,
+        input.target_object_id,
+      ]);
+    } catch (error) {
+      if (isCanonicalHandoffDuplicateConstraint(error)) {
+        return null;
+      }
+      throw error;
+    }
+    if (result.changes === 0) {
+      return null;
+    }
+
+    const row = this.database.query(`
+      SELECT id, scope_id, candidate_id, target_object_type, target_object_id, source_refs,
+             reviewed_at, review_reason, created_at, updated_at
+      FROM canonical_handoff_entries
+      WHERE id = ?
+    `).get(input.id) as Record<string, unknown> | null;
+    if (!row) {
+      throw new Error(`Canonical handoff entry not found after create: ${input.id}`);
+    }
+    return rowToCanonicalHandoffEntry(row);
+  }
+
+  async getCanonicalHandoffEntry(id: string): Promise<CanonicalHandoffEntry | null> {
+    const row = this.database.query(`
+      SELECT id, scope_id, candidate_id, target_object_type, target_object_id, source_refs,
+             reviewed_at, review_reason, created_at, updated_at
+      FROM canonical_handoff_entries
+      WHERE id = ?
+    `).get(id) as Record<string, unknown> | null;
+    return row ? rowToCanonicalHandoffEntry(row) : null;
+  }
+
+  async listCanonicalHandoffEntries(filters?: CanonicalHandoffFilters): Promise<CanonicalHandoffEntry[]> {
+    const limit = filters?.limit ?? 100;
+    const offset = filters?.offset ?? 0;
+    const params: unknown[] = [];
+    const clauses: string[] = [];
+
+    if (filters?.scope_id !== undefined) {
+      params.push(filters.scope_id);
+      clauses.push('scope_id = ?');
+    }
+    if (filters?.candidate_id !== undefined) {
+      params.push(filters.candidate_id);
+      clauses.push('candidate_id = ?');
+    }
+    if (filters?.target_object_type !== undefined) {
+      params.push(filters.target_object_type);
+      clauses.push('target_object_type = ?');
+    }
+
+    params.push(limit, offset);
+    const whereClause = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+    const rows = this.database.query(`
+      SELECT id, scope_id, candidate_id, target_object_type, target_object_id, source_refs,
+             reviewed_at, review_reason, created_at, updated_at
+      FROM canonical_handoff_entries
+      ${whereClause}
+      ORDER BY created_at DESC, id ASC
+      LIMIT ?
+      OFFSET ?
+    `).all(...params) as Record<string, unknown>[];
+    return rows.map(rowToCanonicalHandoffEntry);
+  }
+
   async deleteMemoryCandidateEntry(id: string): Promise<void> {
     this.database.run(`DELETE FROM memory_candidate_entries WHERE id = ?`, [id]);
   }
@@ -2778,6 +2883,26 @@ export class SQLiteEngine implements BrainEngine {
               ON memory_candidate_contradiction_entries(challenged_candidate_id);
           `);
           break;
+        case 20:
+          this.database.exec(`
+            CREATE TABLE IF NOT EXISTS canonical_handoff_entries (
+              id TEXT PRIMARY KEY,
+              scope_id TEXT NOT NULL,
+              candidate_id TEXT NOT NULL UNIQUE REFERENCES memory_candidate_entries(id),
+              target_object_type TEXT NOT NULL CHECK (target_object_type IN ('curated_note', 'procedure', 'profile_memory', 'personal_episode')),
+              target_object_id TEXT NOT NULL,
+              source_refs TEXT NOT NULL DEFAULT '[]',
+              reviewed_at TEXT,
+              review_reason TEXT,
+              created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+              updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_canonical_handoff_scope
+              ON canonical_handoff_entries(scope_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_canonical_handoff_target
+              ON canonical_handoff_entries(target_object_type, target_object_id);
+          `);
+          break;
       }
 
       await this.setConfig('version', String(version));
@@ -3033,6 +3158,16 @@ function isSupersessionDuplicateConstraint(error: unknown): boolean {
   return typeof code === 'string'
     && code.startsWith('SQLITE_CONSTRAINT')
     && error.message.includes('memory_candidate_supersession_entries.superseded_candidate_id');
+}
+
+function isCanonicalHandoffDuplicateConstraint(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const code = (error as { code?: string }).code;
+  return typeof code === 'string'
+    && code.startsWith('SQLITE_CONSTRAINT')
+    && error.message.includes('UNIQUE constraint failed: canonical_handoff_entries.');
 }
 
 function parseVersion(value: string | null): number {
@@ -3376,6 +3511,23 @@ function rowToMemoryCandidateContradictionEntry(
     review_reason: row.review_reason == null ? null : String(row.review_reason),
     created_at: new Date(String(row.created_at)),
     updated_at: new Date(String(row.updated_at)),
+  };
+}
+
+function rowToCanonicalHandoffEntry(
+  row: Record<string, unknown>,
+): CanonicalHandoffEntry {
+  return {
+    id: row.id as string,
+    scope_id: row.scope_id as string,
+    candidate_id: row.candidate_id as string,
+    target_object_type: row.target_object_type as CanonicalHandoffEntry['target_object_type'],
+    target_object_id: row.target_object_id as string,
+    source_refs: parseJsonArray(row.source_refs),
+    reviewed_at: row.reviewed_at ? new Date(row.reviewed_at as string) : null,
+    review_reason: (row.review_reason as string | null) ?? null,
+    created_at: new Date(row.created_at as string),
+    updated_at: new Date(row.updated_at as string),
   };
 }
 

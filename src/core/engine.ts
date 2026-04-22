@@ -21,6 +21,9 @@ import type {
   MemoryCandidateSupersessionEntry,
   MemoryCandidateSupersessionInput,
   MemoryCandidateStatusPatch,
+  CanonicalHandoffEntry,
+  CanonicalHandoffEntryInput,
+  CanonicalHandoffFilters,
   ProfileMemoryEntry,
   ProfileMemoryEntryInput,
   ProfileMemoryFilters,
@@ -148,6 +151,9 @@ export interface BrainEngine {
   getMemoryCandidateSupersessionEntry(id: string): Promise<MemoryCandidateSupersessionEntry | null>;
   createMemoryCandidateContradictionEntry(input: MemoryCandidateContradictionEntryInput): Promise<MemoryCandidateContradictionEntry | null>;
   getMemoryCandidateContradictionEntry(id: string): Promise<MemoryCandidateContradictionEntry | null>;
+  createCanonicalHandoffEntry(input: CanonicalHandoffEntryInput): Promise<CanonicalHandoffEntry | null>;
+  getCanonicalHandoffEntry(id: string): Promise<CanonicalHandoffEntry | null>;
+  listCanonicalHandoffEntries(filters?: CanonicalHandoffFilters): Promise<CanonicalHandoffEntry[]>;
   deleteMemoryCandidateEntry(id: string): Promise<void>;
 
   // Note manifest

@@ -586,6 +586,28 @@ const MIGRATIONS: Migration[] = [
         ON memory_candidate_contradiction_entries(challenged_candidate_id);
     `,
   },
+  {
+    version: 20,
+    name: 'canonical_handoff_records',
+    sql: `
+      CREATE TABLE IF NOT EXISTS canonical_handoff_entries (
+        id TEXT PRIMARY KEY,
+        scope_id TEXT NOT NULL,
+        candidate_id TEXT NOT NULL UNIQUE REFERENCES memory_candidate_entries(id),
+        target_object_type TEXT NOT NULL CHECK (target_object_type IN ('curated_note', 'procedure', 'profile_memory', 'personal_episode')),
+        target_object_id TEXT NOT NULL,
+        source_refs JSONB NOT NULL DEFAULT '[]',
+        reviewed_at TIMESTAMPTZ,
+        review_reason TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+      CREATE INDEX idx_canonical_handoff_scope
+        ON canonical_handoff_entries(scope_id, created_at DESC);
+      CREATE INDEX idx_canonical_handoff_target
+        ON canonical_handoff_entries(target_object_type, target_object_id);
+    `,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.length > 0

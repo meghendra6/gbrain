@@ -20,6 +20,8 @@ test('memory inbox operations can be built from a dedicated domain module', () =
     'rank_memory_candidate_entries',
     'capture_map_derived_candidates',
     'list_memory_candidate_review_backlog',
+    'record_canonical_handoff',
+    'list_canonical_handoff_entries',
     'advance_memory_candidate_status',
     'reject_memory_candidate_entry',
     'preflight_promote_memory_candidate',
@@ -36,6 +38,8 @@ test('memory inbox operations are registered with CLI hints', () => {
   const rank = operations.find((operation) => operation.name === 'rank_memory_candidate_entries');
   const captureMapDerived = operations.find((operation) => operation.name === 'capture_map_derived_candidates');
   const reviewBacklog = operations.find((operation) => operation.name === 'list_memory_candidate_review_backlog');
+  const recordCanonicalHandoff = operations.find((operation) => operation.name === 'record_canonical_handoff');
+  const listCanonicalHandoffs = operations.find((operation) => operation.name === 'list_canonical_handoff_entries');
   const advance = operations.find((operation) => operation.name === 'advance_memory_candidate_status');
   const reject = operations.find((operation) => operation.name === 'reject_memory_candidate_entry');
   const preflight = operations.find((operation) => operation.name === 'preflight_promote_memory_candidate');
@@ -49,6 +53,8 @@ test('memory inbox operations are registered with CLI hints', () => {
   expect(rank?.cliHints?.name).toBe('rank-memory-candidates');
   expect(captureMapDerived?.cliHints?.name).toBe('capture-map-derived-candidates');
   expect(reviewBacklog?.cliHints?.name).toBe('list-memory-candidate-review-backlog');
+  expect(recordCanonicalHandoff?.cliHints?.name).toBe('record-canonical-handoff');
+  expect(listCanonicalHandoffs?.cliHints?.name).toBe('list-canonical-handoffs');
   expect(advance?.cliHints?.name).toBe('advance-memory-candidate-status');
   expect(reject?.cliHints?.name).toBe('reject-memory-candidate');
   expect(preflight?.cliHints?.name).toBe('preflight-promote-memory-candidate');

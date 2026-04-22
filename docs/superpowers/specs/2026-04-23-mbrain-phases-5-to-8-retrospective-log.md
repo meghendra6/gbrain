@@ -50,7 +50,29 @@ Carry-forward execution rules for Phase 7:
 
 ## Phase 7
 
-Pending.
+Current slice: `7.1 canonical handoff`
+
+What worked:
+- Keeping the slice strictly at `explicit handoff record only` was the right boundary. We proved deliberate canonical intent without mutating curated notes, procedures, profile memory, or personal episodes.
+- Reusing Phase 5 promotion state avoided inventing a second approval ladder. `promoted` stayed necessary-but-not-sufficient, and the new handoff record became the explicit second step.
+- Adding the Phase 7 acceptance pack with the first slice prevented a repeat of the early Phase 6 drift where verification was present but too fragmented.
+
+What failed or drifted:
+- The first pass under-specified backend consistency. Duplicate handoff conflicts and empty-string filters behaved differently across engines until review forced explicit alignment.
+- The first pass also treated `reviewed_at` validation too loosely. Invalid `Date` objects could still leak low-level runtime failures even though string validation existed.
+- Slice-local tests initially overfit SQLite. That would have left PGLite/Postgres handoff persistence effectively unverified.
+
+Valid review feedback that changed implementation:
+- Service-layer validation needed to reject invalid `Date` objects, not just malformed ISO strings.
+- Duplicate handoff handling had to converge across SQLite, PGLite, and Postgres instead of relying on backend-specific conflict behavior.
+- `list_canonical_handoff_entries` needed explicit non-empty scope validation, and engine filter checks needed to stop treating empty strings as “no filter”.
+- Phase 7 needed real cross-backend persistence coverage, not only SQLite service/operation/benchmark coverage.
+
+Carry-forward execution rules for the remaining Phase 7 work:
+- Any new canonical-adjacent slice must validate optional timestamp fields for both string and `Date` inputs before the engine layer.
+- When a read surface introduces optional filters, test the empty-string path explicitly so invalid scoped reads cannot widen silently.
+- For any new persistence surface, add at least one SQLite/PGLite/Postgres integration test in the same slice instead of deferring backend coverage.
+- Keep the canonical boundary explicit: record intent first, then add historical validity or stale-control logic as separate slices rather than folding them into one write path.
 
 ## Phase 8
 

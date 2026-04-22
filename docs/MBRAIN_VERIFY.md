@@ -1166,3 +1166,39 @@ mbrain check-update --json
 
 If all six return successfully, the installation is healthy. For the full
 end-to-end sync test (4c), push a real change and verify it appears in search.
+
+## Phase 7 canonical handoff
+
+Run:
+
+```bash
+bun test test/canonical-handoff-service.test.ts test/canonical-handoff-engine.test.ts test/canonical-handoff-operations.test.ts test/phase7-canonical-handoff.test.ts test/memory-inbox-operations.test.ts
+bun run bench:phase7-canonical-handoff --json
+```
+
+Expected:
+
+- only `promoted` candidates with eligible canonical targets can record a handoff
+- SQLite, PGLite, and Postgres persistence stay aligned when `DATABASE_URL` is configured
+- handoff rows preserve candidate provenance and target binding
+- recording a handoff does not mutate the promoted candidate row
+- `record-canonical-handoff` and `list-canonical-handoffs` stay available through the shared operation surface
+- benchmark reports `canonical_handoff_correctness` and `canonical_handoff`
+- `acceptance.phase7_status` matches the local handoff-slice guardrail outcome
+
+## Phase 7 acceptance-pack
+
+Run:
+
+```bash
+bun test test/phase7-acceptance-pack.test.ts
+bun run bench:phase7-acceptance --json
+```
+
+Expected:
+
+- acceptance-pack test passes
+- benchmark summarizes every published Phase 7 benchmark slice
+- `acceptance.readiness_status` reports `pass` only when all published Phase 7 slices pass
+- `acceptance.phase7_status` matches the aggregated phase outcome
+- `test:phase7` runs the published Phase 7 suites and the acceptance-pack test

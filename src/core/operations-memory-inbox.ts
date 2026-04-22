@@ -10,6 +10,7 @@ import { rankMemoryCandidateEntries } from './services/memory-candidate-scoring-
 import { captureMapDerivedCandidates } from './services/map-derived-candidate-service.ts';
 import { getStructuralContextMapReport } from './services/context-map-report-service.ts';
 import { buildMemoryCandidateReviewBacklog } from './services/memory-candidate-dedup-service.ts';
+import { recordCanonicalHandoff } from './services/canonical-handoff-service.ts';
 import { resolveMemoryCandidateContradiction } from './services/memory-inbox-contradiction-service.ts';
 import { promoteMemoryCandidateEntry } from './services/memory-inbox-promotion-service.ts';
 import { supersedeMemoryCandidateEntry } from './services/memory-inbox-supersession-service.ts';
@@ -29,6 +30,7 @@ const MEMORY_CANDIDATE_GENERATED_BY_VALUES = ['agent', 'map_analysis', 'dream_cy
 const MEMORY_CANDIDATE_EXTRACTION_KIND_VALUES = ['extracted', 'inferred', 'ambiguous', 'manual'] as const;
 const MEMORY_CANDIDATE_SENSITIVITY_VALUES = ['public', 'work', 'personal', 'secret', 'unknown'] as const;
 const MEMORY_CANDIDATE_TARGET_OBJECT_TYPE_VALUES = ['curated_note', 'procedure', 'profile_memory', 'personal_episode', 'other'] as const;
+const CANONICAL_HANDOFF_TARGET_OBJECT_TYPE_VALUES = ['curated_note', 'procedure', 'profile_memory', 'personal_episode'] as const;
 const MEMORY_CANDIDATE_CONTRADICTION_OUTCOME_VALUES = ['rejected', 'unresolved', 'superseded'] as const;
 const ISO_DATETIME_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?(?:Z|([+-])(\d{2}):(\d{2}))$/;
 
@@ -464,6 +466,86 @@ export function createMemoryInboxOperations(
     cliHints: { name: 'list-memory-candidate-review-backlog', aliases: { n: 'limit' } },
   };
 
+  const record_canonical_handoff: Operation = {
+    name: 'record_canonical_handoff',
+    description: 'Record one explicit canonical handoff row for a promoted memory candidate without mutating the canonical target.',
+    params: {
+      candidate_id: { type: 'string', required: true, description: 'Promoted memory candidate id' },
+      reviewed_at: { type: 'string', description: 'Optional ISO timestamp for handoff review metadata' },
+      review_reason: { type: 'string', description: 'Optional handoff review reason for auditability' },
+    },
+    mutating: true,
+    handler: async (ctx, p) => {
+      if (typeof p.candidate_id !== 'string' || p.candidate_id.trim().length === 0) {
+        throw invalidParams(deps, 'candidate_id must be a non-empty string');
+      }
+      if (p.review_reason != null && typeof p.review_reason !== 'string') {
+        throw invalidParams(deps, 'review_reason must be a string or null');
+      }
+      if (ctx.dryRun) {
+        return {
+          dry_run: true,
+          action: 'record_canonical_handoff',
+          candidate_id: p.candidate_id,
+        };
+      }
+
+      try {
+        return await recordCanonicalHandoff(ctx.engine, {
+          candidate_id: p.candidate_id,
+          reviewed_at: normalizeOptionalIsoTimestamp(deps, 'reviewed_at', p.reviewed_at),
+          review_reason: typeof p.review_reason === 'string' ? p.review_reason : undefined,
+        });
+      } catch (error) {
+        if (error instanceof MemoryInboxServiceError) {
+          if (error.code === 'memory_candidate_not_found') {
+            throw new deps.OperationError('memory_candidate_not_found', error.message);
+          }
+          throw new deps.OperationError('invalid_params', error.message);
+        }
+        throw error;
+      }
+    },
+    cliHints: { name: 'record-canonical-handoff' },
+  };
+
+  const list_canonical_handoff_entries: Operation = {
+    name: 'list_canonical_handoff_entries',
+    description: 'List explicit canonical handoff records for auditability and downstream canonicalization.',
+    params: {
+      scope_id: { type: 'string', description: `Canonical handoff scope id (default: ${deps.defaultScopeId})` },
+      candidate_id: { type: 'string', description: 'Optional memory candidate id filter' },
+      target_object_type: {
+        type: 'string',
+        description: 'Optional canonical handoff target type filter',
+        enum: [...CANONICAL_HANDOFF_TARGET_OBJECT_TYPE_VALUES],
+      },
+      limit: { type: 'number', description: `Max results (default 20, cap ${MAX_MEMORY_CANDIDATE_LIMIT})` },
+      offset: { type: 'number', description: 'Offset for pagination (default 0)' },
+    },
+    handler: async (ctx, p) => {
+      if (p.scope_id != null && (typeof p.scope_id !== 'string' || p.scope_id.trim().length === 0)) {
+        throw invalidParams(deps, 'scope_id must be a non-empty string');
+      }
+      if (p.candidate_id != null && (typeof p.candidate_id !== 'string' || p.candidate_id.trim().length === 0)) {
+        throw invalidParams(deps, 'candidate_id must be a non-empty string');
+      }
+      return ctx.engine.listCanonicalHandoffEntries({
+        scope_id: String(p.scope_id ?? deps.defaultScopeId),
+        candidate_id: typeof p.candidate_id === 'string' ? p.candidate_id : undefined,
+        target_object_type: optionalEnumValue(
+          deps,
+          'target_object_type',
+          p.target_object_type,
+          CANONICAL_HANDOFF_TARGET_OBJECT_TYPE_VALUES,
+        ),
+        limit: normalizeLimit(deps, p.limit),
+        offset: normalizeOffset(deps, p.offset),
+      });
+    },
+    cliHints: { name: 'list-canonical-handoffs', aliases: { n: 'limit' } },
+  };
+
   const advance_memory_candidate_status: Operation = {
     name: 'advance_memory_candidate_status',
     description: 'Advance one memory-inbox candidate through the bounded early review lifecycle.',
@@ -745,6 +827,8 @@ export function createMemoryInboxOperations(
     rank_memory_candidate_entries,
     capture_map_derived_candidates,
     list_memory_candidate_review_backlog,
+    record_canonical_handoff,
+    list_canonical_handoff_entries,
     advance_memory_candidate_status,
     reject_memory_candidate_entry,
     preflight_promote_memory_candidate,

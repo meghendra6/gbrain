@@ -855,6 +855,8 @@ export type MemoryCandidateContradictionOutcome =
   | 'unresolved'
   | 'superseded';
 
+export type CanonicalHandoffTargetObjectType = Exclude<MemoryCandidateTargetObjectType, 'other'>;
+
 export interface MemoryCandidateContradictionEntry {
   id: string;
   scope_id: string;
@@ -877,6 +879,38 @@ export interface MemoryCandidateContradictionEntryInput {
   supersession_entry_id?: string | null;
   reviewed_at?: Date | string | null;
   review_reason?: string | null;
+}
+
+export interface CanonicalHandoffEntry {
+  id: string;
+  scope_id: string;
+  candidate_id: string;
+  target_object_type: CanonicalHandoffTargetObjectType;
+  target_object_id: string;
+  source_refs: string[];
+  reviewed_at: Date | null;
+  review_reason: string | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface CanonicalHandoffEntryInput {
+  id: string;
+  scope_id: string;
+  candidate_id: string;
+  target_object_type: CanonicalHandoffTargetObjectType;
+  target_object_id: string;
+  source_refs: string[];
+  reviewed_at?: Date | string | null;
+  review_reason?: string | null;
+}
+
+export interface CanonicalHandoffFilters {
+  scope_id?: string;
+  candidate_id?: string;
+  target_object_type?: CanonicalHandoffTargetObjectType;
+  limit?: number;
+  offset?: number;
 }
 
 export interface PersonalEpisodeLookupRoute {

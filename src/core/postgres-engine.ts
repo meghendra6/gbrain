@@ -29,6 +29,9 @@ import type {
   MemoryCandidateSupersessionEntry,
   MemoryCandidateSupersessionInput,
   MemoryCandidateStatusPatch,
+  CanonicalHandoffEntry,
+  CanonicalHandoffEntryInput,
+  CanonicalHandoffFilters,
   ProfileMemoryEntry,
   ProfileMemoryEntryInput,
   ProfileMemoryFilters,
@@ -72,6 +75,7 @@ import {
   rowToMemoryCandidateEntry,
   rowToMemoryCandidateContradictionEntry,
   rowToMemoryCandidateSupersessionEntry,
+  rowToCanonicalHandoffEntry,
   rowToNoteManifestEntry,
   rowToNoteSectionEntry,
   rowToProfileMemoryEntry,
@@ -1532,6 +1536,93 @@ export class PostgresEngine implements BrainEngine {
       return null;
     }
     return rowToMemoryCandidateContradictionEntry(rows[0] as Record<string, unknown>);
+  }
+
+  async createCanonicalHandoffEntry(
+    input: CanonicalHandoffEntryInput,
+  ): Promise<CanonicalHandoffEntry | null> {
+    const sql = this.sql;
+    const rows = await sql`
+      INSERT INTO canonical_handoff_entries (
+        id, scope_id, candidate_id, target_object_type, target_object_id, source_refs,
+        reviewed_at, review_reason
+      )
+      SELECT
+        ${input.id},
+        ${input.scope_id},
+        ${input.candidate_id},
+        ${input.target_object_type},
+        ${input.target_object_id},
+        ${JSON.stringify(input.source_refs ?? [])}::jsonb,
+        ${input.reviewed_at instanceof Date ? input.reviewed_at.toISOString() : input.reviewed_at ?? null},
+        ${input.review_reason ?? null}
+      WHERE EXISTS (
+        SELECT 1
+        FROM memory_candidate_entries
+        WHERE id = ${input.candidate_id}
+          AND scope_id = ${input.scope_id}
+          AND status = 'promoted'
+          AND target_object_type = ${input.target_object_type}
+          AND target_object_id = ${input.target_object_id}
+      )
+      ON CONFLICT DO NOTHING
+      RETURNING id, scope_id, candidate_id, target_object_type, target_object_id, source_refs,
+                reviewed_at, review_reason, created_at, updated_at
+    `;
+    if (rows.length === 0) {
+      return null;
+    }
+    return rowToCanonicalHandoffEntry(rows[0] as Record<string, unknown>);
+  }
+
+  async getCanonicalHandoffEntry(id: string): Promise<CanonicalHandoffEntry | null> {
+    const sql = this.sql;
+    const rows = await sql`
+      SELECT id, scope_id, candidate_id, target_object_type, target_object_id, source_refs,
+             reviewed_at, review_reason, created_at, updated_at
+      FROM canonical_handoff_entries
+      WHERE id = ${id}
+    `;
+    if (rows.length === 0) {
+      return null;
+    }
+    return rowToCanonicalHandoffEntry(rows[0] as Record<string, unknown>);
+  }
+
+  async listCanonicalHandoffEntries(filters?: CanonicalHandoffFilters): Promise<CanonicalHandoffEntry[]> {
+    const sql = this.sql;
+    const limit = filters?.limit ?? 100;
+    const offset = filters?.offset ?? 0;
+    const params: unknown[] = [];
+    const clauses: string[] = [];
+
+    if (filters?.scope_id !== undefined) {
+      params.push(filters.scope_id);
+      clauses.push(`scope_id = $${params.length}`);
+    }
+    if (filters?.candidate_id !== undefined) {
+      params.push(filters.candidate_id);
+      clauses.push(`candidate_id = $${params.length}`);
+    }
+    if (filters?.target_object_type !== undefined) {
+      params.push(filters.target_object_type);
+      clauses.push(`target_object_type = $${params.length}`);
+    }
+
+    params.push(limit);
+    params.push(offset);
+    const whereClause = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+    const rows = await sql.unsafe(
+      `SELECT id, scope_id, candidate_id, target_object_type, target_object_id, source_refs,
+              reviewed_at, review_reason, created_at, updated_at
+       FROM canonical_handoff_entries
+       ${whereClause}
+       ORDER BY created_at DESC, id ASC
+       LIMIT $${params.length - 1}
+       OFFSET $${params.length}`,
+      params,
+    );
+    return (rows as Record<string, unknown>[]).map(rowToCanonicalHandoffEntry);
   }
 
   async deleteMemoryCandidateEntry(id: string): Promise<void> {

@@ -148,6 +148,49 @@ test('retrieval route operation persists a trace when requested', async () => {
     expect((scopedDeny as any).scope_gate?.resolved_scope).toBe('personal');
     expect((scopedDeny as any).trace?.verification).toContain('scope_gate:deny');
     expect((scopedDeny as any).trace?.verification).toContain('scope_gate_reason:unsupported_scope_intent');
+
+    await engine.createTaskThread({
+      id: 'task-2',
+      scope: 'personal',
+      title: 'Personal memory trace',
+      goal: 'Persist personal retrieval traces',
+      status: 'active',
+      repo_path: null,
+      branch_name: null,
+      current_summary: 'Need durable personal explainability',
+    });
+
+    await engine.upsertProfileMemoryEntry({
+      id: 'profile-1',
+      scope_id: 'personal:default',
+      profile_type: 'routine',
+      subject: 'daily routine',
+      content: 'Wake at 7 AM, review priorities, then write.',
+      source_refs: ['User, direct message, 2026-04-22 9:05 AM KST'],
+      sensitivity: 'personal',
+      export_status: 'private_only',
+      last_confirmed_at: new Date('2026-04-22T00:05:00.000Z'),
+      superseded_by: null,
+    });
+
+    const personal = await route.handler({
+      engine,
+      config: {} as any,
+      logger: console,
+      dryRun: false,
+    }, {
+      intent: 'personal_profile_lookup',
+      task_id: 'task-2',
+      subject: 'daily routine',
+      query: 'remember my daily routine',
+      persist_trace: true,
+    });
+
+    expect((personal as any).selection_reason).toBe('direct_subject_match');
+    expect((personal as any).scope_gate?.resolved_scope).toBe('personal');
+    expect((personal as any).trace?.verification).toContain('intent:personal_profile_lookup');
+    expect((personal as any).trace?.verification).toContain('scope_gate:allow');
+    expect((personal as any).trace?.source_refs).toContain('profile-memory:profile-1');
   } finally {
     await engine.disconnect();
     rmSync(dir, { recursive: true, force: true });

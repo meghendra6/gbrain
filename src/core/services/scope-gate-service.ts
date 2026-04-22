@@ -63,7 +63,7 @@ async function resolveScope(
     }
   }
 
-  const haystack = `${input.repo_path ?? ''}\n${input.query ?? ''}`;
+  const haystack = `${input.repo_path ?? ''}\n${input.query ?? ''}\n${input.subject ?? ''}`;
   const hasWorkSignals = WORK_SIGNAL_PATTERNS.some((pattern) => pattern.test(haystack));
   const hasPersonalSignals = PERSONAL_SIGNAL_PATTERNS.some((pattern) => pattern.test(haystack));
 
@@ -98,6 +98,9 @@ function resolvePolicy(intent: ScopeGateDecisionInput['intent'], scope: ScopeGat
   }
   if (intent === 'task_resume') {
     return 'allow';
+  }
+  if (intent === 'personal_profile_lookup') {
+    return scope === 'personal' ? 'allow' : 'deny';
   }
   if (scope === 'work') {
     return 'allow';

@@ -305,6 +305,30 @@ const MIGRATIONS: Migration[] = [
         ON context_atlas_entries(scope_id, kind);
     `,
   },
+  {
+    version: 13,
+    name: 'profile_memory_foundations',
+    sql: `
+      CREATE TABLE IF NOT EXISTS profile_memory_entries (
+        id TEXT PRIMARY KEY,
+        scope_id TEXT NOT NULL,
+        profile_type TEXT NOT NULL,
+        subject TEXT NOT NULL,
+        content TEXT NOT NULL,
+        source_refs JSONB NOT NULL DEFAULT '[]',
+        sensitivity TEXT NOT NULL,
+        export_status TEXT NOT NULL,
+        last_confirmed_at TIMESTAMPTZ,
+        superseded_by TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+      CREATE INDEX IF NOT EXISTS idx_profile_memory_scope_subject
+        ON profile_memory_entries(scope_id, subject);
+      CREATE INDEX IF NOT EXISTS idx_profile_memory_scope_type
+        ON profile_memory_entries(scope_id, profile_type, updated_at DESC);
+    `,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.length > 0

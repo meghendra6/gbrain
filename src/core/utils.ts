@@ -7,6 +7,7 @@ import type {
   NoteSectionEntry,
   ContextMapEntry,
   ContextAtlasEntry,
+  ProfileMemoryEntry,
   Chunk,
   SearchResult,
   TaskAttempt,
@@ -193,6 +194,23 @@ export function rowToContextAtlasEntry(row: Record<string, unknown>): ContextAtl
     entrypoints: parseJsonStringArray(row.entrypoints),
     budget_hint: Number(row.budget_hint),
     generated_at: new Date(row.generated_at as string),
+  };
+}
+
+export function rowToProfileMemoryEntry(row: Record<string, unknown>): ProfileMemoryEntry {
+  return {
+    id: row.id as string,
+    scope_id: row.scope_id as string,
+    profile_type: row.profile_type as ProfileMemoryEntry['profile_type'],
+    subject: row.subject as string,
+    content: row.content as string,
+    source_refs: parseJsonStringArray(row.source_refs),
+    sensitivity: row.sensitivity as ProfileMemoryEntry['sensitivity'],
+    export_status: row.export_status as ProfileMemoryEntry['export_status'],
+    last_confirmed_at: row.last_confirmed_at ? new Date(row.last_confirmed_at as string) : null,
+    superseded_by: (row.superseded_by as string | null) ?? null,
+    created_at: new Date(row.created_at as string),
+    updated_at: new Date(row.updated_at as string),
   };
 }
 

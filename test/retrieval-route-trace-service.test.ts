@@ -280,3 +280,62 @@ test('retrieval route selector persists scope-gate evidence when explicit scope 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('retrieval route selector persists a personal-profile trace when personal lookup is allowed', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mbrain-route-trace-personal-profile-'));
+  const databasePath = join(dir, 'brain.db');
+  const engine = new SQLiteEngine();
+
+  try {
+    await engine.connect({ engine: 'sqlite', database_path: databasePath });
+    await engine.initSchema();
+
+    await engine.createTaskThread({
+      id: 'task-1',
+      scope: 'personal',
+      title: 'Personal memory trace',
+      goal: 'Persist personal retrieval traces',
+      status: 'active',
+      repo_path: null,
+      branch_name: null,
+      current_summary: 'Need durable personal explainability',
+    });
+
+    await engine.upsertProfileMemoryEntry({
+      id: 'profile-1',
+      scope_id: 'personal:default',
+      profile_type: 'routine',
+      subject: 'daily routine',
+      content: 'Wake at 7 AM, review priorities, then write.',
+      source_refs: ['User, direct message, 2026-04-22 9:05 AM KST'],
+      sensitivity: 'personal',
+      export_status: 'private_only',
+      last_confirmed_at: new Date('2026-04-22T00:05:00.000Z'),
+      superseded_by: null,
+    });
+
+    const result = await selectRetrievalRoute(engine, {
+      intent: 'personal_profile_lookup',
+      task_id: 'task-1',
+      subject: 'daily routine',
+      query: 'remember my daily routine',
+      persist_trace: true,
+    } as any);
+
+    expect(result.selected_intent).toBe('personal_profile_lookup');
+    expect(result.selection_reason).toBe('direct_subject_match');
+    expect(result.scope_gate?.resolved_scope).toBe('personal');
+    expect(result.trace?.task_id).toBe('task-1');
+    expect(result.trace?.route).toEqual([
+      'profile_memory_record',
+      'minimal_personal_supporting_reads',
+    ]);
+    expect(result.trace?.source_refs).toContain('profile-memory:profile-1');
+    expect(result.trace?.verification).toContain('intent:personal_profile_lookup');
+    expect(result.trace?.verification).toContain('scope_gate:allow');
+    expect(result.trace?.outcome).toBe('personal_profile_lookup route selected');
+  } finally {
+    await engine.disconnect();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

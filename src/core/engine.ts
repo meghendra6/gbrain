@@ -12,6 +12,9 @@ import type {
   ContextAtlasEntry,
   ContextAtlasEntryInput,
   ContextAtlasFilters,
+  ProfileMemoryEntry,
+  ProfileMemoryEntryInput,
+  ProfileMemoryFilters,
   Chunk, ChunkInput,
   SearchResult, SearchOpts,
   Link, GraphNode,
@@ -110,6 +113,12 @@ export interface BrainEngine {
   listTaskDecisions(taskId: string, opts?: { limit?: number }): Promise<TaskDecision[]>;
   putRetrievalTrace(input: RetrievalTraceInput): Promise<RetrievalTrace>;
   listRetrievalTraces(taskId: string, opts?: { limit?: number }): Promise<RetrievalTrace[]>;
+
+  // Personal profile memory
+  upsertProfileMemoryEntry(input: ProfileMemoryEntryInput): Promise<ProfileMemoryEntry>;
+  getProfileMemoryEntry(id: string): Promise<ProfileMemoryEntry | null>;
+  listProfileMemoryEntries(filters?: ProfileMemoryFilters): Promise<ProfileMemoryEntry[]>;
+  deleteProfileMemoryEntry(id: string): Promise<void>;
 
   // Note manifest
   upsertNoteManifestEntry(input: NoteManifestEntryInput): Promise<NoteManifestEntry>;

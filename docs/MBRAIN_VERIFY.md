@@ -622,6 +622,25 @@ Expected:
 - `acceptance.phase4_status` matches the local guardrail outcome
 - `allow`, `deny`, and `defer` cases are all covered deterministically
 
+## Phase 4 personal-profile-lookup
+
+Run:
+
+```bash
+bun test test/profile-memory-schema.test.ts test/profile-memory-engine.test.ts test/personal-profile-lookup-route-service.test.ts test/personal-profile-lookup-route-operations.test.ts test/phase4-personal-profile-lookup.test.ts
+bun run bench:phase4-personal-profile-lookup --json
+```
+
+Expected:
+
+- profile-memory schema and engine tests pass for SQLite and PGLite
+- Postgres profile-memory persistence is covered when `DATABASE_URL` is available
+- `personal-profile-lookup-route` stays available through the shared operation surface
+- exact-subject direct match, ambiguity, and no-match cases all stay deterministic
+- benchmark reports `personal_profile_lookup_route` and `personal_profile_lookup_route_correctness`
+- `acceptance.readiness_status` reports `pass` or `fail` from the local guardrails
+- `acceptance.phase4_status` matches the local guardrail outcome
+
 ---
 
 ## 2. Skillpack Loaded

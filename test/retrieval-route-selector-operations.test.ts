@@ -173,6 +173,36 @@ test('retrieval route selector operation dispatches task and precision intents',
     expect((scopedDeny as any).route).toBeNull();
     expect((scopedDeny as any).scope_gate?.resolved_scope).toBe('personal');
     expect((scopedDeny as any).scope_gate?.policy).toBe('deny');
+
+    await engine.upsertProfileMemoryEntry({
+      id: 'profile-1',
+      scope_id: 'personal:default',
+      profile_type: 'routine',
+      subject: 'daily routine',
+      content: 'Wake at 7 AM, review priorities, then write.',
+      source_refs: ['User, direct message, 2026-04-22 9:05 AM KST'],
+      sensitivity: 'personal',
+      export_status: 'private_only',
+      last_confirmed_at: new Date('2026-04-22T00:05:00.000Z'),
+      superseded_by: null,
+    });
+
+    const personal = await route.handler({
+      engine,
+      config: {} as any,
+      logger: console,
+      dryRun: false,
+    }, {
+      intent: 'personal_profile_lookup',
+      subject: 'daily routine',
+      query: 'remember my daily routine',
+    });
+
+    expect((personal as any).selected_intent).toBe('personal_profile_lookup');
+    expect((personal as any).selection_reason).toBe('direct_subject_match');
+    expect((personal as any).scope_gate?.resolved_scope).toBe('personal');
+    expect((personal as any).scope_gate?.policy).toBe('allow');
+    expect((personal as any).route?.route_kind).toBe('personal_profile_lookup');
   } finally {
     await engine.disconnect();
     rmSync(dir, { recursive: true, force: true });

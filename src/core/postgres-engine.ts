@@ -16,6 +16,9 @@ import type {
   ContextAtlasEntry,
   ContextAtlasEntryInput,
   ContextAtlasFilters,
+  ProfileMemoryEntry,
+  ProfileMemoryEntryInput,
+  ProfileMemoryFilters,
   Chunk, ChunkInput,
   SearchResult, SearchOpts,
   Link, GraphNode,
@@ -52,6 +55,7 @@ import {
   rowToContextMapEntry,
   rowToNoteManifestEntry,
   rowToNoteSectionEntry,
+  rowToProfileMemoryEntry,
   rowToRetrievalTrace,
   rowToSearchResult,
   rowToTaskAttempt,
@@ -1041,6 +1045,97 @@ export class PostgresEngine implements BrainEngine {
       LIMIT ${opts?.limit ?? 20}
     `;
     return (rows as Record<string, unknown>[]).map(rowToRetrievalTrace);
+  }
+
+  async upsertProfileMemoryEntry(input: ProfileMemoryEntryInput): Promise<ProfileMemoryEntry> {
+    const sql = this.sql;
+    const rows = await sql`
+      INSERT INTO profile_memory_entries (
+        id, scope_id, profile_type, subject, content, source_refs, sensitivity,
+        export_status, last_confirmed_at, superseded_by
+      ) VALUES (
+        ${input.id},
+        ${input.scope_id},
+        ${input.profile_type},
+        ${input.subject},
+        ${input.content},
+        ${JSON.stringify(input.source_refs ?? [])}::jsonb,
+        ${input.sensitivity},
+        ${input.export_status},
+        ${input.last_confirmed_at instanceof Date ? input.last_confirmed_at.toISOString() : input.last_confirmed_at ?? null},
+        ${input.superseded_by ?? null}
+      )
+      ON CONFLICT (id) DO UPDATE SET
+        scope_id = EXCLUDED.scope_id,
+        profile_type = EXCLUDED.profile_type,
+        subject = EXCLUDED.subject,
+        content = EXCLUDED.content,
+        source_refs = EXCLUDED.source_refs,
+        sensitivity = EXCLUDED.sensitivity,
+        export_status = EXCLUDED.export_status,
+        last_confirmed_at = EXCLUDED.last_confirmed_at,
+        superseded_by = EXCLUDED.superseded_by,
+        updated_at = now()
+      RETURNING id, scope_id, profile_type, subject, content, source_refs, sensitivity,
+                export_status, last_confirmed_at, superseded_by, created_at, updated_at
+    `;
+    return rowToProfileMemoryEntry(rows[0] as Record<string, unknown>);
+  }
+
+  async getProfileMemoryEntry(id: string): Promise<ProfileMemoryEntry | null> {
+    const sql = this.sql;
+    const rows = await sql`
+      SELECT id, scope_id, profile_type, subject, content, source_refs, sensitivity,
+             export_status, last_confirmed_at, superseded_by, created_at, updated_at
+      FROM profile_memory_entries
+      WHERE id = ${id}
+    `;
+    if (rows.length === 0) return null;
+    return rowToProfileMemoryEntry(rows[0] as Record<string, unknown>);
+  }
+
+  async listProfileMemoryEntries(filters?: ProfileMemoryFilters): Promise<ProfileMemoryEntry[]> {
+    const sql = this.sql;
+    const limit = filters?.limit ?? 100;
+    const offset = filters?.offset ?? 0;
+    const params: unknown[] = [];
+    const clauses: string[] = [];
+
+    if (filters?.scope_id) {
+      params.push(filters.scope_id);
+      clauses.push(`scope_id = $${params.length}`);
+    }
+    if (filters?.subject) {
+      params.push(filters.subject);
+      clauses.push(`subject = $${params.length}`);
+    }
+    if (filters?.profile_type) {
+      params.push(filters.profile_type);
+      clauses.push(`profile_type = $${params.length}`);
+    }
+
+    params.push(limit);
+    params.push(offset);
+    const whereClause = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+    const rows = await sql.unsafe(
+      `SELECT id, scope_id, profile_type, subject, content, source_refs, sensitivity,
+              export_status, last_confirmed_at, superseded_by, created_at, updated_at
+       FROM profile_memory_entries
+       ${whereClause}
+       ORDER BY updated_at DESC, id ASC
+       LIMIT $${params.length - 1}
+       OFFSET $${params.length}`,
+      params,
+    );
+    return (rows as Record<string, unknown>[]).map(rowToProfileMemoryEntry);
+  }
+
+  async deleteProfileMemoryEntry(id: string): Promise<void> {
+    const sql = this.sql;
+    await sql`
+      DELETE FROM profile_memory_entries
+      WHERE id = ${id}
+    `;
   }
 
   async upsertNoteManifestEntry(input: NoteManifestEntryInput): Promise<NoteManifestEntry> {

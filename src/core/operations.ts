@@ -26,6 +26,7 @@ import { getStructuralContextMapExplanation } from './services/context-map-expla
 import { findStructuralContextMapPath } from './services/context-map-path-service.ts';
 import { queryStructuralContextMap } from './services/context-map-query-service.ts';
 import { getStructuralContextMapReport } from './services/context-map-report-service.ts';
+import { DEFAULT_PROFILE_MEMORY_SCOPE_ID, getPersonalProfileLookupRoute } from './services/personal-profile-lookup-route-service.ts';
 import { getPrecisionLookupRoute } from './services/precision-lookup-route-service.ts';
 import { evaluateScopeGate } from './services/scope-gate-service.ts';
 import { selectRetrievalRoute } from './services/retrieval-route-selector-service.ts';
@@ -2156,20 +2157,48 @@ const get_precision_lookup_route: Operation = {
   cliHints: { name: 'precision-lookup-route' },
 };
 
+const get_personal_profile_lookup_route: Operation = {
+  name: 'get_personal_profile_lookup_route',
+  description: 'Resolve an exact personal profile-memory route for personal/profile lookup intent.',
+  params: {
+    scope_id: { type: 'string', description: 'Personal profile-memory scope id (default: personal:default)' },
+    subject: { type: 'string', required: true, description: 'Exact personal profile subject' },
+    profile_type: {
+      type: 'string',
+      description: 'Optional exact profile-memory type filter',
+      enum: ['preference', 'routine', 'personal_project', 'stable_fact', 'relationship_boundary', 'other'],
+    },
+  },
+  handler: async (ctx, p) => {
+    return getPersonalProfileLookupRoute(ctx.engine, {
+      scope_id: String(p.scope_id ?? DEFAULT_PROFILE_MEMORY_SCOPE_ID),
+      subject: String(p.subject),
+      profile_type: typeof p.profile_type === 'string' ? p.profile_type as any : undefined,
+    });
+  },
+  cliHints: { name: 'personal-profile-lookup-route' },
+};
+
 const evaluate_scope_gate: Operation = {
   name: 'evaluate_scope_gate',
   description: 'Evaluate the deterministic scope gate for the current published retrieval stack.',
   params: {
-    intent: { type: 'string', required: true, description: 'One of task_resume, broad_synthesis, precision_lookup' },
+    intent: { type: 'string', required: true, description: 'One of task_resume, broad_synthesis, precision_lookup, personal_profile_lookup' },
     requested_scope: { type: 'string', description: 'Optional explicit scope override', enum: ['work', 'personal', 'mixed'] },
     task_id: { type: 'string', description: 'Task id used to derive task scope when present' },
     query: { type: 'string', description: 'Optional plain-text request used for signal detection' },
     repo_path: { type: 'string', description: 'Optional repo path or file path used for work-signal detection' },
+    subject: { type: 'string', description: 'Optional personal profile subject used for signal detection' },
   },
   handler: async (ctx, p) => {
     const intent = String(p.intent);
-    if (intent !== 'task_resume' && intent !== 'broad_synthesis' && intent !== 'precision_lookup') {
-      throw new OperationError('invalid_params', 'intent must be one of task_resume, broad_synthesis, precision_lookup.');
+    if (
+      intent !== 'task_resume'
+      && intent !== 'broad_synthesis'
+      && intent !== 'precision_lookup'
+      && intent !== 'personal_profile_lookup'
+    ) {
+      throw new OperationError('invalid_params', 'intent must be one of task_resume, broad_synthesis, precision_lookup, personal_profile_lookup.');
     }
 
     return evaluateScopeGate(ctx.engine, {
@@ -2178,6 +2207,7 @@ const evaluate_scope_gate: Operation = {
       task_id: typeof p.task_id === 'string' ? p.task_id : undefined,
       query: typeof p.query === 'string' ? p.query : undefined,
       repo_path: typeof p.repo_path === 'string' ? p.repo_path : undefined,
+      subject: typeof p.subject === 'string' ? p.subject : undefined,
     });
   },
   cliHints: { name: 'scope-gate' },
@@ -2187,7 +2217,7 @@ const select_retrieval_route: Operation = {
   name: 'select_retrieval_route',
   description: 'Select one published retrieval route by explicit intent.',
   params: {
-    intent: { type: 'string', required: true, description: 'One of task_resume, broad_synthesis, precision_lookup' },
+    intent: { type: 'string', required: true, description: 'One of task_resume, broad_synthesis, precision_lookup, personal_profile_lookup' },
     task_id: { type: 'string', description: 'Task id for task_resume intent' },
     persist_trace: { type: 'boolean', description: 'Persist a task-scoped Retrieval Trace for the selected route' },
     requested_scope: { type: 'string', description: 'Optional explicit scope override', enum: ['work', 'personal', 'mixed'] },
@@ -2200,17 +2230,31 @@ const select_retrieval_route: Operation = {
     path: { type: 'string', description: 'Exact path for precision_lookup intent, optionally with #section/path fragment' },
     section_id: { type: 'string', description: 'Exact section id for precision_lookup intent' },
     source_ref: { type: 'string', description: 'Exact extracted source reference string for precision_lookup intent' },
+    subject: { type: 'string', description: 'Exact profile-memory subject for personal_profile_lookup intent' },
+    profile_type: {
+      type: 'string',
+      description: 'Optional exact profile-memory type filter for personal_profile_lookup intent',
+      enum: ['preference', 'routine', 'personal_project', 'stable_fact', 'relationship_boundary', 'other'],
+    },
   },
   handler: async (ctx, p) => {
     const intent = String(p.intent);
-    if (intent !== 'task_resume' && intent !== 'broad_synthesis' && intent !== 'precision_lookup') {
-      throw new OperationError('invalid_params', 'intent must be one of task_resume, broad_synthesis, precision_lookup.');
+    if (
+      intent !== 'task_resume'
+      && intent !== 'broad_synthesis'
+      && intent !== 'precision_lookup'
+      && intent !== 'personal_profile_lookup'
+    ) {
+      throw new OperationError('invalid_params', 'intent must be one of task_resume, broad_synthesis, precision_lookup, personal_profile_lookup.');
     }
     if (intent === 'task_resume' && typeof p.task_id !== 'string') {
       throw new OperationError('invalid_params', 'task_resume intent requires task_id.');
     }
     if (intent === 'broad_synthesis' && typeof p.query !== 'string') {
       throw new OperationError('invalid_params', 'broad_synthesis intent requires query.');
+    }
+    if (intent === 'personal_profile_lookup' && typeof p.subject !== 'string') {
+      throw new OperationError('invalid_params', 'personal_profile_lookup intent requires subject.');
     }
     if (intent === 'precision_lookup' && typeof p.slug !== 'string' && typeof p.section_id !== 'string') {
       if (typeof p.path !== 'string' && typeof p.source_ref !== 'string') {
@@ -2227,7 +2271,7 @@ const select_retrieval_route: Operation = {
       persist_trace: p.persist_trace === true,
       requested_scope: typeof p.requested_scope === 'string' ? p.requested_scope as any : undefined,
       map_id: typeof p.map_id === 'string' ? p.map_id : undefined,
-      scope_id: String(p.scope_id ?? DEFAULT_NOTE_MANIFEST_SCOPE_ID),
+      scope_id: String(p.scope_id ?? (intent === 'personal_profile_lookup' ? DEFAULT_PROFILE_MEMORY_SCOPE_ID : DEFAULT_NOTE_MANIFEST_SCOPE_ID)),
       kind: p.kind as string | undefined,
       query: typeof p.query === 'string' ? p.query : undefined,
       limit: typeof p.limit === 'number' ? p.limit : undefined,
@@ -2235,6 +2279,8 @@ const select_retrieval_route: Operation = {
       path: typeof p.path === 'string' ? p.path : undefined,
       section_id: typeof p.section_id === 'string' ? p.section_id : undefined,
       source_ref: typeof p.source_ref === 'string' ? p.source_ref : undefined,
+      subject: typeof p.subject === 'string' ? p.subject : undefined,
+      profile_type: typeof p.profile_type === 'string' ? p.profile_type as any : undefined,
     });
   },
   cliHints: { name: 'retrieval-route' },
@@ -2790,7 +2836,7 @@ export const operations: Operation[] = [
   // Structural graph
   get_note_structural_neighbors, find_note_structural_path,
   // Persisted context maps
-  build_context_map, get_context_map_entry, list_context_map_entries, get_context_map_report, get_context_map_explanation, query_context_map, find_context_map_path, get_broad_synthesis_route, get_precision_lookup_route, evaluate_scope_gate, select_retrieval_route, get_workspace_system_card, get_workspace_project_card, get_workspace_orientation_bundle, get_workspace_corpus_card,
+  build_context_map, get_context_map_entry, list_context_map_entries, get_context_map_report, get_context_map_explanation, query_context_map, find_context_map_path, get_broad_synthesis_route, get_precision_lookup_route, get_personal_profile_lookup_route, evaluate_scope_gate, select_retrieval_route, get_workspace_system_card, get_workspace_project_card, get_workspace_orientation_bundle, get_workspace_corpus_card,
   // Context atlas registry
   build_context_atlas, get_context_atlas_entry, list_context_atlas_entries, select_context_atlas_entry, get_context_atlas_overview, get_context_atlas_report, get_atlas_orientation_card, get_atlas_orientation_bundle,
   // Operational memory

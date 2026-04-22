@@ -237,3 +237,43 @@ test('retrieval route selector degrades explicitly when the selected target is m
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('retrieval route selector dispatches personal profile lookup intent', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mbrain-route-selector-personal-profile-'));
+  const databasePath = join(dir, 'brain.db');
+  const engine = new SQLiteEngine();
+
+  try {
+    await engine.connect({ engine: 'sqlite', database_path: databasePath });
+    await engine.initSchema();
+
+    await engine.upsertProfileMemoryEntry({
+      id: 'profile-1',
+      scope_id: 'personal:default',
+      profile_type: 'routine',
+      subject: 'daily routine',
+      content: 'Wake at 7 AM, review priorities, then write.',
+      source_refs: ['User, direct message, 2026-04-22 9:05 AM KST'],
+      sensitivity: 'personal',
+      export_status: 'private_only',
+      last_confirmed_at: new Date('2026-04-22T00:05:00.000Z'),
+      superseded_by: null,
+    });
+
+    const result = await selectRetrievalRoute(engine, {
+      intent: 'personal_profile_lookup',
+      subject: 'daily routine',
+      query: 'remember my daily routine',
+    } as any);
+
+    expect(result.selected_intent).toBe('personal_profile_lookup');
+    expect(result.selection_reason).toBe('direct_subject_match');
+    expect(result.scope_gate?.resolved_scope).toBe('personal');
+    expect(result.scope_gate?.policy).toBe('allow');
+    expect(result.route?.route_kind).toBe('personal_profile_lookup');
+    expect((result.route?.payload as any)?.profile_memory_id).toBe('profile-1');
+  } finally {
+    await engine.disconnect();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

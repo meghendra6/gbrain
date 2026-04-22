@@ -24,6 +24,9 @@ import type {
   ContextAtlasEntry,
   ContextAtlasEntryInput,
   ContextAtlasFilters,
+  ProfileMemoryEntry,
+  ProfileMemoryEntryInput,
+  ProfileMemoryFilters,
   Chunk, ChunkInput,
   SearchResult, SearchOpts,
   Link, GraphNode,
@@ -1300,6 +1303,97 @@ export class SQLiteEngine implements BrainEngine {
     return rows.map(rowToRetrievalTrace);
   }
 
+  async upsertProfileMemoryEntry(input: ProfileMemoryEntryInput): Promise<ProfileMemoryEntry> {
+    const timestamp = nowIso();
+    this.database.run(`
+      INSERT INTO profile_memory_entries (
+        id, scope_id, profile_type, subject, content, source_refs, sensitivity,
+        export_status, last_confirmed_at, superseded_by, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        scope_id = excluded.scope_id,
+        profile_type = excluded.profile_type,
+        subject = excluded.subject,
+        content = excluded.content,
+        source_refs = excluded.source_refs,
+        sensitivity = excluded.sensitivity,
+        export_status = excluded.export_status,
+        last_confirmed_at = excluded.last_confirmed_at,
+        superseded_by = excluded.superseded_by,
+        updated_at = excluded.updated_at
+    `, [
+      input.id,
+      input.scope_id,
+      input.profile_type,
+      input.subject,
+      input.content,
+      JSON.stringify(input.source_refs ?? []),
+      input.sensitivity,
+      input.export_status,
+      toNullableIso(input.last_confirmed_at),
+      input.superseded_by ?? null,
+      timestamp,
+      timestamp,
+    ]);
+
+    const row = this.database.query(`
+      SELECT id, scope_id, profile_type, subject, content, source_refs, sensitivity,
+             export_status, last_confirmed_at, superseded_by, created_at, updated_at
+      FROM profile_memory_entries
+      WHERE id = ?
+    `).get(input.id) as Record<string, unknown> | null;
+    if (!row) throw new Error(`Profile memory entry not found after upsert: ${input.id}`);
+    return rowToProfileMemoryEntry(row);
+  }
+
+  async getProfileMemoryEntry(id: string): Promise<ProfileMemoryEntry | null> {
+    const row = this.database.query(`
+      SELECT id, scope_id, profile_type, subject, content, source_refs, sensitivity,
+             export_status, last_confirmed_at, superseded_by, created_at, updated_at
+      FROM profile_memory_entries
+      WHERE id = ?
+    `).get(id) as Record<string, unknown> | null;
+    return row ? rowToProfileMemoryEntry(row) : null;
+  }
+
+  async listProfileMemoryEntries(filters?: ProfileMemoryFilters): Promise<ProfileMemoryEntry[]> {
+    const limit = filters?.limit ?? 100;
+    const offset = filters?.offset ?? 0;
+    const clauses: string[] = [];
+    const params: unknown[] = [];
+
+    if (filters?.scope_id) {
+      clauses.push('scope_id = ?');
+      params.push(filters.scope_id);
+    }
+    if (filters?.subject) {
+      clauses.push('subject = ?');
+      params.push(filters.subject);
+    }
+    if (filters?.profile_type) {
+      clauses.push('profile_type = ?');
+      params.push(filters.profile_type);
+    }
+
+    params.push(limit);
+    params.push(offset);
+    const whereClause = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+    const rows = this.database.query(`
+      SELECT id, scope_id, profile_type, subject, content, source_refs, sensitivity,
+             export_status, last_confirmed_at, superseded_by, created_at, updated_at
+      FROM profile_memory_entries
+      ${whereClause}
+      ORDER BY updated_at DESC, id ASC
+      LIMIT ?
+      OFFSET ?
+    `).all(...params) as Record<string, unknown>[];
+    return rows.map(rowToProfileMemoryEntry);
+  }
+
+  async deleteProfileMemoryEntry(id: string): Promise<void> {
+    this.database.run(`DELETE FROM profile_memory_entries WHERE id = ?`, [id]);
+  }
+
   async upsertNoteManifestEntry(input: NoteManifestEntryInput): Promise<NoteManifestEntry> {
     const timestamp = nowIso();
     this.database.run(`
@@ -1959,6 +2053,28 @@ export class SQLiteEngine implements BrainEngine {
               ON context_atlas_entries(scope_id, kind);
           `);
           break;
+        case 13:
+          this.database.exec(`
+            CREATE TABLE IF NOT EXISTS profile_memory_entries (
+              id TEXT PRIMARY KEY,
+              scope_id TEXT NOT NULL,
+              profile_type TEXT NOT NULL,
+              subject TEXT NOT NULL,
+              content TEXT NOT NULL,
+              source_refs TEXT NOT NULL DEFAULT '[]',
+              sensitivity TEXT NOT NULL,
+              export_status TEXT NOT NULL,
+              last_confirmed_at TEXT,
+              superseded_by TEXT,
+              created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+              updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_profile_memory_scope_subject
+              ON profile_memory_entries(scope_id, subject);
+            CREATE INDEX IF NOT EXISTS idx_profile_memory_scope_type
+              ON profile_memory_entries(scope_id, profile_type, updated_at DESC);
+          `);
+          break;
       }
 
       await this.setConfig('version', String(version));
@@ -2199,6 +2315,11 @@ function validateSlug(slug: string): string {
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+function toNullableIso(value: Date | string | null | undefined): string | null {
+  if (value == null) return null;
+  return value instanceof Date ? value.toISOString() : String(value);
 }
 
 function parseVersion(value: string | null): number {
@@ -2454,6 +2575,23 @@ function rowToContextAtlasEntry(row: Record<string, unknown>): ContextAtlasEntry
     entrypoints: parseJsonArray(row.entrypoints),
     budget_hint: Number(row.budget_hint),
     generated_at: new Date(String(row.generated_at)),
+  };
+}
+
+function rowToProfileMemoryEntry(row: Record<string, unknown>): ProfileMemoryEntry {
+  return {
+    id: String(row.id),
+    scope_id: String(row.scope_id),
+    profile_type: row.profile_type as ProfileMemoryEntry['profile_type'],
+    subject: String(row.subject),
+    content: String(row.content),
+    source_refs: parseJsonArray(row.source_refs),
+    sensitivity: row.sensitivity as ProfileMemoryEntry['sensitivity'],
+    export_status: row.export_status as ProfileMemoryEntry['export_status'],
+    last_confirmed_at: row.last_confirmed_at == null ? null : new Date(String(row.last_confirmed_at)),
+    superseded_by: row.superseded_by == null ? null : String(row.superseded_by),
+    created_at: new Date(String(row.created_at)),
+    updated_at: new Date(String(row.updated_at)),
   };
 }
 

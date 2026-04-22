@@ -48,6 +48,19 @@ test('scope gate operation returns allow, deny, and defer disclosures', async ()
     expect((allow as any).resolved_scope).toBe('personal');
     expect((allow as any).policy).toBe('allow');
 
+    const personalAllow = await route.handler({
+      engine,
+      config: {} as any,
+      logger: console,
+      dryRun: false,
+    }, {
+      intent: 'personal_profile_lookup',
+      query: 'remember my daily routine',
+    });
+
+    expect((personalAllow as any).resolved_scope).toBe('personal');
+    expect((personalAllow as any).policy).toBe('allow');
+
     const deny = await route.handler({
       engine,
       config: {} as any,

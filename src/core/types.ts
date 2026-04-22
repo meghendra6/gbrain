@@ -523,7 +523,80 @@ export interface PrecisionLookupRouteResult {
   route: PrecisionLookupRoute | null;
 }
 
-export type RetrievalRouteIntent = 'task_resume' | 'broad_synthesis' | 'precision_lookup';
+export type ProfileMemoryType =
+  | 'preference'
+  | 'routine'
+  | 'personal_project'
+  | 'stable_fact'
+  | 'relationship_boundary'
+  | 'other';
+
+export type ProfileMemorySensitivity = 'public' | 'personal' | 'secret';
+export type ProfileMemoryExportStatus = 'private_only' | 'exportable';
+
+export interface ProfileMemoryEntry {
+  id: string;
+  scope_id: string;
+  profile_type: ProfileMemoryType;
+  subject: string;
+  content: string;
+  source_refs: string[];
+  sensitivity: ProfileMemorySensitivity;
+  export_status: ProfileMemoryExportStatus;
+  last_confirmed_at: Date | null;
+  superseded_by: string | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface ProfileMemoryEntryInput {
+  id: string;
+  scope_id: string;
+  profile_type: ProfileMemoryType;
+  subject: string;
+  content: string;
+  source_refs: string[];
+  sensitivity: ProfileMemorySensitivity;
+  export_status: ProfileMemoryExportStatus;
+  last_confirmed_at?: Date | string | null;
+  superseded_by?: string | null;
+}
+
+export interface ProfileMemoryFilters {
+  scope_id?: string;
+  subject?: string;
+  profile_type?: ProfileMemoryType;
+  limit?: number;
+  offset?: number;
+}
+
+export interface PersonalProfileLookupRoute {
+  route_kind: 'personal_profile_lookup';
+  profile_memory_id: string;
+  scope_id: string;
+  profile_type: ProfileMemoryType;
+  subject: string;
+  content: string;
+  sensitivity: ProfileMemorySensitivity;
+  export_status: ProfileMemoryExportStatus;
+  retrieval_route: string[];
+  summary_lines: string[];
+  source_refs: string[];
+}
+
+export interface PersonalProfileLookupRouteInput {
+  scope_id?: string;
+  subject: string;
+  profile_type?: ProfileMemoryType;
+}
+
+export interface PersonalProfileLookupRouteResult {
+  selection_reason: string;
+  candidate_count: number;
+  route: PersonalProfileLookupRoute | null;
+}
+
+export type RetrievalRouteIntent = 'task_resume' | 'broad_synthesis' | 'precision_lookup' | 'personal_profile_lookup';
 
 export interface RetrievalRouteSelection {
   route_kind: RetrievalRouteIntent;
@@ -546,6 +619,8 @@ export interface RetrievalRouteSelectorInput {
   path?: string;
   section_id?: string;
   source_ref?: string;
+  subject?: string;
+  profile_type?: ProfileMemoryType;
 }
 
 export interface RetrievalRouteSelectorResult {
@@ -567,6 +642,7 @@ export interface ScopeGateDecisionInput {
   task_id?: string;
   query?: string;
   repo_path?: string;
+  subject?: string;
 }
 
 export interface ScopeGateDecisionResult {

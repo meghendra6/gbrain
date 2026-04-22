@@ -1,6 +1,7 @@
 import type { BrainEngine } from '../engine.ts';
 import type {
   BroadSynthesisRoute,
+  PersonalProfileLookupRoute,
   PrecisionLookupRoute,
   ScopeGateDecisionResult,
   RetrievalTrace,
@@ -9,6 +10,7 @@ import type {
   RetrievalRouteSelectorResult,
 } from '../types.ts';
 import { getBroadSynthesisRoute } from './broad-synthesis-route-service.ts';
+import { getPersonalProfileLookupRoute } from './personal-profile-lookup-route-service.ts';
 import { getPrecisionLookupRoute } from './precision-lookup-route-service.ts';
 import { evaluateScopeGate } from './scope-gate-service.ts';
 import { buildTaskResumeCard, type TaskResumeCard } from './task-memory-service.ts';
@@ -17,12 +19,14 @@ export async function selectRetrievalRoute(
   engine: BrainEngine,
   input: RetrievalRouteSelectorInput,
 ): Promise<RetrievalRouteSelectorResult> {
-  const scopeGate = input.requested_scope
+  const shouldEvaluateScopeGate = input.requested_scope !== undefined || input.intent === 'personal_profile_lookup';
+  const scopeGate = shouldEvaluateScopeGate
     ? await evaluateScopeGate(engine, {
       intent: input.intent,
       requested_scope: input.requested_scope,
       task_id: input.task_id,
       query: input.query,
+      subject: input.subject,
     })
     : undefined;
 
@@ -53,6 +57,8 @@ export async function selectRetrievalRoute(
       return selectBroadSynthesisRoute(engine, input);
     case 'precision_lookup':
       return selectPrecisionLookupRoute(engine, input);
+    case 'personal_profile_lookup':
+      return selectPersonalProfileLookupRoute(engine, input);
     }
   })();
 
@@ -140,6 +146,32 @@ async function selectPrecisionLookupRoute(
   };
 }
 
+async function selectPersonalProfileLookupRoute(
+  engine: BrainEngine,
+  input: RetrievalRouteSelectorInput,
+): Promise<RetrievalRouteSelectorResult> {
+  if (!input.subject) {
+    return {
+      selected_intent: 'personal_profile_lookup',
+      selection_reason: 'no_match',
+      candidate_count: 0,
+      route: null,
+    };
+  }
+
+  const result = await getPersonalProfileLookupRoute(engine, {
+    scope_id: input.scope_id,
+    subject: input.subject,
+    profile_type: input.profile_type,
+  });
+  return {
+    selected_intent: 'personal_profile_lookup',
+    selection_reason: result.selection_reason,
+    candidate_count: result.candidate_count,
+    route: result.route ? buildDelegatedSelection('personal_profile_lookup', result.route) : null,
+  };
+}
+
 function buildTaskResumeSelection(card: TaskResumeCard): RetrievalRouteSelection {
   return {
     route_kind: 'task_resume',
@@ -159,8 +191,8 @@ function buildTaskResumeSelection(card: TaskResumeCard): RetrievalRouteSelection
 }
 
 function buildDelegatedSelection(
-  routeKind: 'broad_synthesis' | 'precision_lookup',
-  payload: BroadSynthesisRoute | PrecisionLookupRoute,
+  routeKind: 'broad_synthesis' | 'precision_lookup' | 'personal_profile_lookup',
+  payload: BroadSynthesisRoute | PrecisionLookupRoute | PersonalProfileLookupRoute,
 ): RetrievalRouteSelection {
   return {
     route_kind: routeKind,
@@ -221,6 +253,10 @@ function collectSourceRefs(route: RetrievalRouteSelection | null): string[] {
 
   if (route.route_kind === 'task_resume' && payload.task_id) {
     return [`task-thread:${payload.task_id}`];
+  }
+
+  if (route.route_kind === 'personal_profile_lookup' && payload.profile_memory_id) {
+    return [`profile-memory:${payload.profile_memory_id}`];
   }
 
   const refs = payload.recommended_reads ?? [];

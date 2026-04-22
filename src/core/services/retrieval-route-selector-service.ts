@@ -1,6 +1,7 @@
 import type { BrainEngine } from '../engine.ts';
 import type {
   BroadSynthesisRoute,
+  PersonalEpisodeLookupRoute,
   PersonalProfileLookupRoute,
   PrecisionLookupRoute,
   ScopeGateDecisionResult,
@@ -10,6 +11,7 @@ import type {
   RetrievalRouteSelectorResult,
 } from '../types.ts';
 import { getBroadSynthesisRoute } from './broad-synthesis-route-service.ts';
+import { getPersonalEpisodeLookupRoute } from './personal-episode-lookup-route-service.ts';
 import { getPersonalProfileLookupRoute } from './personal-profile-lookup-route-service.ts';
 import { getPrecisionLookupRoute } from './precision-lookup-route-service.ts';
 import { evaluateScopeGate } from './scope-gate-service.ts';
@@ -19,7 +21,9 @@ export async function selectRetrievalRoute(
   engine: BrainEngine,
   input: RetrievalRouteSelectorInput,
 ): Promise<RetrievalRouteSelectorResult> {
-  const shouldEvaluateScopeGate = input.requested_scope !== undefined || input.intent === 'personal_profile_lookup';
+  const shouldEvaluateScopeGate = input.requested_scope !== undefined
+    || input.intent === 'personal_profile_lookup'
+    || input.intent === 'personal_episode_lookup';
   const scopeGate = shouldEvaluateScopeGate
     ? await evaluateScopeGate(engine, {
       intent: input.intent,
@@ -27,6 +31,7 @@ export async function selectRetrievalRoute(
       task_id: input.task_id,
       query: input.query,
       subject: input.subject,
+      title: input.episode_title,
     })
     : undefined;
 
@@ -59,6 +64,8 @@ export async function selectRetrievalRoute(
       return selectPrecisionLookupRoute(engine, input);
     case 'personal_profile_lookup':
       return selectPersonalProfileLookupRoute(engine, input);
+    case 'personal_episode_lookup':
+      return selectPersonalEpisodeLookupRoute(engine, input);
     }
   })();
 
@@ -172,6 +179,32 @@ async function selectPersonalProfileLookupRoute(
   };
 }
 
+async function selectPersonalEpisodeLookupRoute(
+  engine: BrainEngine,
+  input: RetrievalRouteSelectorInput,
+): Promise<RetrievalRouteSelectorResult> {
+  if (!input.episode_title) {
+    return {
+      selected_intent: 'personal_episode_lookup',
+      selection_reason: 'no_match',
+      candidate_count: 0,
+      route: null,
+    };
+  }
+
+  const result = await getPersonalEpisodeLookupRoute(engine, {
+    scope_id: input.scope_id,
+    title: input.episode_title,
+    source_kind: input.episode_source_kind,
+  });
+  return {
+    selected_intent: 'personal_episode_lookup',
+    selection_reason: result.selection_reason,
+    candidate_count: result.candidate_count,
+    route: result.route ? buildDelegatedSelection('personal_episode_lookup', result.route) : null,
+  };
+}
+
 function buildTaskResumeSelection(card: TaskResumeCard): RetrievalRouteSelection {
   return {
     route_kind: 'task_resume',
@@ -191,8 +224,8 @@ function buildTaskResumeSelection(card: TaskResumeCard): RetrievalRouteSelection
 }
 
 function buildDelegatedSelection(
-  routeKind: 'broad_synthesis' | 'precision_lookup' | 'personal_profile_lookup',
-  payload: BroadSynthesisRoute | PrecisionLookupRoute | PersonalProfileLookupRoute,
+  routeKind: 'broad_synthesis' | 'precision_lookup' | 'personal_profile_lookup' | 'personal_episode_lookup',
+  payload: BroadSynthesisRoute | PrecisionLookupRoute | PersonalProfileLookupRoute | PersonalEpisodeLookupRoute,
 ): RetrievalRouteSelection {
   return {
     route_kind: routeKind,
@@ -249,6 +282,8 @@ function collectSourceRefs(route: RetrievalRouteSelection | null): string[] {
       section_id?: string;
     }>;
     task_id?: string;
+    profile_memory_id?: string;
+    personal_episode_id?: string;
   };
 
   if (route.route_kind === 'task_resume' && payload.task_id) {
@@ -257,6 +292,10 @@ function collectSourceRefs(route: RetrievalRouteSelection | null): string[] {
 
   if (route.route_kind === 'personal_profile_lookup' && payload.profile_memory_id) {
     return [`profile-memory:${payload.profile_memory_id}`];
+  }
+
+  if (route.route_kind === 'personal_episode_lookup' && payload.personal_episode_id) {
+    return [`personal-episode:${payload.personal_episode_id}`];
   }
 
   const refs = payload.recommended_reads ?? [];

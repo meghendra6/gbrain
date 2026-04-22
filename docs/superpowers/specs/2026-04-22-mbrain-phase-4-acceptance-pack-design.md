@@ -7,14 +7,13 @@ that can be used for PR review and rollout checks.
 
 ## Scope
 
-- aggregate `scope_gate` and `personal_profile_lookup` benchmark outcomes
+- aggregate `scope_gate`, `personal_profile_lookup`, and `personal_episode_lookup` benchmark outcomes
 - expose one `phase4-acceptance-pack` benchmark script
 - keep the aggregation deterministic and local-only
 - add verification coverage and package scripts
 
 ## Non-Goals
 
-- benchmarking personal-episode foundations before they have their own benchmark
 - replacing the per-slice benchmark scripts
 - introducing baseline comparisons at this layer
 

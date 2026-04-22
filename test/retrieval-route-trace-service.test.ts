@@ -339,3 +339,61 @@ test('retrieval route selector persists a personal-profile trace when personal l
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('retrieval route selector persists a personal-episode trace when episode lookup is allowed', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mbrain-route-trace-personal-episode-'));
+  const databasePath = join(dir, 'brain.db');
+  const engine = new SQLiteEngine();
+
+  try {
+    await engine.connect({ engine: 'sqlite', database_path: databasePath });
+    await engine.initSchema();
+
+    await engine.createTaskThread({
+      id: 'task-2',
+      scope: 'personal',
+      title: 'Personal episode trace',
+      goal: 'Persist personal episode retrieval traces',
+      status: 'active',
+      repo_path: null,
+      branch_name: null,
+      current_summary: 'Need durable personal episode explainability',
+    });
+
+    await engine.createPersonalEpisodeEntry({
+      id: 'episode-1',
+      scope_id: 'personal:default',
+      title: 'Morning reset',
+      start_time: new Date('2026-04-22T06:30:00.000Z'),
+      end_time: new Date('2026-04-22T07:00:00.000Z'),
+      source_kind: 'chat',
+      summary: 'Re-established the daily routine after travel.',
+      source_refs: ['User, direct message, 2026-04-22 9:05 AM KST'],
+      candidate_ids: ['profile-1'],
+    });
+
+    const result = await selectRetrievalRoute(engine, {
+      intent: 'personal_episode_lookup',
+      task_id: 'task-2',
+      episode_title: 'Morning reset',
+      query: 'remember my travel recovery routine',
+      persist_trace: true,
+    } as any);
+
+    expect(result.selected_intent).toBe('personal_episode_lookup');
+    expect(result.selection_reason).toBe('direct_title_match');
+    expect(result.scope_gate?.resolved_scope).toBe('personal');
+    expect(result.trace?.task_id).toBe('task-2');
+    expect(result.trace?.route).toEqual([
+      'personal_episode_record',
+      'minimal_personal_supporting_reads',
+    ]);
+    expect(result.trace?.source_refs).toContain('personal-episode:episode-1');
+    expect(result.trace?.verification).toContain('intent:personal_episode_lookup');
+    expect(result.trace?.verification).toContain('scope_gate:allow');
+    expect(result.trace?.outcome).toBe('personal_episode_lookup route selected');
+  } finally {
+    await engine.disconnect();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -277,3 +277,42 @@ test('retrieval route selector dispatches personal profile lookup intent', async
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('retrieval route selector dispatches personal episode lookup intent', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mbrain-route-selector-personal-episode-'));
+  const databasePath = join(dir, 'brain.db');
+  const engine = new SQLiteEngine();
+
+  try {
+    await engine.connect({ engine: 'sqlite', database_path: databasePath });
+    await engine.initSchema();
+
+    await engine.createPersonalEpisodeEntry({
+      id: 'episode-1',
+      scope_id: 'personal:default',
+      title: 'Morning reset',
+      start_time: new Date('2026-04-22T06:30:00.000Z'),
+      end_time: new Date('2026-04-22T07:00:00.000Z'),
+      source_kind: 'chat',
+      summary: 'Re-established the daily routine after travel.',
+      source_refs: ['User, direct message, 2026-04-22 9:05 AM KST'],
+      candidate_ids: ['profile-1'],
+    });
+
+    const result = await selectRetrievalRoute(engine, {
+      intent: 'personal_episode_lookup',
+      episode_title: 'Morning reset',
+      query: 'remember my travel recovery routine',
+    } as any);
+
+    expect(result.selected_intent).toBe('personal_episode_lookup');
+    expect(result.selection_reason).toBe('direct_title_match');
+    expect(result.scope_gate?.resolved_scope).toBe('personal');
+    expect(result.scope_gate?.policy).toBe('allow');
+    expect(result.route?.route_kind).toBe('personal_episode_lookup');
+    expect((result.route?.payload as any)?.personal_episode_id).toBe('episode-1');
+  } finally {
+    await engine.disconnect();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

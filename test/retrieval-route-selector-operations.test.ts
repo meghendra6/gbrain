@@ -203,6 +203,35 @@ test('retrieval route selector operation dispatches task and precision intents',
     expect((personal as any).scope_gate?.resolved_scope).toBe('personal');
     expect((personal as any).scope_gate?.policy).toBe('allow');
     expect((personal as any).route?.route_kind).toBe('personal_profile_lookup');
+
+    await engine.createPersonalEpisodeEntry({
+      id: 'episode-1',
+      scope_id: 'personal:default',
+      title: 'Morning reset',
+      start_time: new Date('2026-04-22T06:30:00.000Z'),
+      end_time: new Date('2026-04-22T07:00:00.000Z'),
+      source_kind: 'chat',
+      summary: 'Re-established the daily routine after travel.',
+      source_refs: ['User, direct message, 2026-04-22 9:05 AM KST'],
+      candidate_ids: ['profile-1'],
+    });
+
+    const episode = await route.handler({
+      engine,
+      config: {} as any,
+      logger: console,
+      dryRun: false,
+    }, {
+      intent: 'personal_episode_lookup',
+      episode_title: 'Morning reset',
+      query: 'remember my travel recovery routine',
+    });
+
+    expect((episode as any).selected_intent).toBe('personal_episode_lookup');
+    expect((episode as any).selection_reason).toBe('direct_title_match');
+    expect((episode as any).scope_gate?.resolved_scope).toBe('personal');
+    expect((episode as any).scope_gate?.policy).toBe('allow');
+    expect((episode as any).route?.route_kind).toBe('personal_episode_lookup');
   } finally {
     await engine.disconnect();
     rmSync(dir, { recursive: true, force: true });

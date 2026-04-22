@@ -14,6 +14,11 @@ describe('phase4 acceptance-pack benchmark', () => {
     expect(payload.phase).toBe('phase4');
     expect(Array.isArray(payload.benchmarks)).toBe(true);
     expect(payload.benchmarks.length).toBeGreaterThan(0);
+    expect(payload.benchmarks.map((benchmark: any) => benchmark.name).sort()).toEqual([
+      'personal_episode_lookup',
+      'personal_profile_lookup',
+      'scope_gate',
+    ]);
     expect(payload.acceptance.readiness_status).toBe('pass');
     expect(payload.acceptance.phase4_status).toBe('pass');
   });

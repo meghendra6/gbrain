@@ -632,7 +632,39 @@ export interface PersonalEpisodeFilters {
   offset?: number;
 }
 
-export type RetrievalRouteIntent = 'task_resume' | 'broad_synthesis' | 'precision_lookup' | 'personal_profile_lookup';
+export interface PersonalEpisodeLookupRoute {
+  route_kind: 'personal_episode_lookup';
+  personal_episode_id: string;
+  scope_id: string;
+  title: string;
+  source_kind: PersonalEpisodeSourceKind;
+  start_time: Date;
+  end_time: Date | null;
+  summary: string;
+  candidate_ids: string[];
+  retrieval_route: string[];
+  summary_lines: string[];
+  source_refs: string[];
+}
+
+export interface PersonalEpisodeLookupRouteInput {
+  scope_id?: string;
+  title: string;
+  source_kind?: PersonalEpisodeSourceKind;
+}
+
+export interface PersonalEpisodeLookupRouteResult {
+  selection_reason: string;
+  candidate_count: number;
+  route: PersonalEpisodeLookupRoute | null;
+}
+
+export type RetrievalRouteIntent =
+  | 'task_resume'
+  | 'broad_synthesis'
+  | 'precision_lookup'
+  | 'personal_profile_lookup'
+  | 'personal_episode_lookup';
 
 export interface RetrievalRouteSelection {
   route_kind: RetrievalRouteIntent;
@@ -657,6 +689,8 @@ export interface RetrievalRouteSelectorInput {
   source_ref?: string;
   subject?: string;
   profile_type?: ProfileMemoryType;
+  episode_title?: string;
+  episode_source_kind?: PersonalEpisodeSourceKind;
 }
 
 export interface RetrievalRouteSelectorResult {
@@ -679,6 +713,7 @@ export interface ScopeGateDecisionInput {
   query?: string;
   repo_path?: string;
   subject?: string;
+  title?: string;
 }
 
 export interface ScopeGateDecisionResult {

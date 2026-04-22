@@ -191,6 +191,37 @@ test('retrieval route operation persists a trace when requested', async () => {
     expect((personal as any).trace?.verification).toContain('intent:personal_profile_lookup');
     expect((personal as any).trace?.verification).toContain('scope_gate:allow');
     expect((personal as any).trace?.source_refs).toContain('profile-memory:profile-1');
+
+    await engine.createPersonalEpisodeEntry({
+      id: 'episode-1',
+      scope_id: 'personal:default',
+      title: 'Morning reset',
+      start_time: new Date('2026-04-22T06:30:00.000Z'),
+      end_time: new Date('2026-04-22T07:00:00.000Z'),
+      source_kind: 'chat',
+      summary: 'Re-established the daily routine after travel.',
+      source_refs: ['User, direct message, 2026-04-22 9:05 AM KST'],
+      candidate_ids: ['profile-1'],
+    });
+
+    const episode = await route.handler({
+      engine,
+      config: {} as any,
+      logger: console,
+      dryRun: false,
+    }, {
+      intent: 'personal_episode_lookup',
+      task_id: 'task-2',
+      episode_title: 'Morning reset',
+      query: 'remember my travel recovery routine',
+      persist_trace: true,
+    });
+
+    expect((episode as any).selection_reason).toBe('direct_title_match');
+    expect((episode as any).scope_gate?.resolved_scope).toBe('personal');
+    expect((episode as any).trace?.verification).toContain('intent:personal_episode_lookup');
+    expect((episode as any).trace?.verification).toContain('scope_gate:allow');
+    expect((episode as any).trace?.source_refs).toContain('personal-episode:episode-1');
   } finally {
     await engine.disconnect();
     rmSync(dir, { recursive: true, force: true });

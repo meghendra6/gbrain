@@ -166,3 +166,37 @@ test('scope gate allows personal profile lookup when personal scope is explicit 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('scope gate allows personal episode lookup when personal scope is explicit or obvious', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mbrain-scope-gate-personal-episode-lookup-'));
+  const databasePath = join(dir, 'brain.db');
+  const engine = new SQLiteEngine();
+
+  try {
+    await engine.connect({ engine: 'sqlite', database_path: databasePath });
+    await engine.initSchema();
+
+    const explicit = await evaluateScopeGate(engine, {
+      intent: 'personal_episode_lookup',
+      requested_scope: 'personal',
+      title: 'Morning reset',
+      query: 'remember my travel recovery routine',
+    } as any);
+
+    expect(explicit.resolved_scope).toBe('personal');
+    expect(explicit.policy).toBe('allow');
+    expect(explicit.decision_reason).toBe('explicit_scope');
+
+    const inferred = await evaluateScopeGate(engine, {
+      intent: 'personal_episode_lookup',
+      query: 'remember my travel recovery routine',
+    } as any);
+
+    expect(inferred.resolved_scope).toBe('personal');
+    expect(inferred.policy).toBe('allow');
+    expect(inferred.decision_reason).toBe('personal_signal');
+  } finally {
+    await engine.disconnect();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

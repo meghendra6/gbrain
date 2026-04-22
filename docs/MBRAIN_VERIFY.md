@@ -658,6 +658,26 @@ Expected:
 - append-only episode writes are immediately visible through `get` and `list`
 - `test:phase4` includes the personal-episode foundation coverage
 
+## Phase 4 personal-episode-lookup
+
+Run:
+
+```bash
+bun test test/personal-episode-schema.test.ts test/personal-episode-engine.test.ts test/personal-episode-operations.test.ts test/personal-episode-lookup-route-service.test.ts test/personal-episode-lookup-route-operations.test.ts test/phase4-personal-episode-lookup.test.ts
+bun run bench:phase4-personal-episode-lookup --json
+```
+
+Expected:
+
+- personal-episode schema and engine tests pass for SQLite and PGLite
+- Postgres personal-episode persistence is covered when `DATABASE_URL` is available
+- `personal-episode-record`, `personal-episode-get`, and `personal-episode-list` stay available through the shared operation surface
+- `personal-episode-lookup-route` stays available through the shared operation surface
+- exact-title direct match, ambiguity, and no-match cases all stay deterministic
+- benchmark reports `personal_episode_lookup_route` and `personal_episode_lookup_route_correctness`
+- `acceptance.readiness_status` reports `pass` or `fail` from the local guardrails
+- `acceptance.phase4_status` matches the local guardrail outcome
+
 ## Phase 4 acceptance-pack
 
 Run:

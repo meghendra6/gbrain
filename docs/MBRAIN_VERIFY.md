@@ -731,6 +731,25 @@ Expected:
 - benchmark reports `personal_export_visibility` and `personal_export_visibility_correctness`
 - `acceptance.phase4_status` matches the local guardrail outcome
 
+## Phase 4 mixed-scope bridge
+
+Run:
+
+```bash
+bun test test/mixed-scope-bridge-service.test.ts test/mixed-scope-bridge-operations.test.ts test/retrieval-route-selector-service.test.ts test/retrieval-route-selector-operations.test.ts test/phase4-mixed-scope-bridge.test.ts
+bun run bench:phase4-mixed-scope-bridge --json
+```
+
+Expected:
+
+- `mixed-scope-bridge` stays available through the shared operation surface
+- explicit mixed scope is required for the bridge
+- the bridge combines one work-side broad-synthesis route and one personal profile route
+- degraded bridge cases return deterministic no-route disclosures
+- `retrieval-route` can select the bridge and persist a Retrieval Trace
+- benchmark reports `mixed_scope_bridge` and `mixed_scope_bridge_correctness`
+- `acceptance.phase4_status` matches the local guardrail outcome
+
 ## Phase 4 acceptance-pack
 
 Run:
@@ -746,7 +765,7 @@ Expected:
 - benchmark summarizes every published Phase 4 benchmark slice
 - `acceptance.readiness_status` reports `pass` only when all published Phase 4 slices pass
 - `acceptance.phase4_status` matches the aggregated phase outcome
-- `test:phase4` runs the published Phase 4 suites, export-visibility coverage, and the acceptance-pack test
+- `test:phase4` runs the published Phase 4 suites, export-visibility coverage, mixed-scope bridge coverage, and the acceptance-pack test
 
 ---
 

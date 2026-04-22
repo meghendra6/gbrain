@@ -19,6 +19,7 @@ describe('phase5 acceptance-pack benchmark', () => {
       'memory_inbox_promotion_preflight',
       'memory_inbox_promotion',
       'memory_inbox_supersession',
+      'memory_inbox_contradiction',
     ]);
     expect(payload.acceptance.readiness_status).toBe('pass');
     expect(payload.acceptance.phase5_status).toBe('pass');

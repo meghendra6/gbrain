@@ -5,6 +5,7 @@ import {
   preflightPromoteMemoryCandidate,
   rejectMemoryCandidateEntry,
 } from './services/memory-inbox-service.ts';
+import { resolveMemoryCandidateContradiction } from './services/memory-inbox-contradiction-service.ts';
 import { promoteMemoryCandidateEntry } from './services/memory-inbox-promotion-service.ts';
 import { supersedeMemoryCandidateEntry } from './services/memory-inbox-supersession-service.ts';
 
@@ -23,6 +24,7 @@ const MEMORY_CANDIDATE_GENERATED_BY_VALUES = ['agent', 'map_analysis', 'dream_cy
 const MEMORY_CANDIDATE_EXTRACTION_KIND_VALUES = ['extracted', 'inferred', 'ambiguous', 'manual'] as const;
 const MEMORY_CANDIDATE_SENSITIVITY_VALUES = ['public', 'work', 'personal', 'secret', 'unknown'] as const;
 const MEMORY_CANDIDATE_TARGET_OBJECT_TYPE_VALUES = ['curated_note', 'procedure', 'profile_memory', 'personal_episode', 'other'] as const;
+const MEMORY_CANDIDATE_CONTRADICTION_OUTCOME_VALUES = ['rejected', 'unresolved', 'superseded'] as const;
 const ISO_DATETIME_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?(?:Z|([+-])(\d{2}):(\d{2}))$/;
 
 export const DEFAULT_MEMORY_INBOX_SCOPE_ID = 'workspace:default';
@@ -532,6 +534,69 @@ export function createMemoryInboxOperations(
     cliHints: { name: 'supersede-memory-candidate' },
   };
 
+  const resolve_memory_candidate_contradiction: Operation = {
+    name: 'resolve_memory_candidate_contradiction',
+    description: 'Resolve one contradiction between a challenger candidate and an existing challenged candidate.',
+    params: {
+      candidate_id: { type: 'string', required: true, description: 'Challenger candidate id' },
+      challenged_candidate_id: { type: 'string', required: true, description: 'Existing challenged candidate id' },
+      outcome: {
+        type: 'string',
+        required: true,
+        description: 'Contradiction outcome',
+        enum: [...MEMORY_CANDIDATE_CONTRADICTION_OUTCOME_VALUES],
+      },
+      reviewed_at: { type: 'string', description: 'Optional ISO timestamp for contradiction review metadata' },
+      review_reason: { type: 'string', description: 'Optional contradiction review reason' },
+    },
+    mutating: true,
+    handler: async (ctx, p) => {
+      if (typeof p.candidate_id !== 'string' || p.candidate_id.trim().length === 0) {
+        throw invalidParams(deps, 'candidate_id must be a non-empty string');
+      }
+      if (typeof p.challenged_candidate_id !== 'string' || p.challenged_candidate_id.trim().length === 0) {
+        throw invalidParams(deps, 'challenged_candidate_id must be a non-empty string');
+      }
+      const outcome = requireEnumValue(
+        deps,
+        'outcome',
+        p.outcome,
+        MEMORY_CANDIDATE_CONTRADICTION_OUTCOME_VALUES,
+      );
+      if (p.review_reason != null && typeof p.review_reason !== 'string') {
+        throw invalidParams(deps, 'review_reason must be a string or null');
+      }
+      if (ctx.dryRun) {
+        return {
+          dry_run: true,
+          action: 'resolve_memory_candidate_contradiction',
+          candidate_id: p.candidate_id,
+          challenged_candidate_id: p.challenged_candidate_id,
+          outcome,
+        };
+      }
+
+      try {
+        return await resolveMemoryCandidateContradiction(ctx.engine, {
+          candidate_id: p.candidate_id,
+          challenged_candidate_id: p.challenged_candidate_id,
+          outcome,
+          reviewed_at: normalizeOptionalIsoTimestamp(deps, 'reviewed_at', p.reviewed_at),
+          review_reason: typeof p.review_reason === 'string' ? p.review_reason : undefined,
+        });
+      } catch (error) {
+        if (error instanceof MemoryInboxServiceError) {
+          if (error.code === 'memory_candidate_not_found') {
+            throw new deps.OperationError('memory_candidate_not_found', error.message);
+          }
+          throw new deps.OperationError('invalid_params', error.message);
+        }
+        throw error;
+      }
+    },
+    cliHints: { name: 'resolve-memory-candidate-contradiction' },
+  };
+
   return [
     get_memory_candidate_entry,
     list_memory_candidate_entries,
@@ -541,5 +606,6 @@ export function createMemoryInboxOperations(
     preflight_promote_memory_candidate,
     promote_memory_candidate_entry,
     supersede_memory_candidate_entry,
+    resolve_memory_candidate_contradiction,
   ];
 }

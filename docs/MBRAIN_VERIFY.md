@@ -874,6 +874,23 @@ Expected:
 - benchmark reports `memory_inbox_supersession` and `memory_inbox_supersession_correctness`
 - `acceptance.phase5_status` matches the local supersession-slice guardrail outcome
 
+## Phase 5 memory inbox contradiction
+
+Run:
+
+```bash
+bun test test/memory-inbox-contradiction-service.test.ts test/memory-inbox-contradiction-operations.test.ts test/phase5-memory-inbox-contradiction.test.ts
+bun run bench:phase5-memory-inbox-contradiction --json
+```
+
+Expected:
+
+- contradiction handling stays inside the memory-inbox governance boundary
+- reject, unresolved, and superseded outcomes all remain explicit and auditable
+- `resolve-memory-candidate-contradiction` stays available through the shared operation surface
+- benchmark reports `memory_inbox_contradiction` and `memory_inbox_contradiction_correctness`
+- `acceptance.phase5_status` matches the local contradiction-slice guardrail outcome
+
 ## Phase 5 acceptance-pack
 
 Run:
@@ -889,7 +906,7 @@ Expected:
 - benchmark summarizes every published Phase 5 benchmark slice
 - `acceptance.readiness_status` reports `pass` only when all published Phase 5 slices pass
 - `acceptance.phase5_status` matches the aggregated phase outcome
-- `test:phase5` runs the published Phase 5 suites, including supersession, and the acceptance-pack test
+- `test:phase5` runs the published Phase 5 suites, including contradiction handling, and the acceptance-pack test
 
 ---
 

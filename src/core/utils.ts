@@ -8,6 +8,7 @@ import type {
   ContextMapEntry,
   ContextAtlasEntry,
   MemoryCandidateEntry,
+  MemoryCandidateContradictionEntry,
   MemoryCandidateSupersessionEntry,
   ProfileMemoryEntry,
   PersonalEpisodeEntry,
@@ -264,6 +265,23 @@ export function rowToMemoryCandidateSupersessionEntry(
     scope_id: row.scope_id as string,
     superseded_candidate_id: row.superseded_candidate_id as string,
     replacement_candidate_id: row.replacement_candidate_id as string,
+    reviewed_at: row.reviewed_at ? new Date(row.reviewed_at as string) : null,
+    review_reason: (row.review_reason as string | null) ?? null,
+    created_at: new Date(row.created_at as string),
+    updated_at: new Date(row.updated_at as string),
+  };
+}
+
+export function rowToMemoryCandidateContradictionEntry(
+  row: Record<string, unknown>,
+): MemoryCandidateContradictionEntry {
+  return {
+    id: row.id as string,
+    scope_id: row.scope_id as string,
+    candidate_id: row.candidate_id as string,
+    challenged_candidate_id: row.challenged_candidate_id as string,
+    outcome: row.outcome as MemoryCandidateContradictionEntry['outcome'],
+    supersession_entry_id: (row.supersession_entry_id as string | null) ?? null,
     reviewed_at: row.reviewed_at ? new Date(row.reviewed_at as string) : null,
     review_reason: (row.review_reason as string | null) ?? null,
     created_at: new Date(row.created_at as string),

@@ -29,12 +29,13 @@ describe('memory-inbox schema', () => {
         `SELECT name
          FROM sqlite_master
          WHERE type = 'table'
-           AND name IN ('memory_candidate_entries', 'memory_candidate_supersession_entries')
+           AND name IN ('memory_candidate_entries', 'memory_candidate_supersession_entries', 'memory_candidate_contradiction_entries')
          ORDER BY name ASC`,
       )
       .all() as Array<{ name: string }>;
 
     expect(rows.map((row) => row.name)).toEqual([
+      'memory_candidate_contradiction_entries',
       'memory_candidate_entries',
       'memory_candidate_supersession_entries',
     ]);
@@ -131,6 +132,19 @@ describe('memory-inbox schema', () => {
     expect(supersessionSchema.sql).toContain("superseded_candidate_id TEXT NOT NULL");
     expect(supersessionSchema.sql).toContain("replacement_candidate_id TEXT NOT NULL");
 
+    const contradictionSchema = db
+      .query(
+        `SELECT sql
+         FROM sqlite_master
+         WHERE type = 'table'
+           AND name = 'memory_candidate_contradiction_entries'`,
+      )
+      .get() as { sql: string };
+
+    expect(contradictionSchema.sql).toContain("candidate_id TEXT NOT NULL");
+    expect(contradictionSchema.sql).toContain("challenged_candidate_id TEXT NOT NULL");
+    expect(contradictionSchema.sql).toContain("outcome TEXT NOT NULL CHECK");
+
     await engine.disconnect();
   });
 
@@ -146,11 +160,12 @@ describe('memory-inbox schema', () => {
       `SELECT table_name
        FROM information_schema.tables
        WHERE table_schema = 'public'
-         AND table_name IN ('memory_candidate_entries', 'memory_candidate_supersession_entries')
+         AND table_name IN ('memory_candidate_entries', 'memory_candidate_supersession_entries', 'memory_candidate_contradiction_entries')
        ORDER BY table_name ASC`,
     );
 
     expect(result.rows.map((row: { table_name: string }) => row.table_name)).toEqual([
+      'memory_candidate_contradiction_entries',
       'memory_candidate_entries',
       'memory_candidate_supersession_entries',
     ]);
@@ -224,6 +239,17 @@ describe('memory-inbox schema', () => {
 
     expect(supersessionTables.rows.map((row: { table_name: string }) => row.table_name)).toEqual([
       'memory_candidate_supersession_entries',
+    ]);
+
+    const contradictionTables = await (engine as any).db.query(
+      `SELECT table_name
+       FROM information_schema.tables
+       WHERE table_schema = 'public'
+         AND table_name = 'memory_candidate_contradiction_entries'`,
+    );
+
+    expect(contradictionTables.rows.map((row: { table_name: string }) => row.table_name)).toEqual([
+      'memory_candidate_contradiction_entries',
     ]);
 
     await engine.disconnect();

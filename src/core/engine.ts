@@ -13,6 +13,8 @@ import type {
   ContextAtlasEntryInput,
   ContextAtlasFilters,
   MemoryCandidateEntry,
+  MemoryCandidateContradictionEntry,
+  MemoryCandidateContradictionEntryInput,
   MemoryCandidateEntryInput,
   MemoryCandidateFilters,
   MemoryCandidatePromotionPatch,
@@ -144,6 +146,8 @@ export interface BrainEngine {
   promoteMemoryCandidateEntry(id: string, patch?: MemoryCandidatePromotionPatch): Promise<MemoryCandidateEntry | null>;
   supersedeMemoryCandidateEntry(input: MemoryCandidateSupersessionInput): Promise<MemoryCandidateSupersessionEntry | null>;
   getMemoryCandidateSupersessionEntry(id: string): Promise<MemoryCandidateSupersessionEntry | null>;
+  createMemoryCandidateContradictionEntry(input: MemoryCandidateContradictionEntryInput): Promise<MemoryCandidateContradictionEntry | null>;
+  getMemoryCandidateContradictionEntry(id: string): Promise<MemoryCandidateContradictionEntry | null>;
   deleteMemoryCandidateEntry(id: string): Promise<void>;
 
   // Note manifest

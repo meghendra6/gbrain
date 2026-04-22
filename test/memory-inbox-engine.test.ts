@@ -237,6 +237,26 @@ for (const createHarness of [createSqliteHarness, createPgliteHarness]) {
       reopened = await harness.reopen();
       expect((await reopened.getMemoryCandidateEntry(promotedId))?.status).toBe('superseded');
       expect((await reopened.getMemoryCandidateSupersessionEntry(`${promotedId}:supersession`))?.superseded_candidate_id).toBe(promotedId);
+      const contradiction = await reopened.createMemoryCandidateContradictionEntry({
+        id: `${promotedId}:contradiction`,
+        scope_id: scopeId,
+        candidate_id: replacementId,
+        challenged_candidate_id: promotedId,
+        outcome: 'superseded',
+        supersession_entry_id: `${promotedId}:supersession`,
+        reviewed_at: new Date('2026-04-22T06:21:30.000Z'),
+        review_reason: 'Contradiction record should persist across reopen.',
+      });
+      expect(contradiction.outcome).toBe('superseded');
+      expect(await reopened.createMemoryCandidateContradictionEntry({
+        id: `${promotedId}:invalid-contradiction`,
+        scope_id: 'workspace:bogus',
+        candidate_id: replacementId,
+        challenged_candidate_id: promotedId,
+        outcome: 'unresolved',
+        reviewed_at: new Date('2026-04-22T06:21:45.000Z'),
+        review_reason: 'Cross-scope contradiction records should be rejected.',
+      })).toBeNull();
       expect(await reopened.supersedeMemoryCandidateEntry({
         id: `${promotedId}:supersession-duplicate`,
         scope_id: scopeId,
@@ -246,6 +266,10 @@ for (const createHarness of [createSqliteHarness, createPgliteHarness]) {
         reviewed_at: new Date('2026-04-22T06:22:00.000Z'),
         review_reason: 'Duplicate supersession should degrade to null.',
       })).toBeNull();
+
+      await reopened.disconnect();
+      reopened = await harness.reopen();
+      expect((await reopened.getMemoryCandidateContradictionEntry(`${promotedId}:contradiction`))?.outcome).toBe('superseded');
 
       await reopened.deleteMemoryCandidateEntry(id);
       expect(await reopened.getMemoryCandidateEntry(id)).toBeNull();

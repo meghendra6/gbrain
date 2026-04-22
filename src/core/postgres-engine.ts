@@ -21,6 +21,8 @@ import type {
   ContextAtlasEntryInput,
   ContextAtlasFilters,
   MemoryCandidateEntry,
+  MemoryCandidateContradictionEntry,
+  MemoryCandidateContradictionEntryInput,
   MemoryCandidateEntryInput,
   MemoryCandidateFilters,
   MemoryCandidatePromotionPatch,
@@ -68,6 +70,7 @@ import {
   rowToContextAtlasEntry,
   rowToContextMapEntry,
   rowToMemoryCandidateEntry,
+  rowToMemoryCandidateContradictionEntry,
   rowToMemoryCandidateSupersessionEntry,
   rowToNoteManifestEntry,
   rowToNoteSectionEntry,
@@ -1468,6 +1471,67 @@ export class PostgresEngine implements BrainEngine {
       return null;
     }
     return rowToMemoryCandidateSupersessionEntry(rows[0] as Record<string, unknown>);
+  }
+
+  async createMemoryCandidateContradictionEntry(
+    input: MemoryCandidateContradictionEntryInput,
+  ): Promise<MemoryCandidateContradictionEntry | null> {
+    const sql = this.sql;
+    const rows = await sql`
+      INSERT INTO memory_candidate_contradiction_entries (
+        id, scope_id, candidate_id, challenged_candidate_id, outcome, supersession_entry_id,
+        reviewed_at, review_reason
+      )
+      SELECT
+        ${input.id},
+        ${input.scope_id},
+        ${input.candidate_id},
+        ${input.challenged_candidate_id},
+        ${input.outcome},
+        ${input.supersession_entry_id ?? null},
+        ${input.reviewed_at instanceof Date ? input.reviewed_at.toISOString() : input.reviewed_at ?? null},
+        ${input.review_reason ?? null}
+      WHERE EXISTS (
+        SELECT 1
+        FROM memory_candidate_entries candidate
+        JOIN memory_candidate_entries challenged
+          ON challenged.id = ${input.challenged_candidate_id}
+        WHERE candidate.id = ${input.candidate_id}
+          AND candidate.scope_id = ${input.scope_id}
+          AND challenged.scope_id = ${input.scope_id}
+      )
+        AND (
+          ${input.supersession_entry_id ?? null}::text IS NULL
+          OR EXISTS (
+            SELECT 1
+            FROM memory_candidate_supersession_entries
+            WHERE id = ${input.supersession_entry_id ?? null}
+              AND scope_id = ${input.scope_id}
+              AND replacement_candidate_id = ${input.candidate_id}
+              AND superseded_candidate_id = ${input.challenged_candidate_id}
+          )
+        )
+      RETURNING id, scope_id, candidate_id, challenged_candidate_id, outcome, supersession_entry_id,
+                reviewed_at, review_reason, created_at, updated_at
+    `;
+    if (rows.length === 0) {
+      return null;
+    }
+    return rowToMemoryCandidateContradictionEntry(rows[0] as Record<string, unknown>);
+  }
+
+  async getMemoryCandidateContradictionEntry(id: string): Promise<MemoryCandidateContradictionEntry | null> {
+    const sql = this.sql;
+    const rows = await sql`
+      SELECT id, scope_id, candidate_id, challenged_candidate_id, outcome, supersession_entry_id,
+             reviewed_at, review_reason, created_at, updated_at
+      FROM memory_candidate_contradiction_entries
+      WHERE id = ${id}
+    `;
+    if (rows.length === 0) {
+      return null;
+    }
+    return rowToMemoryCandidateContradictionEntry(rows[0] as Record<string, unknown>);
   }
 
   async deleteMemoryCandidateEntry(id: string): Promise<void> {

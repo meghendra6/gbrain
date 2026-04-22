@@ -29,6 +29,8 @@ import type {
   ContextAtlasEntryInput,
   ContextAtlasFilters,
   MemoryCandidateEntry,
+  MemoryCandidateContradictionEntry,
+  MemoryCandidateContradictionEntryInput,
   MemoryCandidateEntryInput,
   MemoryCandidateFilters,
   MemoryCandidatePromotionPatch,
@@ -1764,6 +1766,83 @@ export class SQLiteEngine implements BrainEngine {
     return row ? rowToMemoryCandidateSupersessionEntry(row) : null;
   }
 
+  async createMemoryCandidateContradictionEntry(
+    input: MemoryCandidateContradictionEntryInput,
+  ): Promise<MemoryCandidateContradictionEntry | null> {
+    const timestamp = nowIso();
+    const result = this.database.run(`
+      INSERT INTO memory_candidate_contradiction_entries (
+        id, scope_id, candidate_id, challenged_candidate_id, outcome, supersession_entry_id,
+        reviewed_at, review_reason, created_at, updated_at
+      )
+      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+      WHERE EXISTS (
+        SELECT 1
+        FROM memory_candidate_entries candidate
+        JOIN memory_candidate_entries challenged
+          ON challenged.id = ?
+        WHERE candidate.id = ?
+          AND candidate.scope_id = ?
+          AND challenged.scope_id = ?
+      )
+        AND (
+          ? IS NULL
+          OR EXISTS (
+            SELECT 1
+            FROM memory_candidate_supersession_entries
+            WHERE id = ?
+              AND scope_id = ?
+              AND replacement_candidate_id = ?
+              AND superseded_candidate_id = ?
+          )
+        )
+    `, [
+      input.id,
+      input.scope_id,
+      input.candidate_id,
+      input.challenged_candidate_id,
+      input.outcome,
+      input.supersession_entry_id ?? null,
+      toNullableIso(input.reviewed_at),
+      input.review_reason ?? null,
+      timestamp,
+      timestamp,
+      input.challenged_candidate_id,
+      input.candidate_id,
+      input.scope_id,
+      input.scope_id,
+      input.supersession_entry_id ?? null,
+      input.supersession_entry_id ?? null,
+      input.scope_id,
+      input.candidate_id,
+      input.challenged_candidate_id,
+    ]);
+    if (result.changes === 0) {
+      return null;
+    }
+
+    const row = this.database.query(`
+      SELECT id, scope_id, candidate_id, challenged_candidate_id, outcome, supersession_entry_id,
+             reviewed_at, review_reason, created_at, updated_at
+      FROM memory_candidate_contradiction_entries
+      WHERE id = ?
+    `).get(input.id) as Record<string, unknown> | null;
+    if (!row) {
+      throw new Error(`Memory candidate contradiction entry not found after create: ${input.id}`);
+    }
+    return rowToMemoryCandidateContradictionEntry(row);
+  }
+
+  async getMemoryCandidateContradictionEntry(id: string): Promise<MemoryCandidateContradictionEntry | null> {
+    const row = this.database.query(`
+      SELECT id, scope_id, candidate_id, challenged_candidate_id, outcome, supersession_entry_id,
+             reviewed_at, review_reason, created_at, updated_at
+      FROM memory_candidate_contradiction_entries
+      WHERE id = ?
+    `).get(id) as Record<string, unknown> | null;
+    return row ? rowToMemoryCandidateContradictionEntry(row) : null;
+  }
+
   async deleteMemoryCandidateEntry(id: string): Promise<void> {
     this.database.run(`DELETE FROM memory_candidate_entries WHERE id = ?`, [id]);
   }
@@ -2672,6 +2751,33 @@ export class SQLiteEngine implements BrainEngine {
             END;
           `);
           break;
+        case 19:
+          this.database.exec(`
+            CREATE TABLE IF NOT EXISTS memory_candidate_contradiction_entries (
+              id TEXT PRIMARY KEY,
+              scope_id TEXT NOT NULL,
+              candidate_id TEXT NOT NULL REFERENCES memory_candidate_entries(id),
+              challenged_candidate_id TEXT NOT NULL REFERENCES memory_candidate_entries(id),
+              outcome TEXT NOT NULL CHECK (outcome IN ('rejected', 'unresolved', 'superseded')),
+              supersession_entry_id TEXT REFERENCES memory_candidate_supersession_entries(id),
+              reviewed_at TEXT,
+              review_reason TEXT,
+              created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+              updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+              CHECK (candidate_id <> challenged_candidate_id),
+              CHECK (
+                (outcome = 'superseded' AND supersession_entry_id IS NOT NULL)
+                OR (outcome IN ('rejected', 'unresolved') AND supersession_entry_id IS NULL)
+              )
+            );
+            CREATE INDEX IF NOT EXISTS idx_memory_candidate_contradiction_scope
+              ON memory_candidate_contradiction_entries(scope_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_memory_candidate_contradiction_candidate
+              ON memory_candidate_contradiction_entries(candidate_id);
+            CREATE INDEX IF NOT EXISTS idx_memory_candidate_contradiction_challenged
+              ON memory_candidate_contradiction_entries(challenged_candidate_id);
+          `);
+          break;
       }
 
       await this.setConfig('version', String(version));
@@ -3249,6 +3355,23 @@ function rowToMemoryCandidateSupersessionEntry(
     scope_id: String(row.scope_id),
     superseded_candidate_id: String(row.superseded_candidate_id),
     replacement_candidate_id: String(row.replacement_candidate_id),
+    reviewed_at: row.reviewed_at ? new Date(String(row.reviewed_at)) : null,
+    review_reason: row.review_reason == null ? null : String(row.review_reason),
+    created_at: new Date(String(row.created_at)),
+    updated_at: new Date(String(row.updated_at)),
+  };
+}
+
+function rowToMemoryCandidateContradictionEntry(
+  row: Record<string, unknown>,
+): MemoryCandidateContradictionEntry {
+  return {
+    id: String(row.id),
+    scope_id: String(row.scope_id),
+    candidate_id: String(row.candidate_id),
+    challenged_candidate_id: String(row.challenged_candidate_id),
+    outcome: row.outcome as MemoryCandidateContradictionEntry['outcome'],
+    supersession_entry_id: row.supersession_entry_id == null ? null : String(row.supersession_entry_id),
     reviewed_at: row.reviewed_at ? new Date(String(row.reviewed_at)) : null,
     review_reason: row.review_reason == null ? null : String(row.review_reason),
     created_at: new Date(String(row.created_at)),

@@ -842,6 +842,35 @@ export interface MemoryCandidateSupersessionInput {
   review_reason?: string | null;
 }
 
+export type MemoryCandidateContradictionOutcome =
+  | 'rejected'
+  | 'unresolved'
+  | 'superseded';
+
+export interface MemoryCandidateContradictionEntry {
+  id: string;
+  scope_id: string;
+  candidate_id: string;
+  challenged_candidate_id: string;
+  outcome: MemoryCandidateContradictionOutcome;
+  supersession_entry_id: string | null;
+  reviewed_at: Date | null;
+  review_reason: string | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface MemoryCandidateContradictionEntryInput {
+  id: string;
+  scope_id: string;
+  candidate_id: string;
+  challenged_candidate_id: string;
+  outcome: MemoryCandidateContradictionOutcome;
+  supersession_entry_id?: string | null;
+  reviewed_at?: Date | string | null;
+  review_reason?: string | null;
+}
+
 export interface PersonalEpisodeLookupRoute {
   route_kind: 'personal_episode_lookup';
   personal_episode_id: string;

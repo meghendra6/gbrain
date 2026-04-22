@@ -259,6 +259,21 @@ async function runCorrectnessWorkload(
     passes += 1;
   }
 
+  const scopedDeny = await selectRetrievalRoute(engine, {
+    intent: 'precision_lookup',
+    requested_scope: 'personal',
+    query: 'remember my daily routine',
+    slug: 'systems/mbrain',
+  });
+  checks += 1;
+  if (
+    scopedDeny.selection_reason === 'unsupported_scope_intent'
+    && scopedDeny.route === null
+    && scopedDeny.scope_gate?.policy === 'deny'
+  ) {
+    passes += 1;
+  }
+
   const missing = await selectRetrievalRoute(engine, {
     intent: 'precision_lookup',
     slug: 'systems/unknown',

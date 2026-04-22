@@ -536,6 +536,7 @@ export interface RetrievalRouteSelectorInput {
   intent: RetrievalRouteIntent;
   task_id?: string;
   persist_trace?: boolean;
+  requested_scope?: Exclude<ScopeGateScope, 'unknown'>;
   map_id?: string;
   scope_id?: string;
   kind?: string;
@@ -552,6 +553,7 @@ export interface RetrievalRouteSelectorResult {
   selection_reason: string;
   candidate_count: number;
   route: RetrievalRouteSelection | null;
+  scope_gate?: ScopeGateDecisionResult;
   trace?: RetrievalTrace | null;
 }
 

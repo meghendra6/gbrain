@@ -128,6 +128,26 @@ test('retrieval route operation persists a trace when requested', async () => {
     expect((ambiguous as any).trace?.route).toEqual([]);
     expect((ambiguous as any).trace?.verification).toContain('selection_reason:ambiguous_source_ref_match');
     expect((ambiguous as any).trace?.outcome).toBe('precision_lookup route unavailable');
+
+    const scopedDeny = await route.handler({
+      engine,
+      config: {} as any,
+      logger: console,
+      dryRun: false,
+    }, {
+      intent: 'precision_lookup',
+      task_id: 'task-1',
+      requested_scope: 'personal',
+      query: 'remember my daily routine',
+      slug: 'systems/mbrain',
+      persist_trace: true,
+    });
+
+    expect((scopedDeny as any).selection_reason).toBe('unsupported_scope_intent');
+    expect((scopedDeny as any).route).toBeNull();
+    expect((scopedDeny as any).scope_gate?.resolved_scope).toBe('personal');
+    expect((scopedDeny as any).trace?.verification).toContain('scope_gate:deny');
+    expect((scopedDeny as any).trace?.verification).toContain('scope_gate_reason:unsupported_scope_intent');
   } finally {
     await engine.disconnect();
     rmSync(dir, { recursive: true, force: true });

@@ -155,6 +155,24 @@ test('retrieval route selector operation dispatches task and precision intents',
     expect((ambiguous as any).selection_reason).toBe('ambiguous_source_ref_match');
     expect((ambiguous as any).candidate_count).toBe(2);
     expect((ambiguous as any).route).toBeNull();
+
+    const scopedDeny = await route.handler({
+      engine,
+      config: {} as any,
+      logger: console,
+      dryRun: false,
+    }, {
+      intent: 'precision_lookup',
+      requested_scope: 'personal',
+      query: 'remember my daily routine',
+      slug: 'systems/mbrain',
+    });
+
+    expect((scopedDeny as any).selected_intent).toBe('precision_lookup');
+    expect((scopedDeny as any).selection_reason).toBe('unsupported_scope_intent');
+    expect((scopedDeny as any).route).toBeNull();
+    expect((scopedDeny as any).scope_gate?.resolved_scope).toBe('personal');
+    expect((scopedDeny as any).scope_gate?.policy).toBe('deny');
   } finally {
     await engine.disconnect();
     rmSync(dir, { recursive: true, force: true });

@@ -243,6 +243,23 @@ async function runCorrectnessWorkload(
     passes += 1;
   }
 
+  const scopedDeny = await selectRetrievalRoute(engine, {
+    intent: 'precision_lookup',
+    task_id: 'task-1',
+    requested_scope: 'personal',
+    query: 'remember my daily routine',
+    slug: 'systems/mbrain',
+    persist_trace: true,
+  });
+  checks += 1;
+  if (
+    scopedDeny.selection_reason === 'unsupported_scope_intent'
+    && scopedDeny.trace?.outcome === 'precision_lookup route unavailable'
+    && scopedDeny.trace.verification.includes('scope_gate:deny')
+  ) {
+    passes += 1;
+  }
+
   return {
     name: 'retrieval_route_trace_correctness',
     status: 'measured',

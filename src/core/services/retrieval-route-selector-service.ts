@@ -2,6 +2,7 @@ import type { BrainEngine } from '../engine.ts';
 import type {
   BroadSynthesisRoute,
   PrecisionLookupRoute,
+  ScopeGateDecisionResult,
   RetrievalTrace,
   RetrievalRouteSelection,
   RetrievalRouteSelectorInput,
@@ -9,12 +10,41 @@ import type {
 } from '../types.ts';
 import { getBroadSynthesisRoute } from './broad-synthesis-route-service.ts';
 import { getPrecisionLookupRoute } from './precision-lookup-route-service.ts';
+import { evaluateScopeGate } from './scope-gate-service.ts';
 import { buildTaskResumeCard, type TaskResumeCard } from './task-memory-service.ts';
 
 export async function selectRetrievalRoute(
   engine: BrainEngine,
   input: RetrievalRouteSelectorInput,
 ): Promise<RetrievalRouteSelectorResult> {
+  const scopeGate = input.requested_scope
+    ? await evaluateScopeGate(engine, {
+      intent: input.intent,
+      requested_scope: input.requested_scope,
+      task_id: input.task_id,
+      query: input.query,
+    })
+    : undefined;
+
+  if (scopeGate && scopeGate.policy !== 'allow') {
+    const denied: RetrievalRouteSelectorResult = {
+      selected_intent: input.intent,
+      selection_reason: scopeGate.decision_reason,
+      candidate_count: 0,
+      route: null,
+      scope_gate: scopeGate,
+    };
+
+    if (!input.persist_trace || !input.task_id) {
+      return denied;
+    }
+
+    return {
+      ...denied,
+      trace: await persistSelectedRouteTrace(engine, input.task_id, denied),
+    };
+  }
+
   const selected = await (async (): Promise<RetrievalRouteSelectorResult> => {
     switch (input.intent) {
     case 'task_resume':
@@ -25,6 +55,10 @@ export async function selectRetrievalRoute(
       return selectPrecisionLookupRoute(engine, input);
     }
   })();
+
+  if (scopeGate) {
+    selected.scope_gate = scopeGate;
+  }
 
   if (!input.persist_trace || !input.task_id) {
     return selected;
@@ -155,11 +189,23 @@ async function persistSelectedRouteTrace(
     verification: [
       `intent:${selected.selected_intent}`,
       `selection_reason:${selected.selection_reason}`,
+      ...buildScopeGateVerification(selected.scope_gate),
     ],
     outcome: selected.route
       ? `${selected.selected_intent} route selected`
       : `${selected.selected_intent} route unavailable`,
   });
+}
+
+function buildScopeGateVerification(scopeGate: ScopeGateDecisionResult | undefined): string[] {
+  if (!scopeGate) {
+    return [];
+  }
+
+  return [
+    `scope_gate:${scopeGate.policy}`,
+    `scope_gate_reason:${scopeGate.decision_reason}`,
+  ];
 }
 
 function collectSourceRefs(route: RetrievalRouteSelection | null): string[] {

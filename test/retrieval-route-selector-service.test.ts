@@ -196,6 +196,19 @@ test('retrieval route selector dispatches precision lookup intent', async () => 
     expect(ambiguous.selection_reason).toBe('ambiguous_source_ref_match');
     expect(ambiguous.candidate_count).toBe(2);
     expect(ambiguous.route).toBeNull();
+
+    const scopedDeny = await selectRetrievalRoute(engine, {
+      intent: 'precision_lookup',
+      requested_scope: 'personal',
+      query: 'remember my daily routine',
+      slug: 'systems/mbrain',
+    });
+
+    expect(scopedDeny.selected_intent).toBe('precision_lookup');
+    expect(scopedDeny.selection_reason).toBe('unsupported_scope_intent');
+    expect(scopedDeny.route).toBeNull();
+    expect(scopedDeny.scope_gate?.resolved_scope).toBe('personal');
+    expect(scopedDeny.scope_gate?.policy).toBe('deny');
   } finally {
     await engine.disconnect();
     rmSync(dir, { recursive: true, force: true });

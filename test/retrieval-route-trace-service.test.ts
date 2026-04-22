@@ -237,3 +237,46 @@ test('retrieval route selector persists a degraded trace for ambiguous source-re
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('retrieval route selector persists scope-gate evidence when explicit scope denies a route', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mbrain-route-trace-scope-gate-deny-'));
+  const databasePath = join(dir, 'brain.db');
+  const engine = new SQLiteEngine();
+
+  try {
+    await engine.connect({ engine: 'sqlite', database_path: databasePath });
+    await engine.initSchema();
+
+    await engine.createTaskThread({
+      id: 'task-1',
+      scope: 'work',
+      title: 'Traceable selector',
+      goal: 'Persist retrieval traces',
+      status: 'active',
+      repo_path: '/repo',
+      branch_name: 'phase2-note-manifest',
+      current_summary: 'Need durable explainability',
+    });
+
+    const result = await selectRetrievalRoute(engine, {
+      intent: 'precision_lookup',
+      task_id: 'task-1',
+      requested_scope: 'personal',
+      query: 'remember my daily routine',
+      slug: 'systems/mbrain',
+      persist_trace: true,
+    });
+
+    expect(result.selected_intent).toBe('precision_lookup');
+    expect(result.selection_reason).toBe('unsupported_scope_intent');
+    expect(result.route).toBeNull();
+    expect(result.scope_gate?.resolved_scope).toBe('personal');
+    expect(result.scope_gate?.policy).toBe('deny');
+    expect(result.trace?.verification).toContain('scope_gate:deny');
+    expect(result.trace?.verification).toContain('scope_gate_reason:unsupported_scope_intent');
+    expect(result.trace?.outcome).toBe('precision_lookup route unavailable');
+  } finally {
+    await engine.disconnect();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

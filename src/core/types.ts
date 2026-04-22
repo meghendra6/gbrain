@@ -688,6 +688,7 @@ export type RetrievalRouteIntent =
   | 'task_resume'
   | 'broad_synthesis'
   | 'precision_lookup'
+  | 'mixed_scope_bridge'
   | 'personal_profile_lookup'
   | 'personal_episode_lookup';
 

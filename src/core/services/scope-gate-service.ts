@@ -99,6 +99,9 @@ function resolvePolicy(intent: ScopeGateDecisionInput['intent'], scope: ScopeGat
   if (intent === 'task_resume') {
     return 'allow';
   }
+  if (intent === 'mixed_scope_bridge') {
+    return scope === 'mixed' ? 'allow' : 'deny';
+  }
   if (intent === 'personal_profile_lookup' || intent === 'personal_episode_lookup') {
     return scope === 'personal' ? 'allow' : 'deny';
   }

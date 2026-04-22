@@ -490,21 +490,25 @@ export interface BroadSynthesisRouteResult {
 export interface MixedScopeBridgeRoute {
   route_kind: 'mixed_scope_bridge';
   bridge_reason: 'explicit_mixed_scope';
+  personal_route_kind: 'profile' | 'episode';
   work_route: BroadSynthesisRoute;
-  personal_route: PersonalProfileLookupRoute;
+  personal_route: PersonalProfileLookupRoute | PersonalEpisodeLookupRoute;
   retrieval_route: string[];
   summary_lines: string[];
 }
 
 export interface MixedScopeBridgeInput {
   requested_scope?: Exclude<ScopeGateScope, 'unknown'>;
+  personal_route_kind: 'profile' | 'episode';
   map_id?: string;
   scope_id?: string;
   kind?: string;
   query: string;
   limit?: number;
-  subject: string;
+  subject?: string;
   profile_type?: ProfileMemoryType;
+  episode_title?: string;
+  episode_source_kind?: PersonalEpisodeSourceKind;
 }
 
 export interface MixedScopeBridgeResult {
@@ -731,6 +735,7 @@ export interface RetrievalRouteSelectorInput {
   task_id?: string;
   persist_trace?: boolean;
   requested_scope?: Exclude<ScopeGateScope, 'unknown'>;
+  personal_route_kind?: 'profile' | 'episode';
   map_id?: string;
   scope_id?: string;
   kind?: string;

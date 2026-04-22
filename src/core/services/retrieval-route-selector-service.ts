@@ -163,7 +163,11 @@ async function selectMixedScopeBridgeRoute(
   engine: BrainEngine,
   input: RetrievalRouteSelectorInput,
 ): Promise<RetrievalRouteSelectorResult> {
-  if (!input.query || !input.subject) {
+  const missingPersonalSelector = input.personal_route_kind === 'episode'
+    ? !input.episode_title
+    : !input.subject;
+
+  if (!input.query || missingPersonalSelector) {
     return {
       selected_intent: 'mixed_scope_bridge',
       selection_reason: 'no_match',
@@ -174,6 +178,7 @@ async function selectMixedScopeBridgeRoute(
 
   const result = await getMixedScopeBridge(engine, {
     requested_scope: input.requested_scope,
+    personal_route_kind: input.personal_route_kind ?? 'profile',
     map_id: input.map_id,
     scope_id: input.scope_id,
     kind: input.kind,
@@ -181,6 +186,8 @@ async function selectMixedScopeBridgeRoute(
     limit: input.limit,
     subject: input.subject,
     profile_type: input.profile_type,
+    episode_title: input.episode_title,
+    episode_source_kind: input.episode_source_kind,
   });
 
   return {
@@ -324,7 +331,7 @@ function collectSourceRefs(route: RetrievalRouteSelection | null): string[] {
     profile_memory_id?: string;
     personal_episode_id?: string;
     work_route?: BroadSynthesisRoute;
-    personal_route?: PersonalProfileLookupRoute;
+    personal_route?: PersonalProfileLookupRoute | PersonalEpisodeLookupRoute;
   };
 
   if (route.route_kind === 'task_resume' && payload.task_id) {
@@ -341,7 +348,9 @@ function collectSourceRefs(route: RetrievalRouteSelection | null): string[] {
 
     return [...new Set([
       ...workRefs,
-      `profile-memory:${payload.personal_route.profile_memory_id}`,
+      payload.personal_route.route_kind === 'personal_profile_lookup'
+        ? `profile-memory:${payload.personal_route.profile_memory_id}`
+        : `personal-episode:${payload.personal_route.personal_episode_id}`,
     ])];
   }
 

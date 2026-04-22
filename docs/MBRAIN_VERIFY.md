@@ -744,7 +744,7 @@ Expected:
 
 - `mixed-scope-bridge` stays available through the shared operation surface
 - explicit mixed scope is required for the bridge
-- the bridge combines one work-side broad-synthesis route and one personal profile route
+- the bridge combines one work-side broad-synthesis route with either a personal profile route or a personal episode route
 - degraded bridge cases return deterministic no-route disclosures
 - `retrieval-route` can select the bridge and persist a Retrieval Trace
 - benchmark reports `mixed_scope_bridge` and `mixed_scope_bridge_correctness`

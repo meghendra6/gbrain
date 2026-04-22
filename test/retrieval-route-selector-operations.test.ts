@@ -207,12 +207,12 @@ test('retrieval route selector operation dispatches task and precision intents',
     expect((personal as any).route?.route_kind).toBe('personal_profile_lookup');
 
     await engine.createPersonalEpisodeEntry({
-      id: 'episode-1',
+      id: 'episode-2',
       scope_id: 'personal:default',
       title: 'Morning reset',
       start_time: new Date('2026-04-22T06:30:00.000Z'),
       end_time: new Date('2026-04-22T07:00:00.000Z'),
-      source_kind: 'chat',
+      source_kind: 'note',
       summary: 'Re-established the daily routine after travel.',
       source_refs: ['User, direct message, 2026-04-22 9:05 AM KST'],
       candidate_ids: ['profile-1'],
@@ -256,6 +256,7 @@ test('retrieval route selector operation dispatches task and precision intents',
       task_id: 'task-mixed',
       persist_trace: true,
       requested_scope: 'mixed',
+      personal_route_kind: 'profile',
       query: 'mbrain',
       subject: 'daily routine',
     });
@@ -265,7 +266,41 @@ test('retrieval route selector operation dispatches task and precision intents',
     expect((mixed as any).scope_gate?.resolved_scope).toBe('mixed');
     expect((mixed as any).scope_gate?.policy).toBe('allow');
     expect((mixed as any).route?.route_kind).toBe('mixed_scope_bridge');
+    expect((mixed as any).route?.payload?.personal_route_kind).toBe('profile');
     expect((mixed as any).trace?.task_id).toBe('task-mixed');
+
+    await engine.createPersonalEpisodeEntry({
+      id: 'episode-1',
+      scope_id: 'personal:default',
+      title: 'Morning reset',
+      start_time: new Date('2026-04-22T06:30:00.000Z'),
+      end_time: new Date('2026-04-22T07:00:00.000Z'),
+      source_kind: 'chat',
+      summary: 'Re-established the daily routine after travel.',
+      source_refs: ['User, direct message, 2026-04-22 9:05 AM KST'],
+      candidate_ids: ['profile-1'],
+    });
+
+    const mixedEpisode = await route.handler({
+      engine,
+      config: {} as any,
+      logger: console,
+      dryRun: false,
+    }, {
+      intent: 'mixed_scope_bridge',
+      task_id: 'task-mixed',
+      persist_trace: true,
+      requested_scope: 'mixed',
+      personal_route_kind: 'episode',
+      query: 'mbrain',
+      episode_title: 'Morning reset',
+      episode_source_kind: 'note',
+    });
+
+    expect((mixedEpisode as any).selected_intent).toBe('mixed_scope_bridge');
+    expect((mixedEpisode as any).selection_reason).toBe('direct_mixed_scope_bridge');
+    expect((mixedEpisode as any).route?.payload?.personal_route_kind).toBe('episode');
+    expect((mixedEpisode as any).trace?.source_refs).toContain('personal-episode:episode-2');
   } finally {
     await engine.disconnect();
     rmSync(dir, { recursive: true, force: true });

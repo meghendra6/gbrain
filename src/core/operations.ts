@@ -2472,28 +2472,49 @@ const get_mixed_scope_bridge: Operation = {
   description: 'Resolve the published explicit mixed-scope bridge across one work route and one personal route.',
   params: {
     requested_scope: { type: 'string', description: 'Explicit scope override; must be mixed for this route', enum: ['work', 'personal', 'mixed'] },
+    personal_route_kind: { type: 'string', required: true, description: 'Personal-side route kind for the bridge', enum: ['profile', 'episode'] },
     map_id: { type: 'string', description: 'Optional context map id for the work-side broad synthesis route' },
     scope_id: { type: 'string', description: 'Work-side scope id for broad synthesis (default: workspace:default)' },
     kind: { type: 'string', description: 'Optional map kind filter for the work-side route' },
     query: { type: 'string', required: true, description: 'Work-side broad synthesis query' },
     limit: { type: 'number', description: 'Optional work-side match limit' },
-    subject: { type: 'string', required: true, description: 'Exact personal profile subject for the personal-side route' },
+    subject: { type: 'string', description: 'Exact personal profile subject for the personal-side profile route' },
     profile_type: {
       type: 'string',
       description: 'Optional exact personal profile-memory type filter',
       enum: ['preference', 'routine', 'personal_project', 'stable_fact', 'relationship_boundary', 'other'],
     },
+    episode_title: { type: 'string', description: 'Exact personal episode title for the personal-side episode route' },
+    episode_source_kind: {
+      type: 'string',
+      description: 'Optional exact personal episode source kind filter',
+      enum: ['chat', 'note', 'import', 'meeting', 'reminder', 'other'],
+    },
   },
   handler: async (ctx, p) => {
+    const personalRouteKind = String(p.personal_route_kind);
+    if (personalRouteKind !== 'profile' && personalRouteKind !== 'episode') {
+      throw new OperationError('invalid_params', 'personal_route_kind must be one of profile or episode.');
+    }
+    if (personalRouteKind === 'profile' && typeof p.subject !== 'string') {
+      throw new OperationError('invalid_params', 'profile mixed bridge requires subject.');
+    }
+    if (personalRouteKind === 'episode' && typeof p.episode_title !== 'string') {
+      throw new OperationError('invalid_params', 'episode mixed bridge requires episode_title.');
+    }
+
     return getMixedScopeBridge(ctx.engine, {
       requested_scope: typeof p.requested_scope === 'string' ? p.requested_scope as any : undefined,
+      personal_route_kind: personalRouteKind as any,
       map_id: typeof p.map_id === 'string' ? p.map_id : undefined,
       scope_id: String(p.scope_id ?? DEFAULT_NOTE_MANIFEST_SCOPE_ID),
       kind: typeof p.kind === 'string' ? p.kind : undefined,
       query: String(p.query),
       limit: typeof p.limit === 'number' ? p.limit : undefined,
-      subject: String(p.subject),
+      subject: typeof p.subject === 'string' ? p.subject : undefined,
       profile_type: typeof p.profile_type === 'string' ? p.profile_type as any : undefined,
+      episode_title: typeof p.episode_title === 'string' ? p.episode_title : undefined,
+      episode_source_kind: typeof p.episode_source_kind === 'string' ? p.episode_source_kind as any : undefined,
     });
   },
   cliHints: { name: 'mixed-scope-bridge' },
@@ -2637,6 +2658,7 @@ const select_retrieval_route: Operation = {
     task_id: { type: 'string', description: 'Task id for task_resume intent' },
     persist_trace: { type: 'boolean', description: 'Persist a task-scoped Retrieval Trace for the selected route' },
     requested_scope: { type: 'string', description: 'Optional explicit scope override', enum: ['work', 'personal', 'mixed'] },
+    personal_route_kind: { type: 'string', description: 'Personal-side route kind for mixed_scope_bridge intent', enum: ['profile', 'episode'] },
     map_id: { type: 'string', description: 'Optional context map id for broad_synthesis intent' },
     scope_id: { type: 'string', description: 'Scope id for delegated route selection' },
     kind: { type: 'string', description: 'Optional map kind filter for broad_synthesis intent' },
@@ -2677,11 +2699,17 @@ const select_retrieval_route: Operation = {
     if (intent === 'broad_synthesis' && typeof p.query !== 'string') {
       throw new OperationError('invalid_params', 'broad_synthesis intent requires query.');
     }
+    if (intent === 'mixed_scope_bridge' && typeof p.personal_route_kind !== 'string') {
+      throw new OperationError('invalid_params', 'mixed_scope_bridge intent requires personal_route_kind.');
+    }
     if (intent === 'mixed_scope_bridge' && typeof p.query !== 'string') {
       throw new OperationError('invalid_params', 'mixed_scope_bridge intent requires query.');
     }
-    if (intent === 'mixed_scope_bridge' && typeof p.subject !== 'string') {
-      throw new OperationError('invalid_params', 'mixed_scope_bridge intent requires subject.');
+    if (intent === 'mixed_scope_bridge' && p.personal_route_kind === 'profile' && typeof p.subject !== 'string') {
+      throw new OperationError('invalid_params', 'mixed_scope_bridge profile intent requires subject.');
+    }
+    if (intent === 'mixed_scope_bridge' && p.personal_route_kind === 'episode' && typeof p.episode_title !== 'string') {
+      throw new OperationError('invalid_params', 'mixed_scope_bridge episode intent requires episode_title.');
     }
     if (intent === 'personal_profile_lookup' && typeof p.subject !== 'string') {
       throw new OperationError('invalid_params', 'personal_profile_lookup intent requires subject.');
@@ -2703,6 +2731,7 @@ const select_retrieval_route: Operation = {
       task_id: typeof p.task_id === 'string' ? p.task_id : undefined,
       persist_trace: p.persist_trace === true,
       requested_scope: typeof p.requested_scope === 'string' ? p.requested_scope as any : undefined,
+      personal_route_kind: typeof p.personal_route_kind === 'string' ? p.personal_route_kind as any : undefined,
       map_id: typeof p.map_id === 'string' ? p.map_id : undefined,
       scope_id: String(p.scope_id ?? (
         intent === 'personal_profile_lookup'

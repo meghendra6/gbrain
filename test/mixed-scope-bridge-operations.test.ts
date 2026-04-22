@@ -64,12 +64,14 @@ test('mixed-scope bridge operation returns direct and degraded disclosures', asy
       dryRun: false,
     }, {
       requested_scope: 'mixed',
+      personal_route_kind: 'profile',
       query: 'mbrain',
       subject: 'daily routine',
     });
 
     expect((direct as any).selection_reason).toBe('direct_mixed_scope_bridge');
     expect((direct as any).route?.route_kind).toBe('mixed_scope_bridge');
+    expect((direct as any).route?.personal_route_kind).toBe('profile');
 
     const degraded = await route.handler({
       engine,
@@ -78,12 +80,42 @@ test('mixed-scope bridge operation returns direct and degraded disclosures', asy
       dryRun: false,
     }, {
       requested_scope: 'mixed',
+      personal_route_kind: 'profile',
       query: 'mbrain',
       subject: 'missing routine',
     });
 
     expect((degraded as any).selection_reason).toBe('personal_route_no_match');
     expect((degraded as any).route).toBeNull();
+
+    await engine.createPersonalEpisodeEntry({
+      id: 'episode-1',
+      scope_id: 'personal:default',
+      title: 'Morning reset',
+      start_time: new Date('2026-04-22T06:30:00.000Z'),
+      end_time: new Date('2026-04-22T07:00:00.000Z'),
+      source_kind: 'chat',
+      summary: 'Re-established the daily routine after travel.',
+      source_refs: ['User, direct message, 2026-04-22 9:07 AM KST'],
+      candidate_ids: [],
+    });
+
+    const episode = await route.handler({
+      engine,
+      config: {} as any,
+      logger: console,
+      dryRun: false,
+    }, {
+      requested_scope: 'mixed',
+      personal_route_kind: 'episode',
+      query: 'mbrain',
+      episode_title: 'Morning reset',
+    });
+
+    expect((episode as any).selection_reason).toBe('direct_mixed_scope_bridge');
+    expect((episode as any).route?.route_kind).toBe('mixed_scope_bridge');
+    expect((episode as any).route?.personal_route_kind).toBe('episode');
+    expect((episode as any).route?.personal_route?.route_kind).toBe('personal_episode_lookup');
   } finally {
     await engine.disconnect();
     rmSync(dir, { recursive: true, force: true });

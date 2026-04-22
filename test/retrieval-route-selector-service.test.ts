@@ -373,6 +373,7 @@ test('retrieval route selector dispatches mixed-scope bridge intent and can pers
       task_id: 'task-mixed',
       persist_trace: true,
       requested_scope: 'mixed',
+      personal_route_kind: 'profile',
       query: 'mbrain',
       subject: 'daily routine',
     } as any);
@@ -383,6 +384,7 @@ test('retrieval route selector dispatches mixed-scope bridge intent and can pers
     expect(result.scope_gate?.policy).toBe('allow');
     expect(result.route?.route_kind).toBe('mixed_scope_bridge');
     expect((result.route?.payload as any)?.bridge_reason).toBe('explicit_mixed_scope');
+    expect((result.route?.payload as any)?.personal_route_kind).toBe('profile');
     expect(result.trace?.task_id).toBe('task-mixed');
     expect(result.trace?.route).toEqual([
       'mixed_scope_gate',
@@ -392,6 +394,34 @@ test('retrieval route selector dispatches mixed-scope bridge intent and can pers
     ]);
     expect(result.trace?.source_refs).toContain('profile-memory:profile-1');
     expect(result.trace?.source_refs).toContain('page:systems/mbrain');
+
+    await engine.createPersonalEpisodeEntry({
+      id: 'episode-1',
+      scope_id: 'personal:default',
+      title: 'Morning reset',
+      start_time: new Date('2026-04-22T06:30:00.000Z'),
+      end_time: new Date('2026-04-22T07:00:00.000Z'),
+      source_kind: 'chat',
+      summary: 'Re-established the daily routine after travel.',
+      source_refs: ['User, direct message, 2026-04-22 9:05 AM KST'],
+      candidate_ids: ['profile-1'],
+    });
+
+    const episode = await selectRetrievalRoute(engine, {
+      intent: 'mixed_scope_bridge',
+      task_id: 'task-mixed',
+      persist_trace: true,
+      requested_scope: 'mixed',
+      personal_route_kind: 'episode',
+      query: 'mbrain',
+      episode_title: 'Morning reset',
+    } as any);
+
+    expect(episode.selected_intent).toBe('mixed_scope_bridge');
+    expect(episode.selection_reason).toBe('direct_mixed_scope_bridge');
+    expect((episode.route?.payload as any)?.personal_route_kind).toBe('episode');
+    expect((episode.route?.payload as any)?.personal_route?.route_kind).toBe('personal_episode_lookup');
+    expect(episode.trace?.source_refs).toContain('personal-episode:episode-1');
   } finally {
     await engine.disconnect();
     rmSync(dir, { recursive: true, force: true });

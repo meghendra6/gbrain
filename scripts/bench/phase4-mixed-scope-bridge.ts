@@ -141,6 +141,18 @@ async function seedFixtures(engine: BrainEngine) {
     last_confirmed_at: new Date('2026-04-22T00:05:00.000Z'),
     superseded_by: null,
   });
+
+  await engine.createPersonalEpisodeEntry({
+    id: 'episode-1',
+    scope_id: 'personal:default',
+    title: 'Morning reset',
+    start_time: new Date('2026-04-22T06:30:00.000Z'),
+    end_time: new Date('2026-04-22T07:00:00.000Z'),
+    source_kind: 'chat',
+    summary: 'Re-established the daily routine after travel.',
+    source_refs: ['User, direct message, 2026-04-22 9:07 AM KST'],
+    candidate_ids: ['profile-1'],
+  });
 }
 
 async function runLatencyWorkload(
@@ -152,6 +164,7 @@ async function runLatencyWorkload(
     const start = performance.now();
     await getMixedScopeBridge(engine, {
       requested_scope: 'mixed',
+      personal_route_kind: 'profile',
       query: 'mbrain',
       subject: 'daily routine',
     });
@@ -175,6 +188,7 @@ async function runCorrectnessWorkload(
 
   const success = await getMixedScopeBridge(engine, {
     requested_scope: 'mixed',
+    personal_route_kind: 'profile',
     query: 'mbrain',
     subject: 'daily routine',
   });
@@ -185,6 +199,7 @@ async function runCorrectnessWorkload(
 
   const degraded = await getMixedScopeBridge(engine, {
     requested_scope: 'mixed',
+    personal_route_kind: 'profile',
     query: 'mbrain',
     subject: 'missing routine',
   });
@@ -198,6 +213,7 @@ async function runCorrectnessWorkload(
     task_id: 'task-mixed',
     persist_trace: true,
     requested_scope: 'mixed',
+    personal_route_kind: 'profile',
     query: 'mbrain',
     subject: 'daily routine',
   } as any);
@@ -207,6 +223,21 @@ async function runCorrectnessWorkload(
     && traced.trace?.task_id === 'task-mixed'
     && traced.trace.source_refs.includes('profile-memory:profile-1')
     && traced.trace.source_refs.includes('page:systems/mbrain')
+  ) {
+    passes += 1;
+  }
+
+  const episode = await getMixedScopeBridge(engine, {
+    requested_scope: 'mixed',
+    personal_route_kind: 'episode',
+    query: 'mbrain',
+    episode_title: 'Morning reset',
+  });
+  checks += 1;
+  if (
+    episode.selection_reason === 'direct_mixed_scope_bridge'
+    && episode.route?.personal_route_kind === 'episode'
+    && episode.route.personal_route.route_kind === 'personal_episode_lookup'
   ) {
     passes += 1;
   }

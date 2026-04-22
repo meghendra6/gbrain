@@ -11,6 +11,7 @@ import {
   rejectMemoryCandidateEntry,
 } from '../src/core/services/memory-inbox-service.ts';
 import { promoteMemoryCandidateEntry } from '../src/core/services/memory-inbox-promotion-service.ts';
+import { supersedeMemoryCandidateEntry } from '../src/core/services/memory-inbox-supersession-service.ts';
 
 async function seedCandidate(
   engine: SQLiteEngine,
@@ -36,6 +37,26 @@ async function seedCandidate(
     reviewed_at: null,
     review_reason: null,
     ...overrides,
+  });
+}
+
+async function seedPromotedCandidate(
+  engine: SQLiteEngine,
+  id: string,
+  scopeId = 'workspace:default',
+) {
+  await seedCandidate(engine, id, 'captured', { scope_id: scopeId });
+  await advanceMemoryCandidateStatus(engine, {
+    id,
+    next_status: 'candidate',
+  });
+  await advanceMemoryCandidateStatus(engine, {
+    id,
+    next_status: 'staged_for_review',
+  });
+  return promoteMemoryCandidateEntry(engine, {
+    id,
+    review_reason: `Promoted ${id} for supersession testing.`,
   });
 }
 
@@ -609,6 +630,157 @@ test('memory inbox promotion service rejects missing ids', async () => {
     })).rejects.toMatchObject({
       code: 'memory_candidate_not_found',
     });
+  } finally {
+    await engine.disconnect();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('memory inbox supersession service supersedes promoted candidates with an explicit replacement link', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mbrain-memory-inbox-service-supersede-'));
+  const databasePath = join(dir, 'brain.db');
+  const engine = new SQLiteEngine();
+
+  try {
+    await engine.connect({ engine: 'sqlite', database_path: databasePath });
+    await engine.initSchema();
+    await seedPromotedCandidate(engine, 'candidate-old');
+    await seedPromotedCandidate(engine, 'candidate-new');
+
+    const result = await supersedeMemoryCandidateEntry(engine, {
+      superseded_candidate_id: 'candidate-old',
+      replacement_candidate_id: 'candidate-new',
+      review_reason: 'Newer promoted evidence replaced the earlier candidate.',
+    });
+
+    expect(result.superseded_candidate.status).toBe('superseded');
+    expect(result.replacement_candidate.id).toBe('candidate-new');
+    expect(result.supersession_entry.superseded_candidate_id).toBe('candidate-old');
+  } finally {
+    await engine.disconnect();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('memory inbox supersession service can supersede staged candidates with a promoted replacement', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mbrain-memory-inbox-service-supersede-staged-'));
+  const databasePath = join(dir, 'brain.db');
+  const engine = new SQLiteEngine();
+
+  try {
+    await engine.connect({ engine: 'sqlite', database_path: databasePath });
+    await engine.initSchema();
+    await seedCandidate(engine, 'candidate-staged-old', 'staged_for_review');
+    await seedPromotedCandidate(engine, 'candidate-staged-new');
+
+    const result = await supersedeMemoryCandidateEntry(engine, {
+      superseded_candidate_id: 'candidate-staged-old',
+      replacement_candidate_id: 'candidate-staged-new',
+      review_reason: 'Promoted replacement superseded the older staged candidate.',
+    });
+
+    expect(result.superseded_candidate.status).toBe('superseded');
+    expect(result.replacement_candidate.status).toBe('promoted');
+    expect(result.supersession_entry.superseded_candidate_id).toBe('candidate-staged-old');
+  } finally {
+    await engine.disconnect();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('memory inbox supersession service translates duplicate supersession races into invalid_status_transition', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mbrain-memory-inbox-service-supersede-duplicate-'));
+  const databasePath = join(dir, 'brain.db');
+  const engine = new SQLiteEngine();
+
+  try {
+    await engine.connect({ engine: 'sqlite', database_path: databasePath });
+    await engine.initSchema();
+    await seedPromotedCandidate(engine, 'candidate-duplicate-old');
+    await seedPromotedCandidate(engine, 'candidate-duplicate-new');
+
+    await supersedeMemoryCandidateEntry(engine, {
+      superseded_candidate_id: 'candidate-duplicate-old',
+      replacement_candidate_id: 'candidate-duplicate-new',
+      review_reason: 'First supersession should succeed.',
+    });
+
+    await expect(supersedeMemoryCandidateEntry(engine, {
+      superseded_candidate_id: 'candidate-duplicate-old',
+      replacement_candidate_id: 'candidate-duplicate-new',
+      review_reason: 'Duplicate supersession should degrade cleanly.',
+    })).rejects.toMatchObject({
+      code: 'invalid_status_transition',
+    });
+  } finally {
+    await engine.disconnect();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('memory inbox supersession service rejects invalid replacement routes', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mbrain-memory-inbox-service-supersede-invalid-'));
+  const databasePath = join(dir, 'brain.db');
+  const engine = new SQLiteEngine();
+
+  try {
+    await engine.connect({ engine: 'sqlite', database_path: databasePath });
+    await engine.initSchema();
+    await seedPromotedCandidate(engine, 'candidate-valid-old');
+    await seedPromotedCandidate(engine, 'candidate-valid-new');
+    await seedPromotedCandidate(engine, 'candidate-cross-scope-old');
+    await seedPromotedCandidate(engine, 'candidate-cross-scope-new', 'workspace:other');
+    await seedCandidate(engine, 'candidate-not-promoted', 'staged_for_review');
+
+    await expect(supersedeMemoryCandidateEntry(engine, {
+      superseded_candidate_id: 'candidate-valid-old',
+      replacement_candidate_id: 'candidate-valid-old',
+    })).rejects.toMatchObject({
+      code: 'invalid_status_transition',
+    });
+
+    await expect(supersedeMemoryCandidateEntry(engine, {
+      superseded_candidate_id: 'candidate-valid-old',
+      replacement_candidate_id: 'candidate-not-promoted',
+    })).rejects.toMatchObject({
+      code: 'invalid_status_transition',
+    });
+
+    await expect(supersedeMemoryCandidateEntry(engine, {
+      superseded_candidate_id: 'candidate-cross-scope-old',
+      replacement_candidate_id: 'candidate-cross-scope-new',
+    })).rejects.toMatchObject({
+      code: 'invalid_status_transition',
+    });
+  } finally {
+    await engine.disconnect();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('memory inbox supersession service rejects race-lost supersession attempts', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mbrain-memory-inbox-service-supersede-race-'));
+  const databasePath = join(dir, 'brain.db');
+  const engine = new SQLiteEngine();
+
+  try {
+    await engine.connect({ engine: 'sqlite', database_path: databasePath });
+    await engine.initSchema();
+    await seedPromotedCandidate(engine, 'candidate-race-old');
+    await seedPromotedCandidate(engine, 'candidate-race-new');
+
+    const originalSupersede = engine.supersedeMemoryCandidateEntry.bind(engine);
+    engine.supersedeMemoryCandidateEntry = async () => null;
+
+    await expect(supersedeMemoryCandidateEntry(engine, {
+      superseded_candidate_id: 'candidate-race-old',
+      replacement_candidate_id: 'candidate-race-new',
+    })).rejects.toMatchObject({
+      code: 'invalid_status_transition',
+    });
+
+    expect((await engine.getMemoryCandidateEntry('candidate-race-old'))?.status).toBe('promoted');
+    engine.supersedeMemoryCandidateEntry = originalSupersede;
   } finally {
     await engine.disconnect();
     rmSync(dir, { recursive: true, force: true });

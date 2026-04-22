@@ -190,10 +190,65 @@ for (const createHarness of [createSqliteHarness, createPgliteHarness]) {
 
       expect((await reopened.getMemoryCandidateEntry(promotedId))?.status).toBe('promoted');
 
+      const replacementId = `${id}:replacement`;
+      await seedMemoryCandidate(reopened, replacementId, scopeId);
+      expect((await reopened.updateMemoryCandidateEntryStatus(replacementId, {
+        status: 'candidate',
+        reviewed_at: new Date('2026-04-22T06:18:00.000Z'),
+      }))?.status).toBe('candidate');
+      expect((await reopened.updateMemoryCandidateEntryStatus(replacementId, {
+        status: 'staged_for_review',
+        reviewed_at: new Date('2026-04-22T06:19:00.000Z'),
+      }))?.status).toBe('staged_for_review');
+      expect((await reopened.promoteMemoryCandidateEntry(replacementId, {
+        expected_current_status: 'staged_for_review',
+        reviewed_at: new Date('2026-04-22T06:20:00.000Z'),
+        review_reason: 'Replacement candidate won review.',
+      }))?.status).toBe('promoted');
+
+      const invalidSupersessionId = `${promotedId}:invalid-supersession`;
+      const invalidSupersession = await reopened.supersedeMemoryCandidateEntry({
+        id: invalidSupersessionId,
+        scope_id: 'workspace:bogus',
+        superseded_candidate_id: replacementId,
+        replacement_candidate_id: 'missing-replacement',
+        expected_current_status: 'promoted',
+        reviewed_at: new Date('2026-04-22T06:20:30.000Z'),
+        review_reason: 'Invalid replacement should not be persisted.',
+      });
+      expect(invalidSupersession).toBeNull();
+      expect((await reopened.getMemoryCandidateEntry(replacementId))?.status).toBe('promoted');
+      expect(await reopened.getMemoryCandidateSupersessionEntry(invalidSupersessionId)).toBeNull();
+
+      const supersession = await reopened.supersedeMemoryCandidateEntry({
+        id: `${promotedId}:supersession`,
+        scope_id: scopeId,
+        superseded_candidate_id: promotedId,
+        replacement_candidate_id: replacementId,
+        expected_current_status: 'promoted',
+        reviewed_at: new Date('2026-04-22T06:21:00.000Z'),
+        review_reason: 'Newer promoted evidence replaced the older promoted candidate.',
+      });
+      expect(supersession?.replacement_candidate_id).toBe(replacementId);
+      expect((await reopened.getMemoryCandidateEntry(promotedId))?.status).toBe('superseded');
+      expect((await reopened.getMemoryCandidateSupersessionEntry(`${promotedId}:supersession`))?.superseded_candidate_id).toBe(promotedId);
+
+      await reopened.disconnect();
+      reopened = await harness.reopen();
+      expect((await reopened.getMemoryCandidateEntry(promotedId))?.status).toBe('superseded');
+      expect((await reopened.getMemoryCandidateSupersessionEntry(`${promotedId}:supersession`))?.superseded_candidate_id).toBe(promotedId);
+      expect(await reopened.supersedeMemoryCandidateEntry({
+        id: `${promotedId}:supersession-duplicate`,
+        scope_id: scopeId,
+        superseded_candidate_id: promotedId,
+        replacement_candidate_id: replacementId,
+        expected_current_status: 'promoted',
+        reviewed_at: new Date('2026-04-22T06:22:00.000Z'),
+        review_reason: 'Duplicate supersession should degrade to null.',
+      })).toBeNull();
+
       await reopened.deleteMemoryCandidateEntry(id);
       expect(await reopened.getMemoryCandidateEntry(id)).toBeNull();
-      await reopened.deleteMemoryCandidateEntry(promotedId);
-      expect(await reopened.getMemoryCandidateEntry(promotedId)).toBeNull();
     } finally {
       await reopened?.disconnect();
       await harness.cleanup();

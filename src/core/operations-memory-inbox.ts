@@ -6,6 +6,7 @@ import {
   rejectMemoryCandidateEntry,
 } from './services/memory-inbox-service.ts';
 import { promoteMemoryCandidateEntry } from './services/memory-inbox-promotion-service.ts';
+import { supersedeMemoryCandidateEntry } from './services/memory-inbox-supersession-service.ts';
 
 type OperationErrorCtor = new (
   code: 'memory_candidate_not_found' | 'invalid_params',
@@ -15,13 +16,14 @@ type OperationErrorCtor = new (
 ) => Error;
 
 const MEMORY_CANDIDATE_EARLY_STATUS_VALUES = ['captured', 'candidate', 'staged_for_review'] as const;
-const MEMORY_CANDIDATE_STATUS_VALUES = ['captured', 'candidate', 'staged_for_review', 'rejected', 'promoted'] as const;
+const MEMORY_CANDIDATE_STATUS_VALUES = ['captured', 'candidate', 'staged_for_review', 'rejected', 'promoted', 'superseded'] as const;
 const MEMORY_CANDIDATE_ADVANCE_STATUS_VALUES = ['candidate', 'staged_for_review'] as const;
 const MEMORY_CANDIDATE_TYPE_VALUES = ['fact', 'relationship', 'note_update', 'procedure', 'profile_update', 'open_question', 'rationale'] as const;
 const MEMORY_CANDIDATE_GENERATED_BY_VALUES = ['agent', 'map_analysis', 'dream_cycle', 'manual', 'import'] as const;
 const MEMORY_CANDIDATE_EXTRACTION_KIND_VALUES = ['extracted', 'inferred', 'ambiguous', 'manual'] as const;
 const MEMORY_CANDIDATE_SENSITIVITY_VALUES = ['public', 'work', 'personal', 'secret', 'unknown'] as const;
 const MEMORY_CANDIDATE_TARGET_OBJECT_TYPE_VALUES = ['curated_note', 'procedure', 'profile_memory', 'personal_episode', 'other'] as const;
+const ISO_DATETIME_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?(?:Z|([+-])(\d{2}):(\d{2}))$/;
 
 export const DEFAULT_MEMORY_INBOX_SCOPE_ID = 'workspace:default';
 export const MAX_MEMORY_CANDIDATE_LIMIT = 100;
@@ -119,6 +121,61 @@ function normalizeOptionalTargetObjectId(
     throw invalidParams(deps, 'target_object_id must be a non-empty string');
   }
   return value;
+}
+
+function normalizeOptionalIsoTimestamp(
+  deps: { OperationError: OperationErrorCtor },
+  field: string,
+  value: unknown,
+): string | null | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === null) {
+    return null;
+  }
+  if (typeof value !== 'string') {
+    throw invalidParams(deps, `${field} must be a string or null`);
+  }
+  if (!isValidIsoDatetime(value)) {
+    throw invalidParams(deps, `${field} must be a valid ISO datetime string`);
+  }
+  return value;
+}
+
+function isValidIsoDatetime(value: string): boolean {
+  const match = ISO_DATETIME_PATTERN.exec(value);
+  if (!match) {
+    return false;
+  }
+
+  const [, yearRaw, monthRaw, dayRaw, hourRaw, minuteRaw, secondRaw, _millisRaw, offsetSign, offsetHourRaw, offsetMinuteRaw] = match;
+  const year = Number(yearRaw);
+  const month = Number(monthRaw);
+  const day = Number(dayRaw);
+  const hour = Number(hourRaw);
+  const minute = Number(minuteRaw);
+  const second = Number(secondRaw);
+
+  if (month < 1 || month > 12) {
+    return false;
+  }
+  const maxDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  if (day < 1 || day > maxDay) {
+    return false;
+  }
+  if (hour > 23 || minute > 59 || second > 59) {
+    return false;
+  }
+  if (offsetSign) {
+    const offsetHour = Number(offsetHourRaw);
+    const offsetMinute = Number(offsetMinuteRaw);
+    if (offsetHour > 23 || offsetMinute > 59) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 export function createMemoryInboxOperations(
@@ -425,6 +482,56 @@ export function createMemoryInboxOperations(
     cliHints: { name: 'promote-memory-candidate' },
   };
 
+  const supersede_memory_candidate_entry: Operation = {
+    name: 'supersede_memory_candidate_entry',
+    description: 'Record one explicit supersession outcome linking an older candidate to a newer promoted replacement.',
+    params: {
+      superseded_candidate_id: { type: 'string', required: true, description: 'Candidate id being superseded' },
+      replacement_candidate_id: { type: 'string', required: true, description: 'Promoted replacement candidate id' },
+      reviewed_at: { type: 'string', description: 'Optional ISO timestamp for supersession metadata' },
+      review_reason: { type: 'string', description: 'Optional supersession reason for auditability' },
+    },
+    mutating: true,
+    handler: async (ctx, p) => {
+      if (typeof p.superseded_candidate_id !== 'string' || p.superseded_candidate_id.trim().length === 0) {
+        throw invalidParams(deps, 'superseded_candidate_id must be a non-empty string');
+      }
+      if (typeof p.replacement_candidate_id !== 'string' || p.replacement_candidate_id.trim().length === 0) {
+        throw invalidParams(deps, 'replacement_candidate_id must be a non-empty string');
+      }
+      if (p.review_reason != null && typeof p.review_reason !== 'string') {
+        throw invalidParams(deps, 'review_reason must be a string or null');
+      }
+      if (ctx.dryRun) {
+        return {
+          dry_run: true,
+          action: 'supersede_memory_candidate_entry',
+          superseded_candidate_id: p.superseded_candidate_id,
+          replacement_candidate_id: p.replacement_candidate_id,
+          review_reason: typeof p.review_reason === 'string' ? p.review_reason : null,
+        };
+      }
+
+      try {
+        return await supersedeMemoryCandidateEntry(ctx.engine, {
+          superseded_candidate_id: p.superseded_candidate_id,
+          replacement_candidate_id: p.replacement_candidate_id,
+          reviewed_at: normalizeOptionalIsoTimestamp(deps, 'reviewed_at', p.reviewed_at),
+          review_reason: typeof p.review_reason === 'string' ? p.review_reason : undefined,
+        });
+      } catch (error) {
+        if (error instanceof MemoryInboxServiceError) {
+          if (error.code === 'memory_candidate_not_found') {
+            throw new deps.OperationError('memory_candidate_not_found', error.message);
+          }
+          throw new deps.OperationError('invalid_params', error.message);
+        }
+        throw error;
+      }
+    },
+    cliHints: { name: 'supersede-memory-candidate' },
+  };
+
   return [
     get_memory_candidate_entry,
     list_memory_candidate_entries,
@@ -433,5 +540,6 @@ export function createMemoryInboxOperations(
     reject_memory_candidate_entry,
     preflight_promote_memory_candidate,
     promote_memory_candidate_entry,
+    supersede_memory_candidate_entry,
   ];
 }

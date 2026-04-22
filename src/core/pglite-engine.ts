@@ -31,6 +31,8 @@ import type {
   MemoryCandidateEntryInput,
   MemoryCandidateFilters,
   MemoryCandidatePromotionPatch,
+  MemoryCandidateSupersessionEntry,
+  MemoryCandidateSupersessionInput,
   MemoryCandidateStatusPatch,
   ProfileMemoryEntry,
   ProfileMemoryEntryInput,
@@ -69,6 +71,7 @@ import {
   rowToContextAtlasEntry,
   rowToContextMapEntry,
   rowToMemoryCandidateEntry,
+  rowToMemoryCandidateSupersessionEntry,
   rowToNoteManifestEntry,
   rowToNoteSectionEntry,
   rowToProfileMemoryEntry,
@@ -1323,6 +1326,114 @@ export class PGLiteEngine implements BrainEngine {
     return rowToMemoryCandidateEntry(rows[0] as Record<string, unknown>);
   }
 
+  async supersedeMemoryCandidateEntry(
+    input: MemoryCandidateSupersessionInput,
+  ): Promise<MemoryCandidateSupersessionEntry | null> {
+    const rollbackSentinel = 'memory_candidate_supersession_invalid_replacement';
+    try {
+      return await this.transaction(async (txBase) => {
+        const tx = txBase as PGLiteEngine;
+        const { rows: supersededRows } = await tx.db.query(
+          `SELECT id, scope_id, status
+           FROM memory_candidate_entries
+           WHERE id = $1
+           FOR UPDATE`,
+          [input.superseded_candidate_id],
+        );
+        const { rows: replacementRows } = await tx.db.query(
+          `SELECT id, scope_id, status
+           FROM memory_candidate_entries
+           WHERE id = $1
+           FOR UPDATE`,
+          [input.replacement_candidate_id],
+        );
+        const supersededCandidate = supersededRows[0] as { id: string; scope_id: string; status: string } | undefined;
+        const replacementCandidate = replacementRows[0] as { id: string; scope_id: string; status: string } | undefined;
+        if (!supersededCandidate || !replacementCandidate) {
+          return null;
+        }
+        if (supersededCandidate.id === replacementCandidate.id) {
+          return null;
+        }
+        if (supersededCandidate.scope_id !== input.scope_id || replacementCandidate.scope_id !== input.scope_id) {
+          return null;
+        }
+        if (supersededCandidate.status !== input.expected_current_status) {
+          return null;
+        }
+        if (replacementCandidate.status !== 'promoted') {
+          return null;
+        }
+
+        const { rows } = await tx.db.query(
+          `INSERT INTO memory_candidate_supersession_entries (
+            id, scope_id, superseded_candidate_id, replacement_candidate_id, reviewed_at, review_reason
+          )
+          VALUES ($1, $2, $3, $4, $5, $6)
+          RETURNING id, scope_id, superseded_candidate_id, replacement_candidate_id,
+                    reviewed_at, review_reason, created_at, updated_at`,
+          [
+            input.id,
+            input.scope_id,
+            input.superseded_candidate_id,
+            input.replacement_candidate_id,
+            input.reviewed_at instanceof Date ? input.reviewed_at.toISOString() : input.reviewed_at ?? null,
+            input.review_reason ?? null,
+          ],
+        );
+        if (rows.length === 0) {
+          throw new Error(rollbackSentinel);
+        }
+
+        const { rows: updatedRows } = await tx.db.query(
+          `UPDATE memory_candidate_entries
+           SET status = 'superseded',
+               reviewed_at = $2,
+               review_reason = $3,
+               updated_at = now()
+           WHERE id = $1
+             AND scope_id = $4
+             AND status = $5
+           RETURNING id`,
+          [
+            input.superseded_candidate_id,
+            input.reviewed_at instanceof Date ? input.reviewed_at.toISOString() : input.reviewed_at ?? null,
+            input.review_reason ?? null,
+            input.scope_id,
+            input.expected_current_status,
+          ],
+        );
+        if (updatedRows.length === 0) {
+          throw new Error(rollbackSentinel);
+        }
+
+        return rowToMemoryCandidateSupersessionEntry(rows[0] as Record<string, unknown>);
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message === rollbackSentinel) {
+        return null;
+      }
+      if (isSupersessionDuplicateConstraint(error)) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  async getMemoryCandidateSupersessionEntry(id: string): Promise<MemoryCandidateSupersessionEntry | null> {
+    const { rows } = await this.db.query(
+      `SELECT id, scope_id, superseded_candidate_id, replacement_candidate_id,
+              reviewed_at, review_reason, created_at, updated_at
+       FROM memory_candidate_supersession_entries
+       WHERE id = $1`,
+      [id],
+    );
+    if (rows.length === 0) {
+      return null;
+    }
+    return rowToMemoryCandidateSupersessionEntry(rows[0] as Record<string, unknown>);
+  }
+
   async deleteMemoryCandidateEntry(id: string): Promise<void> {
     await this.db.query(`DELETE FROM memory_candidate_entries WHERE id = $1`, [id]);
   }
@@ -1787,4 +1898,14 @@ function vectorValueToFloat32(value: unknown): Float32Array | null {
   }
 
   return null;
+}
+
+function isSupersessionDuplicateConstraint(error: unknown): boolean {
+  if (typeof error !== 'object' || error == null) {
+    return false;
+  }
+  const candidate = error as { code?: string; constraint?: string; message?: string };
+  return candidate.code === '23505'
+    && (candidate.constraint === 'memory_candidate_supersession_entries_superseded_candidate_id_key'
+      || candidate.message?.includes('superseded_candidate_id') === true);
 }

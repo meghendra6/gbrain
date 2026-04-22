@@ -476,6 +476,87 @@ const MIGRATIONS: Migration[] = [
         ON memory_candidate_entries(target_object_type, target_object_id);
     `,
   },
+  {
+    version: 18,
+    name: 'memory_inbox_supersession_slice',
+    sql: `
+      CREATE TABLE memory_candidate_entries_v18 (
+        id TEXT PRIMARY KEY,
+        scope_id TEXT NOT NULL,
+        candidate_type TEXT NOT NULL CHECK (candidate_type IN ('fact', 'relationship', 'note_update', 'procedure', 'profile_update', 'open_question', 'rationale')),
+        proposed_content TEXT NOT NULL,
+        source_refs JSONB NOT NULL DEFAULT '[]',
+        generated_by TEXT NOT NULL CHECK (generated_by IN ('agent', 'map_analysis', 'dream_cycle', 'manual', 'import')),
+        extraction_kind TEXT NOT NULL CHECK (extraction_kind IN ('extracted', 'inferred', 'ambiguous', 'manual')),
+        confidence_score DOUBLE PRECISION NOT NULL,
+        importance_score DOUBLE PRECISION NOT NULL,
+        recurrence_score DOUBLE PRECISION NOT NULL,
+        sensitivity TEXT NOT NULL CHECK (sensitivity IN ('public', 'work', 'personal', 'secret', 'unknown')),
+        status TEXT NOT NULL CHECK (status IN ('captured', 'candidate', 'staged_for_review', 'rejected', 'promoted', 'superseded')),
+        target_object_type TEXT CHECK (target_object_type IS NULL OR target_object_type IN ('curated_note', 'procedure', 'profile_memory', 'personal_episode', 'other')),
+        target_object_id TEXT,
+        reviewed_at TIMESTAMPTZ,
+        review_reason TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+      INSERT INTO memory_candidate_entries_v18 (
+        id, scope_id, candidate_type, proposed_content, source_refs, generated_by,
+        extraction_kind, confidence_score, importance_score, recurrence_score,
+        sensitivity, status, target_object_type, target_object_id, reviewed_at,
+        review_reason, created_at, updated_at
+      )
+      SELECT
+        id, scope_id, candidate_type, proposed_content, source_refs, generated_by,
+        extraction_kind, confidence_score, importance_score, recurrence_score,
+        sensitivity, status, target_object_type, target_object_id, reviewed_at,
+        review_reason, created_at, updated_at
+      FROM memory_candidate_entries;
+      DROP TABLE memory_candidate_entries;
+      ALTER TABLE memory_candidate_entries_v18 RENAME TO memory_candidate_entries;
+      CREATE INDEX idx_memory_candidates_scope_status
+        ON memory_candidate_entries(scope_id, status, updated_at DESC);
+      CREATE INDEX idx_memory_candidates_scope_type
+        ON memory_candidate_entries(scope_id, candidate_type, updated_at DESC);
+      CREATE INDEX idx_memory_candidates_target
+        ON memory_candidate_entries(target_object_type, target_object_id);
+
+      CREATE TABLE IF NOT EXISTS memory_candidate_supersession_entries (
+        id TEXT PRIMARY KEY,
+        scope_id TEXT NOT NULL,
+        superseded_candidate_id TEXT NOT NULL UNIQUE REFERENCES memory_candidate_entries(id),
+        replacement_candidate_id TEXT NOT NULL REFERENCES memory_candidate_entries(id),
+        reviewed_at TIMESTAMPTZ,
+        review_reason TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        CHECK (superseded_candidate_id <> replacement_candidate_id)
+      );
+      CREATE INDEX idx_memory_candidate_supersession_scope
+        ON memory_candidate_supersession_entries(scope_id, created_at DESC);
+      CREATE INDEX idx_memory_candidate_supersession_replacement
+        ON memory_candidate_supersession_entries(replacement_candidate_id);
+      CREATE OR REPLACE FUNCTION enforce_memory_candidate_superseded_link_v18()
+      RETURNS trigger AS $$
+      BEGIN
+        IF NEW.status = 'superseded'
+          AND NOT EXISTS (
+            SELECT 1
+            FROM memory_candidate_supersession_entries
+            WHERE superseded_candidate_id = NEW.id
+          ) THEN
+          RAISE EXCEPTION 'superseded candidate requires a supersession link record';
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+      DROP TRIGGER IF EXISTS trg_memory_candidate_superseded_link_v18 ON memory_candidate_entries;
+      CREATE TRIGGER trg_memory_candidate_superseded_link_v18
+      BEFORE INSERT OR UPDATE ON memory_candidate_entries
+      FOR EACH ROW
+      EXECUTE FUNCTION enforce_memory_candidate_superseded_link_v18();
+    `,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.length > 0

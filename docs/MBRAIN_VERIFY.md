@@ -856,6 +856,24 @@ Expected:
 - benchmark reports `memory_inbox_promotion` and `memory_inbox_promotion_correctness`
 - `acceptance.phase5_status` matches the local promotion-slice guardrail outcome
 
+## Phase 5 memory inbox supersession
+
+Run:
+
+```bash
+bun test test/memory-inbox-schema.test.ts test/memory-inbox-engine.test.ts test/memory-inbox-service.test.ts test/memory-inbox-operations.test.ts test/phase5-memory-inbox-supersession.test.ts
+bun run bench:phase5-memory-inbox-supersession --json
+```
+
+Expected:
+
+- `superseded` is a DB-valid canonical memory candidate status across SQLite and PGLite schema initialization
+- one explicit supersession record links the old candidate to the newer promoted replacement
+- only `staged_for_review` or `promoted` candidates can be superseded, and only by a replacement that is already `promoted`
+- `supersede-memory-candidate` stays available through the shared operation surface
+- benchmark reports `memory_inbox_supersession` and `memory_inbox_supersession_correctness`
+- `acceptance.phase5_status` matches the local supersession-slice guardrail outcome
+
 ## Phase 5 acceptance-pack
 
 Run:
@@ -871,7 +889,7 @@ Expected:
 - benchmark summarizes every published Phase 5 benchmark slice
 - `acceptance.readiness_status` reports `pass` only when all published Phase 5 slices pass
 - `acceptance.phase5_status` matches the aggregated phase outcome
-- `test:phase5` runs the published Phase 5 suites, the rejection, promotion-preflight, and promotion benchmark tests, and the acceptance-pack test
+- `test:phase5` runs the published Phase 5 suites, including supersession, and the acceptance-pack test
 
 ---
 

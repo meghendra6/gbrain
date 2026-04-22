@@ -14,7 +14,7 @@ describe('memory-inbox schema', () => {
     }
   });
 
-  test('sqlite initSchema creates memory_candidate_entries', async () => {
+  test('sqlite initSchema creates memory candidate supersession schema', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'mbrain-memory-inbox-sqlite-'));
     const databasePath = join(dir, 'brain.db');
     tempPaths.push(dir);
@@ -29,11 +29,15 @@ describe('memory-inbox schema', () => {
         `SELECT name
          FROM sqlite_master
          WHERE type = 'table'
-           AND name = 'memory_candidate_entries'`,
+           AND name IN ('memory_candidate_entries', 'memory_candidate_supersession_entries')
+         ORDER BY name ASC`,
       )
       .all() as Array<{ name: string }>;
 
-    expect(rows.map((row) => row.name)).toEqual(['memory_candidate_entries']);
+    expect(rows.map((row) => row.name)).toEqual([
+      'memory_candidate_entries',
+      'memory_candidate_supersession_entries',
+    ]);
 
     const schema = db
       .query(
@@ -113,12 +117,24 @@ describe('memory-inbox schema', () => {
           'superseded'
         )
       `).run();
-    }).toThrow();
+    }).toThrow(/superseded candidate requires a supersession link record/);
+
+    const supersessionSchema = db
+      .query(
+        `SELECT sql
+         FROM sqlite_master
+         WHERE type = 'table'
+           AND name = 'memory_candidate_supersession_entries'`,
+      )
+      .get() as { sql: string };
+
+    expect(supersessionSchema.sql).toContain("superseded_candidate_id TEXT NOT NULL");
+    expect(supersessionSchema.sql).toContain("replacement_candidate_id TEXT NOT NULL");
 
     await engine.disconnect();
   });
 
-  test('pglite initSchema creates memory_candidate_entries', async () => {
+  test('pglite initSchema creates memory candidate supersession schema', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'mbrain-memory-inbox-pglite-'));
     tempPaths.push(dir);
 
@@ -130,11 +146,13 @@ describe('memory-inbox schema', () => {
       `SELECT table_name
        FROM information_schema.tables
        WHERE table_schema = 'public'
-         AND table_name = 'memory_candidate_entries'`,
+         AND table_name IN ('memory_candidate_entries', 'memory_candidate_supersession_entries')
+       ORDER BY table_name ASC`,
     );
 
     expect(result.rows.map((row: { table_name: string }) => row.table_name)).toEqual([
       'memory_candidate_entries',
+      'memory_candidate_supersession_entries',
     ]);
 
     await expect((engine as any).db.query(`
@@ -195,7 +213,18 @@ describe('memory-inbox schema', () => {
         'work',
         'superseded'
       )
-    `)).rejects.toThrow();
+    `)).rejects.toThrow(/superseded candidate requires a supersession link record/);
+
+    const supersessionTables = await (engine as any).db.query(
+      `SELECT table_name
+       FROM information_schema.tables
+       WHERE table_schema = 'public'
+         AND table_name = 'memory_candidate_supersession_entries'`,
+    );
+
+    expect(supersessionTables.rows.map((row: { table_name: string }) => row.table_name)).toEqual([
+      'memory_candidate_supersession_entries',
+    ]);
 
     await engine.disconnect();
   });

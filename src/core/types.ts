@@ -723,7 +723,8 @@ export type MemoryCandidateStatus =
   | 'candidate'
   | 'staged_for_review'
   | 'rejected'
-  | 'promoted';
+  | 'promoted'
+  | 'superseded';
 
 export type MemoryCandidateCreateStatus =
   | 'captured'
@@ -798,7 +799,7 @@ export interface MemoryCandidateFilters {
 }
 
 export interface MemoryCandidateStatusPatch {
-  status: Exclude<MemoryCandidateStatus, 'promoted'>;
+  status: Exclude<MemoryCandidateStatus, 'promoted' | 'superseded'>;
   reviewed_at?: Date | string | null;
   review_reason?: string | null;
 }
@@ -818,6 +819,27 @@ export interface MemoryCandidatePromotionPreflightResult {
   decision: MemoryCandidatePromotionPreflightDecision;
   reasons: MemoryCandidatePromotionPreflightReason[];
   summary_lines: string[];
+}
+
+export interface MemoryCandidateSupersessionEntry {
+  id: string;
+  scope_id: string;
+  superseded_candidate_id: string;
+  replacement_candidate_id: string;
+  reviewed_at: Date | null;
+  review_reason: string | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface MemoryCandidateSupersessionInput {
+  id: string;
+  scope_id: string;
+  superseded_candidate_id: string;
+  replacement_candidate_id: string;
+  expected_current_status: 'staged_for_review' | 'promoted';
+  reviewed_at?: Date | string | null;
+  review_reason?: string | null;
 }
 
 export interface PersonalEpisodeLookupRoute {

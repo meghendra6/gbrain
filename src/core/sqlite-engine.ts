@@ -32,6 +32,8 @@ import type {
   MemoryCandidateEntryInput,
   MemoryCandidateFilters,
   MemoryCandidatePromotionPatch,
+  MemoryCandidateSupersessionEntry,
+  MemoryCandidateSupersessionInput,
   MemoryCandidateStatusPatch,
   ProfileMemoryEntry,
   ProfileMemoryEntryInput,
@@ -1654,6 +1656,114 @@ export class SQLiteEngine implements BrainEngine {
     return rowToMemoryCandidateEntry(row);
   }
 
+  async supersedeMemoryCandidateEntry(
+    input: MemoryCandidateSupersessionInput,
+  ): Promise<MemoryCandidateSupersessionEntry | null> {
+    const rollbackSentinel = 'memory_candidate_supersession_invalid_replacement';
+    try {
+      return await this.transaction(async (txBase) => {
+        const tx = txBase as SQLiteEngine;
+        const supersededCandidate = await tx.getMemoryCandidateEntry(input.superseded_candidate_id);
+        const replacementCandidate = await tx.getMemoryCandidateEntry(input.replacement_candidate_id);
+        if (!supersededCandidate || !replacementCandidate) {
+          return null;
+        }
+        if (supersededCandidate.id === replacementCandidate.id) {
+          return null;
+        }
+        if (supersededCandidate.scope_id !== input.scope_id || replacementCandidate.scope_id !== input.scope_id) {
+          return null;
+        }
+        if (supersededCandidate.status !== input.expected_current_status) {
+          return null;
+        }
+        if (replacementCandidate.status !== 'promoted') {
+          return null;
+        }
+
+        const timestamp = nowIso();
+        const insertResult = tx.database.run(`
+          INSERT INTO memory_candidate_supersession_entries (
+            id, scope_id, superseded_candidate_id, replacement_candidate_id, reviewed_at,
+            review_reason, created_at, updated_at
+          )
+          SELECT ?, ?, ?, ?, ?, ?, ?, ?
+          WHERE EXISTS (
+            SELECT 1
+            FROM memory_candidate_entries
+            WHERE id = ?
+              AND scope_id = ?
+              AND status = 'promoted'
+          )
+        `, [
+          input.id,
+          input.scope_id,
+          input.superseded_candidate_id,
+          input.replacement_candidate_id,
+          toNullableIso(input.reviewed_at),
+          input.review_reason ?? null,
+          timestamp,
+          timestamp,
+          input.replacement_candidate_id,
+          input.scope_id,
+        ]);
+        if (insertResult.changes === 0) {
+          throw new Error(rollbackSentinel);
+        }
+
+        const updateResult = tx.database.run(`
+          UPDATE memory_candidate_entries
+          SET status = 'superseded',
+              reviewed_at = ?,
+              review_reason = ?,
+              updated_at = ?
+          WHERE id = ?
+            AND scope_id = ?
+            AND status = ?
+        `, [
+          toNullableIso(input.reviewed_at),
+          input.review_reason ?? null,
+          timestamp,
+          input.superseded_candidate_id,
+          input.scope_id,
+          input.expected_current_status,
+        ]);
+        if (updateResult.changes === 0) {
+          throw new Error(rollbackSentinel);
+        }
+
+        const row = tx.database.query(`
+          SELECT id, scope_id, superseded_candidate_id, replacement_candidate_id,
+                 reviewed_at, review_reason, created_at, updated_at
+          FROM memory_candidate_supersession_entries
+          WHERE id = ?
+        `).get(input.id) as Record<string, unknown> | null;
+        if (!row) {
+          throw new Error(`Memory candidate supersession entry not found after create: ${input.id}`);
+        }
+        return rowToMemoryCandidateSupersessionEntry(row);
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message === rollbackSentinel) {
+        return null;
+      }
+      if (isSupersessionDuplicateConstraint(error)) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  async getMemoryCandidateSupersessionEntry(id: string): Promise<MemoryCandidateSupersessionEntry | null> {
+    const row = this.database.query(`
+      SELECT id, scope_id, superseded_candidate_id, replacement_candidate_id,
+             reviewed_at, review_reason, created_at, updated_at
+      FROM memory_candidate_supersession_entries
+      WHERE id = ?
+    `).get(id) as Record<string, unknown> | null;
+    return row ? rowToMemoryCandidateSupersessionEntry(row) : null;
+  }
+
   async deleteMemoryCandidateEntry(id: string): Promise<void> {
     this.database.run(`DELETE FROM memory_candidate_entries WHERE id = ?`, [id]);
   }
@@ -2478,6 +2588,90 @@ export class SQLiteEngine implements BrainEngine {
               ON memory_candidate_entries(target_object_type, target_object_id);
           `);
           break;
+        case 18:
+          this.database.exec(`
+            CREATE TABLE memory_candidate_entries_v18 (
+              id TEXT PRIMARY KEY,
+              scope_id TEXT NOT NULL,
+              candidate_type TEXT NOT NULL CHECK (candidate_type IN ('fact', 'relationship', 'note_update', 'procedure', 'profile_update', 'open_question', 'rationale')),
+              proposed_content TEXT NOT NULL,
+              source_refs TEXT NOT NULL DEFAULT '[]',
+              generated_by TEXT NOT NULL CHECK (generated_by IN ('agent', 'map_analysis', 'dream_cycle', 'manual', 'import')),
+              extraction_kind TEXT NOT NULL CHECK (extraction_kind IN ('extracted', 'inferred', 'ambiguous', 'manual')),
+              confidence_score REAL NOT NULL,
+              importance_score REAL NOT NULL,
+              recurrence_score REAL NOT NULL,
+              sensitivity TEXT NOT NULL CHECK (sensitivity IN ('public', 'work', 'personal', 'secret', 'unknown')),
+              status TEXT NOT NULL CHECK (status IN ('captured', 'candidate', 'staged_for_review', 'rejected', 'promoted', 'superseded')),
+              target_object_type TEXT CHECK (target_object_type IS NULL OR target_object_type IN ('curated_note', 'procedure', 'profile_memory', 'personal_episode', 'other')),
+              target_object_id TEXT,
+              reviewed_at TEXT,
+              review_reason TEXT,
+              created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+              updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            );
+            INSERT INTO memory_candidate_entries_v18 (
+              id, scope_id, candidate_type, proposed_content, source_refs, generated_by,
+              extraction_kind, confidence_score, importance_score, recurrence_score,
+              sensitivity, status, target_object_type, target_object_id, reviewed_at,
+              review_reason, created_at, updated_at
+            )
+            SELECT
+              id, scope_id, candidate_type, proposed_content, source_refs, generated_by,
+              extraction_kind, confidence_score, importance_score, recurrence_score,
+              sensitivity, status, target_object_type, target_object_id, reviewed_at,
+              review_reason, created_at, updated_at
+            FROM memory_candidate_entries;
+            DROP TABLE memory_candidate_entries;
+            ALTER TABLE memory_candidate_entries_v18 RENAME TO memory_candidate_entries;
+            CREATE INDEX IF NOT EXISTS idx_memory_candidates_scope_status
+              ON memory_candidate_entries(scope_id, status, updated_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_memory_candidates_scope_type
+              ON memory_candidate_entries(scope_id, candidate_type, updated_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_memory_candidates_target
+              ON memory_candidate_entries(target_object_type, target_object_id);
+
+            CREATE TABLE IF NOT EXISTS memory_candidate_supersession_entries (
+              id TEXT PRIMARY KEY,
+              scope_id TEXT NOT NULL,
+              superseded_candidate_id TEXT NOT NULL UNIQUE REFERENCES memory_candidate_entries(id),
+              replacement_candidate_id TEXT NOT NULL REFERENCES memory_candidate_entries(id),
+              reviewed_at TEXT,
+              review_reason TEXT,
+              created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+              updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+              CHECK (superseded_candidate_id <> replacement_candidate_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_memory_candidate_supersession_scope
+              ON memory_candidate_supersession_entries(scope_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_memory_candidate_supersession_replacement
+              ON memory_candidate_supersession_entries(replacement_candidate_id);
+            CREATE TRIGGER IF NOT EXISTS trg_memory_candidate_superseded_link_insert
+            BEFORE INSERT ON memory_candidate_entries
+            FOR EACH ROW
+            WHEN NEW.status = 'superseded'
+              AND NOT EXISTS (
+                SELECT 1
+                FROM memory_candidate_supersession_entries
+                WHERE superseded_candidate_id = NEW.id
+              )
+            BEGIN
+              SELECT RAISE(ABORT, 'superseded candidate requires a supersession link record');
+            END;
+            CREATE TRIGGER IF NOT EXISTS trg_memory_candidate_superseded_link_update
+            BEFORE UPDATE ON memory_candidate_entries
+            FOR EACH ROW
+            WHEN NEW.status = 'superseded'
+              AND NOT EXISTS (
+                SELECT 1
+                FROM memory_candidate_supersession_entries
+                WHERE superseded_candidate_id = NEW.id
+              )
+            BEGIN
+              SELECT RAISE(ABORT, 'superseded candidate requires a supersession link record');
+            END;
+          `);
+          break;
       }
 
       await this.setConfig('version', String(version));
@@ -2723,6 +2917,16 @@ function nowIso(): string {
 function toNullableIso(value: Date | string | null | undefined): string | null {
   if (value == null) return null;
   return value instanceof Date ? value.toISOString() : String(value);
+}
+
+function isSupersessionDuplicateConstraint(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const code = (error as { code?: string }).code;
+  return typeof code === 'string'
+    && code.startsWith('SQLITE_CONSTRAINT')
+    && error.message.includes('memory_candidate_supersession_entries.superseded_candidate_id');
 }
 
 function parseVersion(value: string | null): number {
@@ -3031,6 +3235,21 @@ function rowToMemoryCandidateEntry(row: Record<string, unknown>): MemoryCandidat
     target_object_type: row.target_object_type == null ? null : row.target_object_type as MemoryCandidateEntry['target_object_type'],
     target_object_id: row.target_object_id == null ? null : String(row.target_object_id),
     reviewed_at: row.reviewed_at == null ? null : new Date(String(row.reviewed_at)),
+    review_reason: row.review_reason == null ? null : String(row.review_reason),
+    created_at: new Date(String(row.created_at)),
+    updated_at: new Date(String(row.updated_at)),
+  };
+}
+
+function rowToMemoryCandidateSupersessionEntry(
+  row: Record<string, unknown>,
+): MemoryCandidateSupersessionEntry {
+  return {
+    id: String(row.id),
+    scope_id: String(row.scope_id),
+    superseded_candidate_id: String(row.superseded_candidate_id),
+    replacement_candidate_id: String(row.replacement_candidate_id),
+    reviewed_at: row.reviewed_at ? new Date(String(row.reviewed_at)) : null,
     review_reason: row.review_reason == null ? null : String(row.review_reason),
     created_at: new Date(String(row.created_at)),
     updated_at: new Date(String(row.updated_at)),

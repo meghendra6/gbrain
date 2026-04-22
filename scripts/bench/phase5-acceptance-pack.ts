@@ -13,6 +13,7 @@ const BENCHMARKS = [
   { name: 'memory_inbox_rejection', path: 'scripts/bench/phase5-memory-inbox-rejection.ts' },
   { name: 'memory_inbox_promotion_preflight', path: 'scripts/bench/phase5-memory-inbox-promotion-preflight.ts' },
   { name: 'memory_inbox_promotion', path: 'scripts/bench/phase5-memory-inbox-promotion.ts' },
+  { name: 'memory_inbox_supersession', path: 'scripts/bench/phase5-memory-inbox-supersession.ts' },
 ] as const;
 
 const args = new Set(process.argv.slice(2));

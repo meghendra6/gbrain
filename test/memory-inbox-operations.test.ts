@@ -21,6 +21,7 @@ test('memory inbox operations can be built from a dedicated domain module', () =
     'reject_memory_candidate_entry',
     'preflight_promote_memory_candidate',
     'promote_memory_candidate_entry',
+    'supersede_memory_candidate_entry',
   ]);
 });
 
@@ -32,6 +33,7 @@ test('memory inbox operations are registered with CLI hints', () => {
   const reject = operations.find((operation) => operation.name === 'reject_memory_candidate_entry');
   const preflight = operations.find((operation) => operation.name === 'preflight_promote_memory_candidate');
   const promote = operations.find((operation) => operation.name === 'promote_memory_candidate_entry');
+  const supersede = operations.find((operation) => operation.name === 'supersede_memory_candidate_entry');
 
   expect(create?.cliHints?.name).toBe('create-memory-candidate');
   expect(get?.cliHints?.name).toBe('get-memory-candidate');
@@ -40,8 +42,9 @@ test('memory inbox operations are registered with CLI hints', () => {
   expect(reject?.cliHints?.name).toBe('reject-memory-candidate');
   expect(preflight?.cliHints?.name).toBe('preflight-promote-memory-candidate');
   expect(promote?.cliHints?.name).toBe('promote-memory-candidate');
+  expect(supersede?.cliHints?.name).toBe('supersede-memory-candidate');
   expect(create?.params.status?.enum).toEqual(['captured', 'candidate', 'staged_for_review']);
-  expect(list?.params.status?.enum).toEqual(['captured', 'candidate', 'staged_for_review', 'rejected', 'promoted']);
+  expect(list?.params.status?.enum).toEqual(['captured', 'candidate', 'staged_for_review', 'rejected', 'promoted', 'superseded']);
   expect(advance?.params.next_status?.description).toContain('depends on the current stored status');
 });
 
@@ -378,6 +381,128 @@ test('memory inbox promotion operation promotes staged candidates and rejects bl
     }, {
       id: 'candidate-promote',
       review_reason: 123,
+    })).rejects.toMatchObject({
+      code: 'invalid_params',
+    });
+  } finally {
+    await engine.disconnect();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('memory inbox supersession operation records explicit old/new links', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mbrain-memory-inbox-op-supersede-'));
+  const databasePath = join(dir, 'brain.db');
+  const engine = new SQLiteEngine();
+  const create = operations.find((operation) => operation.name === 'create_memory_candidate_entry');
+  const advance = operations.find((operation) => operation.name === 'advance_memory_candidate_status');
+  const promote = operations.find((operation) => operation.name === 'promote_memory_candidate_entry');
+  const supersede = operations.find((operation) => operation.name === 'supersede_memory_candidate_entry');
+
+  if (!create || !advance || !promote || !supersede) {
+    throw new Error('memory inbox supersession operation is missing');
+  }
+
+  try {
+    await engine.connect({ engine: 'sqlite', database_path: databasePath });
+    await engine.initSchema();
+
+    for (const id of ['candidate-old', 'candidate-new']) {
+      await create.handler({ engine, config: {} as any, logger: console, dryRun: false }, {
+        id,
+        candidate_type: 'fact',
+        proposed_content: `Candidate ${id} participates in supersession review.`,
+        source_ref: 'User, direct message, 2026-04-23 11:30 PM KST',
+        target_object_type: 'curated_note',
+        target_object_id: 'concepts/memory-inbox',
+      });
+      await advance.handler({ engine, config: {} as any, logger: console, dryRun: false }, {
+        id,
+        next_status: 'candidate',
+      });
+      await advance.handler({ engine, config: {} as any, logger: console, dryRun: false }, {
+        id,
+        next_status: 'staged_for_review',
+      });
+      await promote.handler({ engine, config: {} as any, logger: console, dryRun: false }, {
+        id,
+        review_reason: 'Promotion before supersession test.',
+      });
+    }
+
+    const result = await supersede.handler({
+      engine,
+      config: {} as any,
+      logger: console,
+      dryRun: false,
+    }, {
+      superseded_candidate_id: 'candidate-old',
+      replacement_candidate_id: 'candidate-new',
+      review_reason: 'Newer promoted candidate replaced the older one.',
+    });
+
+    expect((result as any).superseded_candidate.status).toBe('superseded');
+    expect((result as any).supersession_entry.replacement_candidate_id).toBe('candidate-new');
+
+    await expect(supersede.handler({
+      engine,
+      config: {} as any,
+      logger: console,
+      dryRun: false,
+    }, {
+      superseded_candidate_id: 'missing-candidate',
+      replacement_candidate_id: 'candidate-new',
+    })).rejects.toMatchObject({
+      code: 'memory_candidate_not_found',
+    });
+
+    await create.handler({ engine, config: {} as any, logger: console, dryRun: false }, {
+      id: 'candidate-not-promoted',
+      candidate_type: 'fact',
+      proposed_content: 'Replacement is not yet promoted.',
+      source_ref: 'User, direct message, 2026-04-23 11:35 PM KST',
+      target_object_type: 'curated_note',
+      target_object_id: 'concepts/memory-inbox',
+    });
+    await advance.handler({ engine, config: {} as any, logger: console, dryRun: false }, {
+      id: 'candidate-not-promoted',
+      next_status: 'candidate',
+    });
+
+    await expect(supersede.handler({
+      engine,
+      config: {} as any,
+      logger: console,
+      dryRun: false,
+    }, {
+      superseded_candidate_id: 'candidate-new',
+      replacement_candidate_id: 'candidate-not-promoted',
+    })).rejects.toMatchObject({
+      code: 'invalid_params',
+    });
+
+    await expect(supersede.handler({
+      engine,
+      config: {} as any,
+      logger: console,
+      dryRun: false,
+    }, {
+      superseded_candidate_id: 'candidate-new',
+      replacement_candidate_id: 'candidate-not-promoted',
+      reviewed_at: 'Thu Apr 23 2026 10:15:00 GMT+0900 (Korean Standard Time)',
+    })).rejects.toMatchObject({
+      code: 'invalid_params',
+    });
+
+    await expect(supersede.handler({
+      engine,
+      config: {} as any,
+      logger: console,
+      dryRun: false,
+    }, {
+      superseded_candidate_id: 'candidate-new',
+      replacement_candidate_id: 'candidate-not-promoted',
+      reviewed_at: '2026-99-99T25:61:61Z',
     })).rejects.toMatchObject({
       code: 'invalid_params',
     });

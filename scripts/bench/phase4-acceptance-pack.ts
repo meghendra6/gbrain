@@ -15,6 +15,7 @@ const BENCHMARKS = [
   { name: 'personal_write_target', path: 'scripts/bench/phase4-personal-write-target.ts' },
   { name: 'personal_export_visibility', path: 'scripts/bench/phase4-export-visibility.ts' },
   { name: 'mixed_scope_bridge', path: 'scripts/bench/phase4-mixed-scope-bridge.ts' },
+  { name: 'mixed_scope_disclosure', path: 'scripts/bench/phase4-mixed-scope-disclosure.ts' },
 ] as const;
 
 const args = new Set(process.argv.slice(2));

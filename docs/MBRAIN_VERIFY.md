@@ -750,6 +750,24 @@ Expected:
 - benchmark reports `mixed_scope_bridge` and `mixed_scope_bridge_correctness`
 - `acceptance.phase4_status` matches the local guardrail outcome
 
+## Phase 4 mixed-scope disclosure
+
+Run:
+
+```bash
+bun test test/mixed-scope-disclosure-service.test.ts test/mixed-scope-disclosure-operations.test.ts test/phase4-mixed-scope-disclosure.test.ts
+bun run bench:phase4-mixed-scope-disclosure --json
+```
+
+Expected:
+
+- `mixed-scope-disclosure` stays available through the shared operation surface
+- exportable profile-memory records may disclose exact content in mixed output
+- private-only or secret profile-memory records withhold raw content
+- personal-episode mixed output remains metadata-only
+- benchmark reports `mixed_scope_disclosure` and `mixed_scope_disclosure_correctness`
+- `acceptance.phase4_status` matches the local guardrail outcome
+
 ## Phase 4 acceptance-pack
 
 Run:
@@ -765,7 +783,7 @@ Expected:
 - benchmark summarizes every published Phase 4 benchmark slice
 - `acceptance.readiness_status` reports `pass` only when all published Phase 4 slices pass
 - `acceptance.phase4_status` matches the aggregated phase outcome
-- `test:phase4` runs the published Phase 4 suites, export-visibility coverage, mixed-scope bridge coverage, and the acceptance-pack test
+- `test:phase4` runs the published Phase 4 suites, mixed-scope disclosure coverage, export-visibility coverage, mixed-scope bridge coverage, and the acceptance-pack test
 
 ---
 

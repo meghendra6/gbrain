@@ -329,6 +329,29 @@ const MIGRATIONS: Migration[] = [
         ON profile_memory_entries(scope_id, profile_type, updated_at DESC);
     `,
   },
+  {
+    version: 14,
+    name: 'personal_episode_foundations',
+    sql: `
+      CREATE TABLE IF NOT EXISTS personal_episode_entries (
+        id TEXT PRIMARY KEY,
+        scope_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        start_time TIMESTAMPTZ NOT NULL,
+        end_time TIMESTAMPTZ,
+        source_kind TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        source_refs JSONB NOT NULL DEFAULT '[]',
+        candidate_ids JSONB NOT NULL DEFAULT '[]',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+      CREATE INDEX IF NOT EXISTS idx_personal_episode_scope_start
+        ON personal_episode_entries(scope_id, start_time DESC);
+      CREATE INDEX IF NOT EXISTS idx_personal_episode_scope_title
+        ON personal_episode_entries(scope_id, title);
+    `,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.length > 0

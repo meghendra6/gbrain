@@ -19,6 +19,9 @@ import type {
   ProfileMemoryEntry,
   ProfileMemoryEntryInput,
   ProfileMemoryFilters,
+  PersonalEpisodeEntry,
+  PersonalEpisodeEntryInput,
+  PersonalEpisodeFilters,
   Chunk, ChunkInput,
   SearchResult, SearchOpts,
   Link, GraphNode,
@@ -56,6 +59,7 @@ import {
   rowToNoteManifestEntry,
   rowToNoteSectionEntry,
   rowToProfileMemoryEntry,
+  rowToPersonalEpisodeEntry,
   rowToRetrievalTrace,
   rowToSearchResult,
   rowToTaskAttempt,
@@ -1134,6 +1138,84 @@ export class PostgresEngine implements BrainEngine {
     const sql = this.sql;
     await sql`
       DELETE FROM profile_memory_entries
+      WHERE id = ${id}
+    `;
+  }
+
+  async createPersonalEpisodeEntry(input: PersonalEpisodeEntryInput): Promise<PersonalEpisodeEntry> {
+    const sql = this.sql;
+    const rows = await sql`
+      INSERT INTO personal_episode_entries (
+        id, scope_id, title, start_time, end_time, source_kind, summary, source_refs, candidate_ids
+      ) VALUES (
+        ${input.id},
+        ${input.scope_id},
+        ${input.title},
+        ${input.start_time instanceof Date ? input.start_time.toISOString() : input.start_time},
+        ${input.end_time instanceof Date ? input.end_time.toISOString() : input.end_time ?? null},
+        ${input.source_kind},
+        ${input.summary},
+        ${JSON.stringify(input.source_refs ?? [])}::jsonb,
+        ${JSON.stringify(input.candidate_ids ?? [])}::jsonb
+      )
+      RETURNING id, scope_id, title, start_time, end_time, source_kind, summary,
+                source_refs, candidate_ids, created_at, updated_at
+    `;
+    return rowToPersonalEpisodeEntry(rows[0] as Record<string, unknown>);
+  }
+
+  async getPersonalEpisodeEntry(id: string): Promise<PersonalEpisodeEntry | null> {
+    const sql = this.sql;
+    const rows = await sql`
+      SELECT id, scope_id, title, start_time, end_time, source_kind, summary,
+             source_refs, candidate_ids, created_at, updated_at
+      FROM personal_episode_entries
+      WHERE id = ${id}
+    `;
+    if (rows.length === 0) return null;
+    return rowToPersonalEpisodeEntry(rows[0] as Record<string, unknown>);
+  }
+
+  async listPersonalEpisodeEntries(filters?: PersonalEpisodeFilters): Promise<PersonalEpisodeEntry[]> {
+    const sql = this.sql;
+    const limit = filters?.limit ?? 100;
+    const offset = filters?.offset ?? 0;
+    const params: unknown[] = [];
+    const clauses: string[] = [];
+
+    if (filters?.scope_id) {
+      params.push(filters.scope_id);
+      clauses.push(`scope_id = $${params.length}`);
+    }
+    if (filters?.title) {
+      params.push(filters.title);
+      clauses.push(`title = $${params.length}`);
+    }
+    if (filters?.source_kind) {
+      params.push(filters.source_kind);
+      clauses.push(`source_kind = $${params.length}`);
+    }
+
+    params.push(limit);
+    params.push(offset);
+    const whereClause = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+    const rows = await sql.unsafe(
+      `SELECT id, scope_id, title, start_time, end_time, source_kind, summary,
+              source_refs, candidate_ids, created_at, updated_at
+       FROM personal_episode_entries
+       ${whereClause}
+       ORDER BY start_time DESC, id ASC
+       LIMIT $${params.length - 1}
+       OFFSET $${params.length}`,
+      params,
+    );
+    return (rows as Record<string, unknown>[]).map(rowToPersonalEpisodeEntry);
+  }
+
+  async deletePersonalEpisodeEntry(id: string): Promise<void> {
+    const sql = this.sql;
+    await sql`
+      DELETE FROM personal_episode_entries
       WHERE id = ${id}
     `;
   }

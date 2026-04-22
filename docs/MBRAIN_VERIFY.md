@@ -642,6 +642,39 @@ Expected:
 - `acceptance.readiness_status` reports `pass` or `fail` from the local guardrails
 - `acceptance.phase4_status` matches the local guardrail outcome
 
+## Phase 4 personal-episode foundations
+
+Run:
+
+```bash
+bun test test/personal-episode-schema.test.ts test/personal-episode-engine.test.ts test/personal-episode-operations.test.ts
+```
+
+Expected:
+
+- personal-episode schema and engine tests pass for SQLite and PGLite
+- Postgres personal-episode persistence is covered when `DATABASE_URL` is available
+- `personal-episode-record`, `personal-episode-get`, and `personal-episode-list` stay available through the shared operation surface
+- append-only episode writes are immediately visible through `get` and `list`
+- `test:phase4` includes the personal-episode foundation coverage
+
+## Phase 4 acceptance-pack
+
+Run:
+
+```bash
+bun test test/phase4-acceptance-pack.test.ts
+bun run bench:phase4-acceptance --json
+```
+
+Expected:
+
+- acceptance-pack test passes
+- benchmark summarizes every published Phase 4 benchmark slice
+- `acceptance.readiness_status` reports `pass` only when all published Phase 4 slices pass
+- `acceptance.phase4_status` matches the aggregated phase outcome
+- `test:phase4` runs the published Phase 4 suites plus the acceptance-pack test
+
 ---
 
 ## 2. Skillpack Loaded

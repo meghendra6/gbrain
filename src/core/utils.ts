@@ -8,6 +8,7 @@ import type {
   ContextMapEntry,
   ContextAtlasEntry,
   ProfileMemoryEntry,
+  PersonalEpisodeEntry,
   Chunk,
   SearchResult,
   TaskAttempt,
@@ -209,6 +210,22 @@ export function rowToProfileMemoryEntry(row: Record<string, unknown>): ProfileMe
     export_status: row.export_status as ProfileMemoryEntry['export_status'],
     last_confirmed_at: row.last_confirmed_at ? new Date(row.last_confirmed_at as string) : null,
     superseded_by: (row.superseded_by as string | null) ?? null,
+    created_at: new Date(row.created_at as string),
+    updated_at: new Date(row.updated_at as string),
+  };
+}
+
+export function rowToPersonalEpisodeEntry(row: Record<string, unknown>): PersonalEpisodeEntry {
+  return {
+    id: row.id as string,
+    scope_id: row.scope_id as string,
+    title: row.title as string,
+    start_time: new Date(row.start_time as string),
+    end_time: row.end_time ? new Date(row.end_time as string) : null,
+    source_kind: row.source_kind as PersonalEpisodeEntry['source_kind'],
+    summary: row.summary as string,
+    source_refs: parseJsonStringArray(row.source_refs),
+    candidate_ids: parseJsonStringArray(row.candidate_ids),
     created_at: new Date(row.created_at as string),
     updated_at: new Date(row.updated_at as string),
   };

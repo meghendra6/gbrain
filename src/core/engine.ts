@@ -15,6 +15,9 @@ import type {
   ProfileMemoryEntry,
   ProfileMemoryEntryInput,
   ProfileMemoryFilters,
+  PersonalEpisodeEntry,
+  PersonalEpisodeEntryInput,
+  PersonalEpisodeFilters,
   Chunk, ChunkInput,
   SearchResult, SearchOpts,
   Link, GraphNode,
@@ -119,6 +122,12 @@ export interface BrainEngine {
   getProfileMemoryEntry(id: string): Promise<ProfileMemoryEntry | null>;
   listProfileMemoryEntries(filters?: ProfileMemoryFilters): Promise<ProfileMemoryEntry[]>;
   deleteProfileMemoryEntry(id: string): Promise<void>;
+
+  // Personal episodes
+  createPersonalEpisodeEntry(input: PersonalEpisodeEntryInput): Promise<PersonalEpisodeEntry>;
+  getPersonalEpisodeEntry(id: string): Promise<PersonalEpisodeEntry | null>;
+  listPersonalEpisodeEntries(filters?: PersonalEpisodeFilters): Promise<PersonalEpisodeEntry[]>;
+  deletePersonalEpisodeEntry(id: string): Promise<void>;
 
   // Note manifest
   upsertNoteManifestEntry(input: NoteManifestEntryInput): Promise<NoteManifestEntry>;

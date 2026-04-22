@@ -26,6 +26,9 @@ import type {
   ProfileMemoryEntry,
   ProfileMemoryEntryInput,
   ProfileMemoryFilters,
+  PersonalEpisodeEntry,
+  PersonalEpisodeEntryInput,
+  PersonalEpisodeFilters,
   Chunk, ChunkInput,
   SearchResult, SearchOpts,
   Link, GraphNode,
@@ -59,6 +62,7 @@ import {
   rowToNoteManifestEntry,
   rowToNoteSectionEntry,
   rowToProfileMemoryEntry,
+  rowToPersonalEpisodeEntry,
   rowToSearchResult,
   rowToRetrievalTrace,
   rowToTaskAttempt,
@@ -1085,6 +1089,79 @@ export class PGLiteEngine implements BrainEngine {
 
   async deleteProfileMemoryEntry(id: string): Promise<void> {
     await this.db.query(`DELETE FROM profile_memory_entries WHERE id = $1`, [id]);
+  }
+
+  async createPersonalEpisodeEntry(input: PersonalEpisodeEntryInput): Promise<PersonalEpisodeEntry> {
+    const { rows } = await this.db.query(
+      `INSERT INTO personal_episode_entries (
+        id, scope_id, title, start_time, end_time, source_kind, summary, source_refs, candidate_ids
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb)
+      RETURNING id, scope_id, title, start_time, end_time, source_kind, summary,
+                source_refs, candidate_ids, created_at, updated_at`,
+      [
+        input.id,
+        input.scope_id,
+        input.title,
+        input.start_time instanceof Date ? input.start_time.toISOString() : input.start_time,
+        input.end_time instanceof Date ? input.end_time.toISOString() : input.end_time ?? null,
+        input.source_kind,
+        input.summary,
+        JSON.stringify(input.source_refs ?? []),
+        JSON.stringify(input.candidate_ids ?? []),
+      ],
+    );
+    return rowToPersonalEpisodeEntry(rows[0] as Record<string, unknown>);
+  }
+
+  async getPersonalEpisodeEntry(id: string): Promise<PersonalEpisodeEntry | null> {
+    const { rows } = await this.db.query(
+      `SELECT id, scope_id, title, start_time, end_time, source_kind, summary,
+              source_refs, candidate_ids, created_at, updated_at
+       FROM personal_episode_entries
+       WHERE id = $1`,
+      [id],
+    );
+    if (rows.length === 0) return null;
+    return rowToPersonalEpisodeEntry(rows[0] as Record<string, unknown>);
+  }
+
+  async listPersonalEpisodeEntries(filters?: PersonalEpisodeFilters): Promise<PersonalEpisodeEntry[]> {
+    const limit = filters?.limit ?? 100;
+    const offset = filters?.offset ?? 0;
+    const params: unknown[] = [];
+    const clauses: string[] = [];
+
+    if (filters?.scope_id) {
+      params.push(filters.scope_id);
+      clauses.push(`scope_id = $${params.length}`);
+    }
+    if (filters?.title) {
+      params.push(filters.title);
+      clauses.push(`title = $${params.length}`);
+    }
+    if (filters?.source_kind) {
+      params.push(filters.source_kind);
+      clauses.push(`source_kind = $${params.length}`);
+    }
+
+    params.push(limit);
+    params.push(offset);
+    const whereClause = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+    const { rows } = await this.db.query(
+      `SELECT id, scope_id, title, start_time, end_time, source_kind, summary,
+              source_refs, candidate_ids, created_at, updated_at
+       FROM personal_episode_entries
+       ${whereClause}
+       ORDER BY start_time DESC, id ASC
+       LIMIT $${params.length - 1}
+       OFFSET $${params.length}`,
+      params,
+    );
+    return (rows as Record<string, unknown>[]).map(rowToPersonalEpisodeEntry);
+  }
+
+  async deletePersonalEpisodeEntry(id: string): Promise<void> {
+    await this.db.query(`DELETE FROM personal_episode_entries WHERE id = $1`, [id]);
   }
 
   async upsertNoteManifestEntry(input: NoteManifestEntryInput): Promise<NoteManifestEntry> {

@@ -1544,6 +1544,93 @@ const upsert_profile_memory_entry: Operation = {
   cliHints: { name: 'profile-memory-upsert' },
 };
 
+const get_personal_episode_entry: Operation = {
+  name: 'get_personal_episode_entry',
+  description: 'Get one canonical personal-episode entry by id.',
+  params: {
+    id: { type: 'string', required: true, description: 'Personal-episode entry id' },
+  },
+  handler: async (ctx, p) => {
+    return ctx.engine.getPersonalEpisodeEntry(String(p.id));
+  },
+  cliHints: { name: 'personal-episode-get' },
+};
+
+const list_personal_episode_entries: Operation = {
+  name: 'list_personal_episode_entries',
+  description: 'List canonical personal-episode entries.',
+  params: {
+    scope_id: { type: 'string', description: 'Personal-episode scope id (default: personal:default)' },
+    title: { type: 'string', description: 'Exact personal-episode title filter' },
+    source_kind: {
+      type: 'string',
+      description: 'Optional personal-episode source kind filter',
+      enum: ['chat', 'note', 'import', 'meeting', 'reminder', 'other'],
+    },
+    limit: { type: 'number', description: 'Max results (default 20)' },
+    offset: { type: 'number', description: 'Offset for pagination (default 0)' },
+  },
+  handler: async (ctx, p) => {
+    return ctx.engine.listPersonalEpisodeEntries({
+      scope_id: String(p.scope_id ?? DEFAULT_PROFILE_MEMORY_SCOPE_ID),
+      title: typeof p.title === 'string' ? p.title : undefined,
+      source_kind: typeof p.source_kind === 'string' ? p.source_kind as any : undefined,
+      limit: typeof p.limit === 'number' ? p.limit : 20,
+      offset: typeof p.offset === 'number' ? p.offset : 0,
+    });
+  },
+  cliHints: { name: 'personal-episode-list', aliases: { n: 'limit' } },
+};
+
+const record_personal_episode: Operation = {
+  name: 'record_personal_episode',
+  description: 'Record one append-only canonical personal-episode entry.',
+  params: {
+    id: { type: 'string', description: 'Optional personal-episode id (generated when omitted)' },
+    scope_id: { type: 'string', description: 'Personal-episode scope id (default: personal:default)' },
+    title: { type: 'string', required: true, description: 'Compact personal-episode title' },
+    start_time: { type: 'string', required: true, description: 'ISO timestamp for episode start' },
+    end_time: { type: 'string', description: 'Optional ISO timestamp for episode end' },
+    source_kind: {
+      type: 'string',
+      required: true,
+      description: 'Personal-episode source kind',
+      enum: ['chat', 'note', 'import', 'meeting', 'reminder', 'other'],
+    },
+    summary: { type: 'string', required: true, description: 'Episode summary' },
+    source_ref: { type: 'string', description: 'Optional single provenance string' },
+    candidate_id: { type: 'string', description: 'Optional linked candidate or profile id' },
+  },
+  mutating: true,
+  handler: async (ctx, p) => {
+    const id = typeof p.id === 'string' ? p.id : crypto.randomUUID();
+    const scopeId = String(p.scope_id ?? DEFAULT_PROFILE_MEMORY_SCOPE_ID);
+    if (ctx.dryRun) {
+      return {
+        dry_run: true,
+        action: 'record_personal_episode',
+        id,
+        scope_id: scopeId,
+        title: p.title,
+        source_kind: p.source_kind,
+      };
+    }
+
+    return ctx.engine.createPersonalEpisodeEntry({
+      id,
+      scope_id: scopeId,
+      title: String(p.title),
+      start_time: String(p.start_time),
+      end_time: typeof p.end_time === 'string' ? p.end_time : null,
+      source_kind: String(p.source_kind) as any,
+      summary: String(p.summary),
+      source_refs: typeof p.source_ref === 'string' ? [p.source_ref] : [],
+      candidate_ids: typeof p.candidate_id === 'string' ? [p.candidate_id] : [],
+    });
+  },
+  cliHints: { name: 'personal-episode-record' },
+};
+
 // --- Operational Memory ---
 
 const list_tasks: Operation = {
@@ -2922,6 +3009,8 @@ export const operations: Operation[] = [
   resolve_slugs, get_chunks,
   // Profile memory
   get_profile_memory_entry, list_profile_memory_entries, upsert_profile_memory_entry,
+  // Personal episodes
+  get_personal_episode_entry, list_personal_episode_entries, record_personal_episode,
   // Note manifest
   get_note_manifest_entry, list_note_manifest_entries, rebuild_note_manifest,
   // Note sections

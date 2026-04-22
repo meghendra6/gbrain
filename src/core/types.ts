@@ -596,6 +596,42 @@ export interface PersonalProfileLookupRouteResult {
   route: PersonalProfileLookupRoute | null;
 }
 
+export type PersonalEpisodeSourceKind = 'chat' | 'note' | 'import' | 'meeting' | 'reminder' | 'other';
+
+export interface PersonalEpisodeEntry {
+  id: string;
+  scope_id: string;
+  title: string;
+  start_time: Date;
+  end_time: Date | null;
+  source_kind: PersonalEpisodeSourceKind;
+  summary: string;
+  source_refs: string[];
+  candidate_ids: string[];
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface PersonalEpisodeEntryInput {
+  id: string;
+  scope_id: string;
+  title: string;
+  start_time: Date | string;
+  end_time?: Date | string | null;
+  source_kind: PersonalEpisodeSourceKind;
+  summary: string;
+  source_refs: string[];
+  candidate_ids: string[];
+}
+
+export interface PersonalEpisodeFilters {
+  scope_id?: string;
+  title?: string;
+  source_kind?: PersonalEpisodeSourceKind;
+  limit?: number;
+  offset?: number;
+}
+
 export type RetrievalRouteIntent = 'task_resume' | 'broad_synthesis' | 'precision_lookup' | 'personal_profile_lookup';
 
 export interface RetrievalRouteSelection {

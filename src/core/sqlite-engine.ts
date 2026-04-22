@@ -27,6 +27,9 @@ import type {
   ProfileMemoryEntry,
   ProfileMemoryEntryInput,
   ProfileMemoryFilters,
+  PersonalEpisodeEntry,
+  PersonalEpisodeEntryInput,
+  PersonalEpisodeFilters,
   Chunk, ChunkInput,
   SearchResult, SearchOpts,
   Link, GraphNode,
@@ -1394,6 +1397,85 @@ export class SQLiteEngine implements BrainEngine {
     this.database.run(`DELETE FROM profile_memory_entries WHERE id = ?`, [id]);
   }
 
+  async createPersonalEpisodeEntry(input: PersonalEpisodeEntryInput): Promise<PersonalEpisodeEntry> {
+    const timestamp = nowIso();
+    this.database.run(`
+      INSERT INTO personal_episode_entries (
+        id, scope_id, title, start_time, end_time, source_kind, summary,
+        source_refs, candidate_ids, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+      input.id,
+      input.scope_id,
+      input.title,
+      toNullableIso(input.start_time),
+      toNullableIso(input.end_time),
+      input.source_kind,
+      input.summary,
+      JSON.stringify(input.source_refs ?? []),
+      JSON.stringify(input.candidate_ids ?? []),
+      timestamp,
+      timestamp,
+    ]);
+
+    const row = this.database.query(`
+      SELECT id, scope_id, title, start_time, end_time, source_kind, summary,
+             source_refs, candidate_ids, created_at, updated_at
+      FROM personal_episode_entries
+      WHERE id = ?
+    `).get(input.id) as Record<string, unknown> | null;
+    if (!row) throw new Error(`Personal episode entry not found after create: ${input.id}`);
+    return rowToPersonalEpisodeEntry(row);
+  }
+
+  async getPersonalEpisodeEntry(id: string): Promise<PersonalEpisodeEntry | null> {
+    const row = this.database.query(`
+      SELECT id, scope_id, title, start_time, end_time, source_kind, summary,
+             source_refs, candidate_ids, created_at, updated_at
+      FROM personal_episode_entries
+      WHERE id = ?
+    `).get(id) as Record<string, unknown> | null;
+    return row ? rowToPersonalEpisodeEntry(row) : null;
+  }
+
+  async listPersonalEpisodeEntries(filters?: PersonalEpisodeFilters): Promise<PersonalEpisodeEntry[]> {
+    const limit = filters?.limit ?? 100;
+    const offset = filters?.offset ?? 0;
+    const clauses: string[] = [];
+    const params: unknown[] = [];
+
+    if (filters?.scope_id) {
+      clauses.push('scope_id = ?');
+      params.push(filters.scope_id);
+    }
+    if (filters?.title) {
+      clauses.push('title = ?');
+      params.push(filters.title);
+    }
+    if (filters?.source_kind) {
+      clauses.push('source_kind = ?');
+      params.push(filters.source_kind);
+    }
+
+    params.push(limit);
+    params.push(offset);
+    const whereClause = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+    const rows = this.database.query(`
+      SELECT id, scope_id, title, start_time, end_time, source_kind, summary,
+             source_refs, candidate_ids, created_at, updated_at
+      FROM personal_episode_entries
+      ${whereClause}
+      ORDER BY start_time DESC, id ASC
+      LIMIT ?
+      OFFSET ?
+    `).all(...params) as Record<string, unknown>[];
+    return rows.map(rowToPersonalEpisodeEntry);
+  }
+
+  async deletePersonalEpisodeEntry(id: string): Promise<void> {
+    this.database.run(`DELETE FROM personal_episode_entries WHERE id = ?`, [id]);
+  }
+
   async upsertNoteManifestEntry(input: NoteManifestEntryInput): Promise<NoteManifestEntry> {
     const timestamp = nowIso();
     this.database.run(`
@@ -2075,6 +2157,27 @@ export class SQLiteEngine implements BrainEngine {
               ON profile_memory_entries(scope_id, profile_type, updated_at DESC);
           `);
           break;
+        case 14:
+          this.database.exec(`
+            CREATE TABLE IF NOT EXISTS personal_episode_entries (
+              id TEXT PRIMARY KEY,
+              scope_id TEXT NOT NULL,
+              title TEXT NOT NULL,
+              start_time TEXT NOT NULL,
+              end_time TEXT,
+              source_kind TEXT NOT NULL,
+              summary TEXT NOT NULL,
+              source_refs TEXT NOT NULL DEFAULT '[]',
+              candidate_ids TEXT NOT NULL DEFAULT '[]',
+              created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+              updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_personal_episode_scope_start
+              ON personal_episode_entries(scope_id, start_time DESC);
+            CREATE INDEX IF NOT EXISTS idx_personal_episode_scope_title
+              ON personal_episode_entries(scope_id, title);
+          `);
+          break;
       }
 
       await this.setConfig('version', String(version));
@@ -2590,6 +2693,22 @@ function rowToProfileMemoryEntry(row: Record<string, unknown>): ProfileMemoryEnt
     export_status: row.export_status as ProfileMemoryEntry['export_status'],
     last_confirmed_at: row.last_confirmed_at == null ? null : new Date(String(row.last_confirmed_at)),
     superseded_by: row.superseded_by == null ? null : String(row.superseded_by),
+    created_at: new Date(String(row.created_at)),
+    updated_at: new Date(String(row.updated_at)),
+  };
+}
+
+function rowToPersonalEpisodeEntry(row: Record<string, unknown>): PersonalEpisodeEntry {
+  return {
+    id: String(row.id),
+    scope_id: String(row.scope_id),
+    title: String(row.title),
+    start_time: new Date(String(row.start_time)),
+    end_time: row.end_time == null ? null : new Date(String(row.end_time)),
+    source_kind: row.source_kind as PersonalEpisodeEntry['source_kind'],
+    summary: String(row.summary),
+    source_refs: parseJsonArray(row.source_refs),
+    candidate_ids: parseJsonArray(row.candidate_ids),
     created_at: new Date(String(row.created_at)),
     updated_at: new Date(String(row.updated_at)),
   };

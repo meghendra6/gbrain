@@ -555,6 +555,25 @@ export interface RetrievalRouteSelectorResult {
   trace?: RetrievalTrace | null;
 }
 
+export type ScopeGateScope = 'work' | 'personal' | 'mixed' | 'unknown';
+export type ScopeGatePolicy = 'allow' | 'defer' | 'deny';
+export type ScopeGateIntent = RetrievalRouteIntent;
+
+export interface ScopeGateDecisionInput {
+  intent: ScopeGateIntent;
+  requested_scope?: Exclude<ScopeGateScope, 'unknown'>;
+  task_id?: string;
+  query?: string;
+  repo_path?: string;
+}
+
+export interface ScopeGateDecisionResult {
+  resolved_scope: ScopeGateScope;
+  policy: ScopeGatePolicy;
+  decision_reason: string;
+  summary_lines: string[];
+}
+
 export interface WorkspaceSystemCard {
   card_kind: 'workspace_system';
   system_slug: string;

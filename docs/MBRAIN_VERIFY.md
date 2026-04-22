@@ -604,6 +604,24 @@ Expected:
 - `acceptance.phase3_status` matches the aggregated phase outcome
 - `test:phase3` runs the published Phase 3 suites plus the acceptance-pack test
 
+## Phase 4 scope-gate
+
+Run:
+
+```bash
+bun test test/scope-gate-service.test.ts test/scope-gate-operations.test.ts test/phase4-scope-gate.test.ts
+bun run bench:phase4-scope-gate --json
+```
+
+Expected:
+
+- scope-gate tests pass
+- `scope-gate` stays available through the shared operation surface
+- benchmark reports `scope_gate` and `scope_gate_correctness`
+- `acceptance.readiness_status` reports `pass` or `fail` from the local guardrails
+- `acceptance.phase4_status` matches the local guardrail outcome
+- `allow`, `deny`, and `defer` cases are all covered deterministically
+
 ---
 
 ## 2. Skillpack Loaded

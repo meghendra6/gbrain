@@ -41,6 +41,7 @@
   "bench:phase3-retrieval-route-selector": "bun run ./scripts/bench/phase3-retrieval-route-selector.ts",
   "bench:phase3-retrieval-route-trace": "bun run ./scripts/bench/phase3-retrieval-route-trace.ts",
   "bench:phase3-acceptance": "bun run ./scripts/bench/phase3-acceptance-pack.ts",
+  "bench:phase4-scope-gate": "bun run ./scripts/bench/phase4-scope-gate.ts",
   "bench:phase2-workspace-system-card": "bun run ./scripts/bench/phase2-workspace-system-card.ts",
   "bench:phase2-workspace-project-card": "bun run ./scripts/bench/phase2-workspace-project-card.ts",
   "bench:phase2-workspace-orientation-bundle": "bun run ./scripts/bench/phase2-workspace-orientation-bundle.ts",

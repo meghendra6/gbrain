@@ -20,6 +20,7 @@ test('memory inbox operations can be built from a dedicated domain module', () =
     'advance_memory_candidate_status',
     'reject_memory_candidate_entry',
     'preflight_promote_memory_candidate',
+    'promote_memory_candidate_entry',
   ]);
 });
 
@@ -30,6 +31,7 @@ test('memory inbox operations are registered with CLI hints', () => {
   const advance = operations.find((operation) => operation.name === 'advance_memory_candidate_status');
   const reject = operations.find((operation) => operation.name === 'reject_memory_candidate_entry');
   const preflight = operations.find((operation) => operation.name === 'preflight_promote_memory_candidate');
+  const promote = operations.find((operation) => operation.name === 'promote_memory_candidate_entry');
 
   expect(create?.cliHints?.name).toBe('create-memory-candidate');
   expect(get?.cliHints?.name).toBe('get-memory-candidate');
@@ -37,8 +39,9 @@ test('memory inbox operations are registered with CLI hints', () => {
   expect(advance?.cliHints?.name).toBe('advance-memory-candidate-status');
   expect(reject?.cliHints?.name).toBe('reject-memory-candidate');
   expect(preflight?.cliHints?.name).toBe('preflight-promote-memory-candidate');
+  expect(promote?.cliHints?.name).toBe('promote-memory-candidate');
   expect(create?.params.status?.enum).toEqual(['captured', 'candidate', 'staged_for_review']);
-  expect(list?.params.status?.enum).toEqual(['captured', 'candidate', 'staged_for_review', 'rejected']);
+  expect(list?.params.status?.enum).toEqual(['captured', 'candidate', 'staged_for_review', 'rejected', 'promoted']);
   expect(advance?.params.next_status?.description).toContain('depends on the current stored status');
 });
 
@@ -259,6 +262,123 @@ test('memory inbox promotion preflight operation returns explicit allow and not-
       logger: console,
       dryRun: false,
     }, {})).rejects.toMatchObject({
+      code: 'invalid_params',
+    });
+  } finally {
+    await engine.disconnect();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('memory inbox promotion operation promotes staged candidates and rejects blocked ones', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mbrain-memory-inbox-op-promote-'));
+  const databasePath = join(dir, 'brain.db');
+  const engine = new SQLiteEngine();
+  const create = operations.find((operation) => operation.name === 'create_memory_candidate_entry');
+  const advance = operations.find((operation) => operation.name === 'advance_memory_candidate_status');
+  const promote = operations.find((operation) => operation.name === 'promote_memory_candidate_entry');
+
+  if (!create || !advance || !promote) {
+    throw new Error('memory inbox create/advance/promote operations are missing');
+  }
+
+  try {
+    await engine.connect({ engine: 'sqlite', database_path: databasePath });
+    await engine.initSchema();
+
+    await create.handler({
+      engine,
+      config: {} as any,
+      logger: console,
+      dryRun: false,
+    }, {
+      id: 'candidate-promote',
+      candidate_type: 'fact',
+      proposed_content: 'Promotion writes an explicit governance outcome.',
+      source_ref: 'User, direct message, 2026-04-23 8:10 PM KST',
+      target_object_type: 'curated_note',
+      target_object_id: 'concepts/memory-inbox',
+    });
+
+    await advance.handler({ engine, config: {} as any, logger: console, dryRun: false }, {
+      id: 'candidate-promote',
+      next_status: 'candidate',
+    });
+    await advance.handler({ engine, config: {} as any, logger: console, dryRun: false }, {
+      id: 'candidate-promote',
+      next_status: 'staged_for_review',
+      review_reason: 'Ready for promotion.',
+    });
+
+    const promoted = await promote.handler({
+      engine,
+      config: {} as any,
+      logger: console,
+      dryRun: false,
+    }, {
+      id: 'candidate-promote',
+      review_reason: 'Promoted after passing preflight.',
+    });
+
+    expect((promoted as any).status).toBe('promoted');
+    expect((promoted as any).review_reason).toBe('Promoted after passing preflight.');
+
+    await create.handler({
+      engine,
+      config: {} as any,
+      logger: console,
+      dryRun: false,
+    }, {
+      id: 'candidate-promote-blocked',
+      candidate_type: 'fact',
+      proposed_content: 'Blocked promotion should stay staged when target binding is missing.',
+      source_ref: 'User, direct message, 2026-04-23 8:15 PM KST',
+    });
+
+    await advance.handler({ engine, config: {} as any, logger: console, dryRun: false }, {
+      id: 'candidate-promote-blocked',
+      next_status: 'candidate',
+    });
+    await advance.handler({ engine, config: {} as any, logger: console, dryRun: false }, {
+      id: 'candidate-promote-blocked',
+      next_status: 'staged_for_review',
+      review_reason: 'Waiting for deterministic governance check.',
+    });
+
+    await expect(promote.handler({
+      engine,
+      config: {} as any,
+      logger: console,
+      dryRun: false,
+    }, {
+      id: 'candidate-promote-blocked',
+    })).rejects.toMatchObject({
+      code: 'invalid_params',
+    });
+
+    const blocked = await engine.getMemoryCandidateEntry('candidate-promote-blocked');
+    expect(blocked?.status).toBe('staged_for_review');
+
+    await expect(promote.handler({
+      engine,
+      config: {} as any,
+      logger: console,
+      dryRun: false,
+    }, {
+      id: 'missing-promoted-candidate',
+    })).rejects.toMatchObject({
+      code: 'memory_candidate_not_found',
+    });
+
+    await expect(promote.handler({
+      engine,
+      config: {} as any,
+      logger: console,
+      dryRun: false,
+    }, {
+      id: 'candidate-promote',
+      review_reason: 123,
+    })).rejects.toMatchObject({
       code: 'invalid_params',
     });
   } finally {

@@ -67,10 +67,10 @@ describe('memory-inbox schema', () => {
           sensitivity,
           status
         ) VALUES (
-          'rejected-status',
+          'promoted-status',
           'workspace:default',
           'fact',
-          'Rejected should be valid in the rejection slice.',
+          'Promoted should be valid in the promotion slice.',
           '[]',
           'manual',
           'manual',
@@ -78,7 +78,7 @@ describe('memory-inbox schema', () => {
           0.5,
           0,
           'work',
-          'rejected'
+          'promoted'
         )
       `).run();
     }).not.toThrow();
@@ -110,7 +110,7 @@ describe('memory-inbox schema', () => {
           0.5,
           0,
           'work',
-          'promoted'
+          'superseded'
         )
       `).run();
     }).toThrow();
@@ -152,10 +152,10 @@ describe('memory-inbox schema', () => {
         sensitivity,
         status
       ) VALUES (
-        'rejected-status',
+        'promoted-status',
         'workspace:default',
         'fact',
-        'Rejected should be valid in the rejection slice.',
+        'Promoted should be valid in the promotion slice.',
         '[]',
         'manual',
         'manual',
@@ -163,7 +163,7 @@ describe('memory-inbox schema', () => {
         0.5,
         0,
         'work',
-        'rejected'
+        'promoted'
       )
     `)).resolves.toBeDefined();
 
@@ -193,7 +193,7 @@ describe('memory-inbox schema', () => {
         0.5,
         0,
         'work',
-        'promoted'
+        'superseded'
       )
     `)).rejects.toThrow();
 

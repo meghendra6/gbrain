@@ -722,7 +722,13 @@ export type MemoryCandidateStatus =
   | 'captured'
   | 'candidate'
   | 'staged_for_review'
-  | 'rejected';
+  | 'rejected'
+  | 'promoted';
+
+export type MemoryCandidateCreateStatus =
+  | 'captured'
+  | 'candidate'
+  | 'staged_for_review';
 
 export type MemoryCandidateTargetObjectType =
   | 'curated_note'
@@ -775,7 +781,7 @@ export interface MemoryCandidateEntryInput {
   importance_score: number;
   recurrence_score: number;
   sensitivity: MemoryCandidateSensitivity;
-  status: MemoryCandidateStatus;
+  status: MemoryCandidateCreateStatus;
   target_object_type?: MemoryCandidateTargetObjectType | null;
   target_object_id?: string | null;
   reviewed_at?: Date | string | null;
@@ -792,7 +798,13 @@ export interface MemoryCandidateFilters {
 }
 
 export interface MemoryCandidateStatusPatch {
-  status: MemoryCandidateStatus;
+  status: Exclude<MemoryCandidateStatus, 'promoted'>;
+  reviewed_at?: Date | string | null;
+  review_reason?: string | null;
+}
+
+export interface MemoryCandidatePromotionPatch {
+  expected_current_status?: 'staged_for_review';
   reviewed_at?: Date | string | null;
   review_reason?: string | null;
 }

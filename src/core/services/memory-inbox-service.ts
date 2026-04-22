@@ -8,7 +8,13 @@ import type {
   MemoryCandidateTargetObjectType,
 } from '../types.ts';
 
-const ALLOWED_TRANSITIONS: Record<MemoryCandidateStatus, MemoryCandidateStatus | null> = {
+type AdvanceableMemoryCandidateStatus = 'captured' | 'candidate' | 'staged_for_review';
+type MemoryCandidateAdvanceTargetStatus = 'candidate' | 'staged_for_review';
+
+const ALLOWED_TRANSITIONS: Record<
+  AdvanceableMemoryCandidateStatus,
+  MemoryCandidateAdvanceTargetStatus | null
+> = {
   captured: 'candidate',
   candidate: 'staged_for_review',
   staged_for_review: null,
@@ -16,7 +22,7 @@ const ALLOWED_TRANSITIONS: Record<MemoryCandidateStatus, MemoryCandidateStatus |
 
 export class MemoryInboxServiceError extends Error {
   constructor(
-    public code: 'memory_candidate_not_found' | 'invalid_status_transition',
+    public code: 'memory_candidate_not_found' | 'invalid_status_transition' | 'promotion_preflight_failed',
     message: string,
   ) {
     super(message);
@@ -26,7 +32,7 @@ export class MemoryInboxServiceError extends Error {
 
 export interface AdvanceMemoryCandidateStatusInput {
   id: string;
-  next_status: MemoryCandidateStatus;
+  next_status: MemoryCandidateAdvanceTargetStatus;
   reviewed_at?: Date | string | null;
   review_reason?: string | null;
 }
@@ -71,7 +77,7 @@ export async function preflightPromoteMemoryCandidate(
     deferReasons.push('candidate_requires_revalidation');
   }
 
-  const reasons = denyReasons.length > 0
+  const reasons: MemoryCandidatePromotionPreflightReason[] = denyReasons.length > 0
     ? denyReasons
     : (deferReasons.length > 0 ? deferReasons : ['candidate_ready_for_promotion']);
   const decision = denyReasons.length > 0
@@ -102,7 +108,7 @@ export async function advanceMemoryCandidateStatus(
     );
   }
 
-  const allowedNext = ALLOWED_TRANSITIONS[entry.status];
+  const allowedNext = getAllowedAdvanceTargetStatus(entry.status);
   if (allowedNext !== input.next_status) {
     throw new MemoryInboxServiceError(
       'invalid_status_transition',
@@ -110,13 +116,20 @@ export async function advanceMemoryCandidateStatus(
     );
   }
 
-  return engine.updateMemoryCandidateEntryStatus(entry.id, {
+  const advanced = await engine.updateMemoryCandidateEntryStatus(entry.id, {
     status: input.next_status,
     reviewed_at: input.reviewed_at !== undefined
       ? input.reviewed_at
       : (input.next_status === 'staged_for_review' ? new Date() : null),
     review_reason: input.review_reason ?? null,
   });
+  if (!advanced) {
+    throw new MemoryInboxServiceError(
+      'invalid_status_transition',
+      `Cannot advance memory candidate ${entry.id}; current state changed before advance completed.`,
+    );
+  }
+  return advanced;
 }
 
 export async function rejectMemoryCandidateEntry(
@@ -138,11 +151,18 @@ export async function rejectMemoryCandidateEntry(
     );
   }
 
-  return engine.updateMemoryCandidateEntryStatus(entry.id, {
+  const rejected = await engine.updateMemoryCandidateEntryStatus(entry.id, {
     status: 'rejected',
     reviewed_at: input.reviewed_at !== undefined ? input.reviewed_at : new Date(),
     review_reason: input.review_reason,
   });
+  if (!rejected) {
+    throw new MemoryInboxServiceError(
+      'invalid_status_transition',
+      `Cannot reject memory candidate ${entry.id}; current state changed before rejection completed.`,
+    );
+  }
+  return rejected;
 }
 
 function hasScopeConflict(entry: MemoryCandidateEntry): boolean {
@@ -181,6 +201,20 @@ function classifyTargetObjectType(
     return 'personal_only';
   }
   return 'other';
+}
+
+function getAllowedAdvanceTargetStatus(
+  status: MemoryCandidateStatus,
+): MemoryCandidateAdvanceTargetStatus | null {
+  switch (status) {
+    case 'captured':
+    case 'candidate':
+    case 'staged_for_review':
+      return ALLOWED_TRANSITIONS[status];
+    case 'rejected':
+    case 'promoted':
+      return null;
+  }
 }
 
 function formatReasonLabel(reason: MemoryCandidatePromotionPreflightReason): string {

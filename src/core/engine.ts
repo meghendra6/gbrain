@@ -15,6 +15,7 @@ import type {
   MemoryCandidateEntry,
   MemoryCandidateEntryInput,
   MemoryCandidateFilters,
+  MemoryCandidatePromotionPatch,
   MemoryCandidateStatusPatch,
   ProfileMemoryEntry,
   ProfileMemoryEntryInput,
@@ -137,7 +138,8 @@ export interface BrainEngine {
   createMemoryCandidateEntry(input: MemoryCandidateEntryInput): Promise<MemoryCandidateEntry>;
   getMemoryCandidateEntry(id: string): Promise<MemoryCandidateEntry | null>;
   listMemoryCandidateEntries(filters?: MemoryCandidateFilters): Promise<MemoryCandidateEntry[]>;
-  updateMemoryCandidateEntryStatus(id: string, patch: MemoryCandidateStatusPatch): Promise<MemoryCandidateEntry>;
+  updateMemoryCandidateEntryStatus(id: string, patch: MemoryCandidateStatusPatch): Promise<MemoryCandidateEntry | null>;
+  promoteMemoryCandidateEntry(id: string, patch?: MemoryCandidatePromotionPatch): Promise<MemoryCandidateEntry | null>;
   deleteMemoryCandidateEntry(id: string): Promise<void>;
 
   // Note manifest

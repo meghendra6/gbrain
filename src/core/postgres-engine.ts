@@ -1,5 +1,9 @@
 import postgres from 'postgres';
 import type { BrainEngine } from './engine.ts';
+import {
+  assertMemoryCandidateCreateStatus,
+  isAllowedMemoryCandidateStatusUpdate,
+} from './memory-inbox-status.ts';
 import { runMigrations } from './migrate.ts';
 import { SCHEMA_SQL } from './schema-embedded.ts';
 import type {
@@ -19,6 +23,7 @@ import type {
   MemoryCandidateEntry,
   MemoryCandidateEntryInput,
   MemoryCandidateFilters,
+  MemoryCandidatePromotionPatch,
   MemoryCandidateStatusPatch,
   ProfileMemoryEntry,
   ProfileMemoryEntryInput,
@@ -1227,6 +1232,7 @@ export class PostgresEngine implements BrainEngine {
 
   async createMemoryCandidateEntry(input: MemoryCandidateEntryInput): Promise<MemoryCandidateEntry> {
     const sql = this.sql;
+    const initialStatus = assertMemoryCandidateCreateStatus(input.status);
     const rows = await sql`
       INSERT INTO memory_candidate_entries (
         id, scope_id, candidate_type, proposed_content, source_refs, generated_by,
@@ -1245,7 +1251,7 @@ export class PostgresEngine implements BrainEngine {
         ${input.importance_score},
         ${input.recurrence_score},
         ${input.sensitivity},
-        ${input.status},
+        ${initialStatus},
         ${input.target_object_type ?? null},
         ${input.target_object_id ?? null},
         ${input.reviewed_at instanceof Date ? input.reviewed_at.toISOString() : input.reviewed_at ?? null},
@@ -1315,8 +1321,15 @@ export class PostgresEngine implements BrainEngine {
     return (rows as Record<string, unknown>[]).map(rowToMemoryCandidateEntry);
   }
 
-  async updateMemoryCandidateEntryStatus(id: string, patch: MemoryCandidateStatusPatch): Promise<MemoryCandidateEntry> {
+  async updateMemoryCandidateEntryStatus(id: string, patch: MemoryCandidateStatusPatch): Promise<MemoryCandidateEntry | null> {
     const sql = this.sql;
+    const current = await this.getMemoryCandidateEntry(id);
+    if (!current) {
+      throw new Error(`Memory candidate entry not found before status update: ${id}`);
+    }
+    if (!isAllowedMemoryCandidateStatusUpdate(current.status, patch.status)) {
+      throw new Error(`Cannot update memory candidate from ${current.status} to ${patch.status}.`);
+    }
     const rows = await sql`
       UPDATE memory_candidate_entries
       SET status = ${patch.status},
@@ -1324,12 +1337,34 @@ export class PostgresEngine implements BrainEngine {
           review_reason = ${patch.review_reason ?? null},
           updated_at = now()
       WHERE id = ${id}
+        AND status = ${current.status}
       RETURNING id, scope_id, candidate_type, proposed_content, source_refs, generated_by,
                 extraction_kind, confidence_score, importance_score, recurrence_score,
                 sensitivity, status, target_object_type, target_object_id, reviewed_at,
                 review_reason, created_at, updated_at
     `;
-    if (rows.length === 0) throw new Error(`Memory candidate entry not found after status update: ${id}`);
+    if (rows.length === 0) return null;
+    return rowToMemoryCandidateEntry(rows[0] as Record<string, unknown>);
+  }
+
+  async promoteMemoryCandidateEntry(id: string, patch: MemoryCandidatePromotionPatch = {}): Promise<MemoryCandidateEntry | null> {
+    const sql = this.sql;
+    const rows = await sql`
+      UPDATE memory_candidate_entries
+      SET status = 'promoted',
+          reviewed_at = ${patch.reviewed_at instanceof Date ? patch.reviewed_at.toISOString() : patch.reviewed_at ?? null},
+          review_reason = ${patch.review_reason ?? null},
+          updated_at = now()
+      WHERE id = ${id}
+        AND status = ${patch.expected_current_status ?? 'staged_for_review'}
+      RETURNING id, scope_id, candidate_type, proposed_content, source_refs, generated_by,
+                extraction_kind, confidence_score, importance_score, recurrence_score,
+                sensitivity, status, target_object_type, target_object_id, reviewed_at,
+                review_reason, created_at, updated_at
+    `;
+    if (rows.length === 0) {
+      return null;
+    }
     return rowToMemoryCandidateEntry(rows[0] as Record<string, unknown>);
   }
 

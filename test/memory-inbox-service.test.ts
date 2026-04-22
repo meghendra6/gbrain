@@ -10,6 +10,7 @@ import {
   preflightPromoteMemoryCandidate,
   rejectMemoryCandidateEntry,
 } from '../src/core/services/memory-inbox-service.ts';
+import { promoteMemoryCandidateEntry } from '../src/core/services/memory-inbox-promotion-service.ts';
 
 async function seedCandidate(
   engine: SQLiteEngine,
@@ -225,6 +226,34 @@ test('memory inbox service preserves explicit null reviewed_at on rejection', as
     expect(updated.status).toBe('rejected');
     expect(updated.reviewed_at).toBeNull();
     expect(updated.review_reason).toBe('Explicit null review time stays preserved on rejection.');
+  } finally {
+    await engine.disconnect();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('memory inbox service rejects race-lost rejection attempts', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mbrain-memory-inbox-service-reject-race-'));
+  const databasePath = join(dir, 'brain.db');
+  const engine = new SQLiteEngine();
+
+  try {
+    await engine.connect({ engine: 'sqlite', database_path: databasePath });
+    await engine.initSchema();
+    await seedCandidate(engine, 'candidate-reject-race', 'staged_for_review');
+
+    const originalUpdate = engine.updateMemoryCandidateEntryStatus.bind(engine);
+    engine.updateMemoryCandidateEntryStatus = async () => null;
+
+    await expect(rejectMemoryCandidateEntry(engine, {
+      id: 'candidate-reject-race',
+      review_reason: 'A concurrent promotion already won the governance decision.',
+    })).rejects.toMatchObject({
+      code: 'invalid_status_transition',
+    });
+
+    expect((await engine.getMemoryCandidateEntry('candidate-reject-race'))?.status).toBe('staged_for_review');
+    engine.updateMemoryCandidateEntryStatus = originalUpdate;
   } finally {
     await engine.disconnect();
     rmSync(dir, { recursive: true, force: true });
@@ -477,6 +506,106 @@ test('memory inbox service rejects promotion preflight before staged_for_review 
     })).rejects.toBeInstanceOf(MemoryInboxServiceError);
     await expect(preflightPromoteMemoryCandidate(engine, {
       id: 'missing-candidate',
+    })).rejects.toMatchObject({
+      code: 'memory_candidate_not_found',
+    });
+  } finally {
+    await engine.disconnect();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('memory inbox promotion service promotes staged candidates that pass preflight', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mbrain-memory-inbox-service-promote-allow-'));
+  const databasePath = join(dir, 'brain.db');
+  const engine = new SQLiteEngine();
+
+  try {
+    await engine.connect({ engine: 'sqlite', database_path: databasePath });
+    await engine.initSchema();
+    await seedCandidate(engine, 'candidate-18', 'staged_for_review');
+
+    const promoted = await promoteMemoryCandidateEntry(engine, {
+      id: 'candidate-18',
+      review_reason: 'Promoted after passing promotion preflight.',
+    });
+
+    expect(promoted.status).toBe('promoted');
+    expect(promoted.review_reason).toBe('Promoted after passing promotion preflight.');
+    expect(promoted.reviewed_at).not.toBeNull();
+  } finally {
+    await engine.disconnect();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('memory inbox promotion service preserves explicit null reviewed_at', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mbrain-memory-inbox-service-promote-null-'));
+  const databasePath = join(dir, 'brain.db');
+  const engine = new SQLiteEngine();
+
+  try {
+    await engine.connect({ engine: 'sqlite', database_path: databasePath });
+    await engine.initSchema();
+    await seedCandidate(engine, 'candidate-19', 'staged_for_review');
+
+    const promoted = await promoteMemoryCandidateEntry(engine, {
+      id: 'candidate-19',
+      reviewed_at: null,
+      review_reason: 'Explicit null should remain preserved.',
+    });
+
+    expect(promoted.status).toBe('promoted');
+    expect(promoted.reviewed_at).toBeNull();
+  } finally {
+    await engine.disconnect();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('memory inbox promotion service rejects non-staged or non-promotable candidates', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mbrain-memory-inbox-service-promote-invalid-'));
+  const databasePath = join(dir, 'brain.db');
+  const engine = new SQLiteEngine();
+
+  try {
+    await engine.connect({ engine: 'sqlite', database_path: databasePath });
+    await engine.initSchema();
+    await seedCandidate(engine, 'candidate-20', 'candidate');
+    await seedCandidate(engine, 'candidate-21', 'staged_for_review', {
+      source_refs: [],
+    });
+
+    await expect(promoteMemoryCandidateEntry(engine, {
+      id: 'candidate-20',
+      review_reason: 'Should not promote before staged review.',
+    })).rejects.toMatchObject({
+      code: 'invalid_status_transition',
+    });
+
+    await expect(promoteMemoryCandidateEntry(engine, {
+      id: 'candidate-21',
+      review_reason: 'Should not promote without provenance.',
+    })).rejects.toMatchObject({
+      code: 'promotion_preflight_failed',
+    });
+  } finally {
+    await engine.disconnect();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('memory inbox promotion service rejects missing ids', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mbrain-memory-inbox-service-promote-missing-'));
+  const databasePath = join(dir, 'brain.db');
+  const engine = new SQLiteEngine();
+
+  try {
+    await engine.connect({ engine: 'sqlite', database_path: databasePath });
+    await engine.initSchema();
+
+    await expect(promoteMemoryCandidateEntry(engine, {
+      id: 'missing-promoted-candidate',
     })).rejects.toMatchObject({
       code: 'memory_candidate_not_found',
     });

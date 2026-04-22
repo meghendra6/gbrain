@@ -3,6 +3,10 @@ import { mkdirSync } from 'fs';
 import { homedir } from 'os';
 import { dirname, join } from 'path';
 import type { BrainEngine } from './engine.ts';
+import {
+  assertMemoryCandidateCreateStatus,
+  isAllowedMemoryCandidateStatusUpdate,
+} from './memory-inbox-status.ts';
 import { LATEST_VERSION } from './migrate.ts';
 import { ensurePageChunks } from './page-chunks.ts';
 import { buildPageCentroid } from './services/page-embedding.ts';
@@ -27,6 +31,7 @@ import type {
   MemoryCandidateEntry,
   MemoryCandidateEntryInput,
   MemoryCandidateFilters,
+  MemoryCandidatePromotionPatch,
   MemoryCandidateStatusPatch,
   ProfileMemoryEntry,
   ProfileMemoryEntryInput,
@@ -1481,6 +1486,7 @@ export class SQLiteEngine implements BrainEngine {
   }
 
   async createMemoryCandidateEntry(input: MemoryCandidateEntryInput): Promise<MemoryCandidateEntry> {
+    const initialStatus = assertMemoryCandidateCreateStatus(input.status);
     const timestamp = nowIso();
     this.database.run(`
       INSERT INTO memory_candidate_entries (
@@ -1501,7 +1507,7 @@ export class SQLiteEngine implements BrainEngine {
       input.importance_score,
       input.recurrence_score,
       input.sensitivity,
-      input.status,
+      initialStatus,
       input.target_object_type ?? null,
       input.target_object_id ?? null,
       toNullableIso(input.reviewed_at),
@@ -1574,22 +1580,35 @@ export class SQLiteEngine implements BrainEngine {
     return rows.map(rowToMemoryCandidateEntry);
   }
 
-  async updateMemoryCandidateEntryStatus(id: string, patch: MemoryCandidateStatusPatch): Promise<MemoryCandidateEntry> {
+  async updateMemoryCandidateEntryStatus(id: string, patch: MemoryCandidateStatusPatch): Promise<MemoryCandidateEntry | null> {
+    const current = await this.getMemoryCandidateEntry(id);
+    if (!current) {
+      throw new Error(`Memory candidate entry not found before status update: ${id}`);
+    }
+    if (!isAllowedMemoryCandidateStatusUpdate(current.status, patch.status)) {
+      throw new Error(`Cannot update memory candidate from ${current.status} to ${patch.status}.`);
+    }
+
     const timestamp = nowIso();
-    this.database.run(`
+    const result = this.database.run(`
       UPDATE memory_candidate_entries
       SET status = ?,
           reviewed_at = ?,
           review_reason = ?,
           updated_at = ?
       WHERE id = ?
+        AND status = ?
     `, [
       patch.status,
       toNullableIso(patch.reviewed_at),
       patch.review_reason ?? null,
       timestamp,
       id,
+      current.status,
     ]);
+    if (result.changes === 0) {
+      return null;
+    }
 
     const row = this.database.query(`
       SELECT id, scope_id, candidate_type, proposed_content, source_refs, generated_by,
@@ -1600,6 +1619,38 @@ export class SQLiteEngine implements BrainEngine {
       WHERE id = ?
     `).get(id) as Record<string, unknown> | null;
     if (!row) throw new Error(`Memory candidate entry not found after status update: ${id}`);
+    return rowToMemoryCandidateEntry(row);
+  }
+
+  async promoteMemoryCandidateEntry(id: string, patch: MemoryCandidatePromotionPatch = {}): Promise<MemoryCandidateEntry | null> {
+    const timestamp = nowIso();
+    this.database.run(`
+      UPDATE memory_candidate_entries
+      SET status = 'promoted',
+          reviewed_at = ?,
+          review_reason = ?,
+          updated_at = ?
+      WHERE id = ?
+        AND status = ?
+    `, [
+      toNullableIso(patch.reviewed_at),
+      patch.review_reason ?? null,
+      timestamp,
+      id,
+      patch.expected_current_status ?? 'staged_for_review',
+    ]);
+
+    const row = this.database.query(`
+      SELECT id, scope_id, candidate_type, proposed_content, source_refs, generated_by,
+             extraction_kind, confidence_score, importance_score, recurrence_score,
+             sensitivity, status, target_object_type, target_object_id, reviewed_at,
+             review_reason, created_at, updated_at
+      FROM memory_candidate_entries
+      WHERE id = ?
+    `).get(id) as Record<string, unknown> | null;
+    if (!row || row.status !== 'promoted') {
+      return null;
+    }
     return rowToMemoryCandidateEntry(row);
   }
 
@@ -2375,6 +2426,50 @@ export class SQLiteEngine implements BrainEngine {
             FROM memory_candidate_entries;
             DROP TABLE memory_candidate_entries;
             ALTER TABLE memory_candidate_entries_v16 RENAME TO memory_candidate_entries;
+            CREATE INDEX IF NOT EXISTS idx_memory_candidates_scope_status
+              ON memory_candidate_entries(scope_id, status, updated_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_memory_candidates_scope_type
+              ON memory_candidate_entries(scope_id, candidate_type, updated_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_memory_candidates_target
+              ON memory_candidate_entries(target_object_type, target_object_id);
+          `);
+          break;
+        case 17:
+          this.database.exec(`
+            CREATE TABLE memory_candidate_entries_v17 (
+              id TEXT PRIMARY KEY,
+              scope_id TEXT NOT NULL,
+              candidate_type TEXT NOT NULL CHECK (candidate_type IN ('fact', 'relationship', 'note_update', 'procedure', 'profile_update', 'open_question', 'rationale')),
+              proposed_content TEXT NOT NULL,
+              source_refs TEXT NOT NULL DEFAULT '[]',
+              generated_by TEXT NOT NULL CHECK (generated_by IN ('agent', 'map_analysis', 'dream_cycle', 'manual', 'import')),
+              extraction_kind TEXT NOT NULL CHECK (extraction_kind IN ('extracted', 'inferred', 'ambiguous', 'manual')),
+              confidence_score REAL NOT NULL,
+              importance_score REAL NOT NULL,
+              recurrence_score REAL NOT NULL,
+              sensitivity TEXT NOT NULL CHECK (sensitivity IN ('public', 'work', 'personal', 'secret', 'unknown')),
+              status TEXT NOT NULL CHECK (status IN ('captured', 'candidate', 'staged_for_review', 'rejected', 'promoted')),
+              target_object_type TEXT CHECK (target_object_type IS NULL OR target_object_type IN ('curated_note', 'procedure', 'profile_memory', 'personal_episode', 'other')),
+              target_object_id TEXT,
+              reviewed_at TEXT,
+              review_reason TEXT,
+              created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+              updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            );
+            INSERT INTO memory_candidate_entries_v17 (
+              id, scope_id, candidate_type, proposed_content, source_refs, generated_by,
+              extraction_kind, confidence_score, importance_score, recurrence_score,
+              sensitivity, status, target_object_type, target_object_id, reviewed_at,
+              review_reason, created_at, updated_at
+            )
+            SELECT
+              id, scope_id, candidate_type, proposed_content, source_refs, generated_by,
+              extraction_kind, confidence_score, importance_score, recurrence_score,
+              sensitivity, status, target_object_type, target_object_id, reviewed_at,
+              review_reason, created_at, updated_at
+            FROM memory_candidate_entries;
+            DROP TABLE memory_candidate_entries;
+            ALTER TABLE memory_candidate_entries_v17 RENAME TO memory_candidate_entries;
             CREATE INDEX IF NOT EXISTS idx_memory_candidates_scope_status
               ON memory_candidate_entries(scope_id, status, updated_at DESC);
             CREATE INDEX IF NOT EXISTS idx_memory_candidates_scope_type

@@ -487,6 +487,33 @@ export interface BroadSynthesisRouteResult {
   route: BroadSynthesisRoute | null;
 }
 
+export interface MixedScopeBridgeRoute {
+  route_kind: 'mixed_scope_bridge';
+  bridge_reason: 'explicit_mixed_scope';
+  work_route: BroadSynthesisRoute;
+  personal_route: PersonalProfileLookupRoute;
+  retrieval_route: string[];
+  summary_lines: string[];
+}
+
+export interface MixedScopeBridgeInput {
+  requested_scope?: Exclude<ScopeGateScope, 'unknown'>;
+  map_id?: string;
+  scope_id?: string;
+  kind?: string;
+  query: string;
+  limit?: number;
+  subject: string;
+  profile_type?: ProfileMemoryType;
+}
+
+export interface MixedScopeBridgeResult {
+  selection_reason: string;
+  candidate_count: number;
+  route: MixedScopeBridgeRoute | null;
+  scope_gate: ScopeGateDecisionResult;
+}
+
 export interface PrecisionLookupRouteRead {
   node_id: string;
   node_kind: 'page' | 'section';

@@ -586,6 +586,24 @@ Expected:
 - `acceptance.readiness_status` reports `pass` or `fail` from the local guardrails
 - `acceptance.phase3_status` matches the local guardrail outcome without introducing a baseline artifact
 
+## Phase 3 acceptance-pack
+
+Run:
+
+```bash
+bun test test/phase3-acceptance-pack.test.ts
+bun run bench:phase3-acceptance --json
+bun run test:phase3
+```
+
+Expected:
+
+- acceptance-pack test passes
+- benchmark summarizes every published Phase 3 benchmark slice
+- `acceptance.readiness_status` reports `pass` only when all Phase 3 slices pass
+- `acceptance.phase3_status` matches the aggregated phase outcome
+- `test:phase3` runs the published Phase 3 suites plus the acceptance-pack test
+
 ---
 
 ## 2. Skillpack Loaded

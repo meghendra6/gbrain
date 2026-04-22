@@ -306,6 +306,7 @@ export interface ContextMapReport {
   report_kind: 'structural';
   title: string;
   map_id: string;
+  scope_id: string;
   status: string;
   summary_lines: string[];
   recommended_reads: ContextMapReportRead[];

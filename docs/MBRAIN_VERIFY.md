@@ -940,6 +940,23 @@ Expect:
 - `acceptance.phase6_status` matches the aggregated phase outcome
 - `test:phase6` runs the published Phase 6 suites, starting with candidate scoring
 
+## Phase 6 map-derived candidates
+
+Run:
+
+```bash
+bun test test/map-derived-candidate-service.test.ts test/map-derived-candidate-operations.test.ts test/phase6-map-derived-candidates.test.ts
+bun run bench:phase6-map-derived-candidates --json
+```
+
+Expect:
+
+- ready maps capture `generated_by: map_analysis` candidates with `extraction_kind: inferred`
+- stale maps capture weaker `generated_by: map_analysis` candidates with `extraction_kind: ambiguous`
+- capture writes only inbox candidates and does not mutate the source map entry
+- benchmark reports `map_derived_candidates_correctness` and `map_derived_candidates`
+- `acceptance.phase6_status` matches the local bridge-slice guardrail outcome
+
 ---
 
 ## 2. Skillpack Loaded

@@ -18,6 +18,7 @@ test('memory inbox operations can be built from a dedicated domain module', () =
     'list_memory_candidate_entries',
     'create_memory_candidate_entry',
     'rank_memory_candidate_entries',
+    'capture_map_derived_candidates',
     'advance_memory_candidate_status',
     'reject_memory_candidate_entry',
     'preflight_promote_memory_candidate',
@@ -32,6 +33,7 @@ test('memory inbox operations are registered with CLI hints', () => {
   const get = operations.find((operation) => operation.name === 'get_memory_candidate_entry');
   const list = operations.find((operation) => operation.name === 'list_memory_candidate_entries');
   const rank = operations.find((operation) => operation.name === 'rank_memory_candidate_entries');
+  const captureMapDerived = operations.find((operation) => operation.name === 'capture_map_derived_candidates');
   const advance = operations.find((operation) => operation.name === 'advance_memory_candidate_status');
   const reject = operations.find((operation) => operation.name === 'reject_memory_candidate_entry');
   const preflight = operations.find((operation) => operation.name === 'preflight_promote_memory_candidate');
@@ -43,6 +45,7 @@ test('memory inbox operations are registered with CLI hints', () => {
   expect(get?.cliHints?.name).toBe('get-memory-candidate');
   expect(list?.cliHints?.name).toBe('list-memory-candidates');
   expect(rank?.cliHints?.name).toBe('rank-memory-candidates');
+  expect(captureMapDerived?.cliHints?.name).toBe('capture-map-derived-candidates');
   expect(advance?.cliHints?.name).toBe('advance-memory-candidate-status');
   expect(reject?.cliHints?.name).toBe('reject-memory-candidate');
   expect(preflight?.cliHints?.name).toBe('preflight-promote-memory-candidate');

@@ -6,6 +6,8 @@ import {
   rejectMemoryCandidateEntry,
 } from './services/memory-inbox-service.ts';
 import { rankMemoryCandidateEntries } from './services/memory-candidate-scoring-service.ts';
+import { captureMapDerivedCandidates } from './services/map-derived-candidate-service.ts';
+import { getStructuralContextMapReport } from './services/context-map-report-service.ts';
 import { resolveMemoryCandidateContradiction } from './services/memory-inbox-contradiction-service.ts';
 import { promoteMemoryCandidateEntry } from './services/memory-inbox-promotion-service.ts';
 import { supersedeMemoryCandidateEntry } from './services/memory-inbox-supersession-service.ts';
@@ -364,6 +366,40 @@ export function createMemoryInboxOperations(
     cliHints: { name: 'rank-memory-candidates', aliases: { n: 'limit' } },
   };
 
+  const capture_map_derived_candidates: Operation = {
+    name: 'capture_map_derived_candidates',
+    description: 'Capture context-map recommended reads as bounded inbox candidates without mutating canonical notes.',
+    params: {
+      map_id: { type: 'string', description: 'Optional explicit context-map id' },
+      scope_id: { type: 'string', description: `Optional scope id when selecting the default map (default: ${deps.defaultScopeId})` },
+      limit: { type: 'number', description: 'Optional smaller capture limit; defaults to the report read limit' },
+    },
+    mutating: true,
+    handler: async (ctx, p) => {
+      const mapId = typeof p.map_id === 'string' ? p.map_id : undefined;
+      const scopeId = typeof p.scope_id === 'string' ? p.scope_id : undefined;
+      const limit = p.limit == null ? undefined : normalizeLimit(deps, p.limit);
+      if (ctx.dryRun) {
+        const resolvedScopeId = mapId && !scopeId
+          ? ((await getStructuralContextMapReport(ctx.engine, { map_id: mapId })).report?.scope_id ?? deps.defaultScopeId)
+          : (scopeId ?? deps.defaultScopeId);
+        return {
+          dry_run: true,
+          action: 'capture_map_derived_candidates',
+          map_id: mapId ?? null,
+          scope_id: resolvedScopeId,
+          limit: limit ?? null,
+        };
+      }
+      return captureMapDerivedCandidates(ctx.engine, {
+        map_id: mapId,
+        scope_id: scopeId,
+        limit,
+      });
+    },
+    cliHints: { name: 'capture-map-derived-candidates', aliases: { n: 'limit' } },
+  };
+
   const advance_memory_candidate_status: Operation = {
     name: 'advance_memory_candidate_status',
     description: 'Advance one memory-inbox candidate through the bounded early review lifecycle.',
@@ -643,6 +679,7 @@ export function createMemoryInboxOperations(
     list_memory_candidate_entries,
     create_memory_candidate_entry,
     rank_memory_candidate_entries,
+    capture_map_derived_candidates,
     advance_memory_candidate_status,
     reject_memory_candidate_entry,
     preflight_promote_memory_candidate,

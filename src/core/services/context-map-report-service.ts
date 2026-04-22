@@ -70,6 +70,7 @@ async function buildMapReport(
     report_kind: 'structural',
     title: `${entry.title} Report`,
     map_id: entry.id,
+    scope_id: entry.scope_id,
     status: entry.status,
     summary_lines: [
       `Context map status is ${entry.status}.`,

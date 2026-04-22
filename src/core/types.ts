@@ -659,6 +659,31 @@ export interface PersonalEpisodeLookupRouteResult {
   route: PersonalEpisodeLookupRoute | null;
 }
 
+export type PersonalWriteTargetKind = 'profile_memory' | 'personal_episode';
+
+export interface PersonalWriteTargetRoute {
+  route_kind: 'personal_write_target';
+  target_kind: PersonalWriteTargetKind;
+  scope_id: string;
+  write_path: string[];
+  summary_lines: string[];
+}
+
+export interface PersonalWriteTargetInput {
+  target_kind: PersonalWriteTargetKind;
+  requested_scope?: Exclude<ScopeGateScope, 'unknown'>;
+  query?: string;
+  subject?: string;
+  title?: string;
+}
+
+export interface PersonalWriteTargetResult {
+  selection_reason: string;
+  candidate_count: number;
+  route: PersonalWriteTargetRoute | null;
+  scope_gate: ScopeGateDecisionResult;
+}
+
 export type RetrievalRouteIntent =
   | 'task_resume'
   | 'broad_synthesis'

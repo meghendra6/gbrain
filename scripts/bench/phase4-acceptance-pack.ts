@@ -12,6 +12,7 @@ const BENCHMARKS = [
   { name: 'scope_gate', path: 'scripts/bench/phase4-scope-gate.ts' },
   { name: 'personal_profile_lookup', path: 'scripts/bench/phase4-personal-profile-lookup.ts' },
   { name: 'personal_episode_lookup', path: 'scripts/bench/phase4-personal-episode-lookup.ts' },
+  { name: 'personal_write_target', path: 'scripts/bench/phase4-personal-write-target.ts' },
 ] as const;
 
 const args = new Set(process.argv.slice(2));

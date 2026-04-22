@@ -28,6 +28,7 @@ import { queryStructuralContextMap } from './services/context-map-query-service.
 import { getStructuralContextMapReport } from './services/context-map-report-service.ts';
 import { DEFAULT_PERSONAL_EPISODE_SCOPE_ID, getPersonalEpisodeLookupRoute } from './services/personal-episode-lookup-route-service.ts';
 import { DEFAULT_PROFILE_MEMORY_SCOPE_ID, getPersonalProfileLookupRoute } from './services/personal-profile-lookup-route-service.ts';
+import { selectPersonalWriteTarget } from './services/personal-write-target-service.ts';
 import { getPrecisionLookupRoute } from './services/precision-lookup-route-service.ts';
 import { evaluateScopeGate } from './services/scope-gate-service.ts';
 import { selectRetrievalRoute } from './services/retrieval-route-selector-service.ts';
@@ -2380,6 +2381,38 @@ const get_personal_episode_lookup_route: Operation = {
   cliHints: { name: 'personal-episode-lookup-route' },
 };
 
+const select_personal_write_target: Operation = {
+  name: 'select_personal_write_target',
+  description: 'Select the safe personal durable-memory target after scope-gate preflight.',
+  params: {
+    target_kind: {
+      type: 'string',
+      required: true,
+      description: 'One of profile_memory or personal_episode',
+      enum: ['profile_memory', 'personal_episode'],
+    },
+    requested_scope: { type: 'string', description: 'Optional explicit scope override', enum: ['work', 'personal', 'mixed'] },
+    query: { type: 'string', description: 'Optional plain-text request used for scope classification' },
+    subject: { type: 'string', description: 'Optional profile-memory subject when target_kind is profile_memory' },
+    title: { type: 'string', description: 'Optional personal-episode title when target_kind is personal_episode' },
+  },
+  handler: async (ctx, p) => {
+    const targetKind = String(p.target_kind);
+    if (targetKind !== 'profile_memory' && targetKind !== 'personal_episode') {
+      throw new OperationError('invalid_params', 'target_kind must be one of profile_memory or personal_episode.');
+    }
+
+    return selectPersonalWriteTarget(ctx.engine, {
+      target_kind: targetKind as any,
+      requested_scope: typeof p.requested_scope === 'string' ? p.requested_scope as any : undefined,
+      query: typeof p.query === 'string' ? p.query : undefined,
+      subject: typeof p.subject === 'string' ? p.subject : undefined,
+      title: typeof p.title === 'string' ? p.title : undefined,
+    });
+  },
+  cliHints: { name: 'personal-write-target' },
+};
+
 const evaluate_scope_gate: Operation = {
   name: 'evaluate_scope_gate',
   description: 'Evaluate the deterministic scope gate for the current published retrieval stack.',
@@ -3062,7 +3095,7 @@ export const operations: Operation[] = [
   // Structural graph
   get_note_structural_neighbors, find_note_structural_path,
   // Persisted context maps
-  build_context_map, get_context_map_entry, list_context_map_entries, get_context_map_report, get_context_map_explanation, query_context_map, find_context_map_path, get_broad_synthesis_route, get_precision_lookup_route, get_personal_profile_lookup_route, get_personal_episode_lookup_route, evaluate_scope_gate, select_retrieval_route, get_workspace_system_card, get_workspace_project_card, get_workspace_orientation_bundle, get_workspace_corpus_card,
+  build_context_map, get_context_map_entry, list_context_map_entries, get_context_map_report, get_context_map_explanation, query_context_map, find_context_map_path, get_broad_synthesis_route, get_precision_lookup_route, get_personal_profile_lookup_route, get_personal_episode_lookup_route, select_personal_write_target, evaluate_scope_gate, select_retrieval_route, get_workspace_system_card, get_workspace_project_card, get_workspace_orientation_bundle, get_workspace_corpus_card,
   // Context atlas registry
   build_context_atlas, get_context_atlas_entry, list_context_atlas_entries, select_context_atlas_entry, get_context_atlas_overview, get_context_atlas_report, get_atlas_orientation_card, get_atlas_orientation_bundle,
   // Operational memory

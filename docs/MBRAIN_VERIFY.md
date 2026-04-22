@@ -678,6 +678,24 @@ Expected:
 - `acceptance.readiness_status` reports `pass` or `fail` from the local guardrails
 - `acceptance.phase4_status` matches the local guardrail outcome
 
+## Phase 4 personal-write-target
+
+Run:
+
+```bash
+bun test test/personal-write-target-service.test.ts test/personal-write-target-operations.test.ts test/phase4-personal-write-target.test.ts
+bun run bench:phase4-personal-write-target --json
+```
+
+Expected:
+
+- `personal-write-target` stays available through the shared operation surface
+- `profile_memory` and `personal_episode` targets both require personal-scope approval
+- deny and defer cases disclose the scope-gate reason instead of returning a target
+- benchmark reports `personal_write_target` and `personal_write_target_correctness`
+- `acceptance.readiness_status` reports `pass` or `fail` from the local guardrails
+- `acceptance.phase4_status` matches the local guardrail outcome
+
 ## Phase 4 acceptance-pack
 
 Run:

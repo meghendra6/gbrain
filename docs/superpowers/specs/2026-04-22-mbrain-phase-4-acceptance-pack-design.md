@@ -7,7 +7,7 @@ that can be used for PR review and rollout checks.
 
 ## Scope
 
-- aggregate `scope_gate`, `personal_profile_lookup`, and `personal_episode_lookup` benchmark outcomes
+- aggregate `scope_gate`, `personal_profile_lookup`, `personal_episode_lookup`, and `personal_write_target` benchmark outcomes
 - expose one `phase4-acceptance-pack` benchmark script
 - keep the aggregation deterministic and local-only
 - add verification coverage and package scripts

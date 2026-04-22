@@ -25,7 +25,7 @@ export async function evaluateScopeGate(
   return {
     resolved_scope: scope.resolved_scope,
     policy,
-    decision_reason: policy === 'deny' && scope.resolved_scope !== 'work' && input.intent !== 'task_resume'
+    decision_reason: policy === 'deny' && input.intent !== 'task_resume'
       ? 'unsupported_scope_intent'
       : scope.decision_reason,
     summary_lines: buildSummaryLines(input.intent, scope.resolved_scope, policy),

@@ -17,6 +17,7 @@ describe('phase4 acceptance-pack benchmark', () => {
     expect(payload.benchmarks.map((benchmark: any) => benchmark.name).sort()).toEqual([
       'personal_episode_lookup',
       'personal_profile_lookup',
+      'personal_write_target',
       'scope_gate',
     ]);
     expect(payload.acceptance.readiness_status).toBe('pass');

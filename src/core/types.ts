@@ -802,6 +802,7 @@ export interface MemoryCandidateFilters {
   status?: MemoryCandidateStatus;
   candidate_type?: MemoryCandidateType;
   target_object_type?: MemoryCandidateTargetObjectType;
+  target_object_id?: string;
   limit?: number;
   offset?: number;
 }

@@ -5,9 +5,9 @@ import { fileURLToPath } from 'url';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-describe('phase7 acceptance-pack benchmark', () => {
-  test('--json prints a phase7 acceptance summary shape', () => {
-    const proc = spawnSync(['bun', 'run', 'scripts/bench/phase7-acceptance-pack.ts', '--json'], {
+describe('phase7 historical-validity benchmark', () => {
+  test('--json prints a phase7 historical-validity benchmark report shape', () => {
+    const proc = spawnSync(['bun', 'run', 'scripts/bench/phase7-historical-validity.ts', '--json'], {
       cwd: repoRoot,
       stdout: 'pipe',
       stderr: 'pipe',
@@ -17,9 +17,9 @@ describe('phase7 acceptance-pack benchmark', () => {
     const payload = JSON.parse(new TextDecoder().decode(proc.stdout));
 
     expect(payload.phase).toBe('phase7');
-    expect(Array.isArray(payload.benchmarks)).toBe(true);
-    expect(payload.benchmarks.map((benchmark: any) => benchmark.name)).toEqual([
-      'canonical_handoff',
+    expect(Array.isArray(payload.workloads)).toBe(true);
+    expect(payload.workloads.map((workload: any) => workload.name)).toEqual([
+      'historical_validity_correctness',
       'historical_validity',
     ]);
     expect(payload.acceptance.readiness_status).toBe('pass');

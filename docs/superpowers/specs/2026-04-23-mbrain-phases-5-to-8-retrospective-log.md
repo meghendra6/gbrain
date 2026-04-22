@@ -50,29 +50,30 @@ Carry-forward execution rules for Phase 7:
 
 ## Phase 7
 
-Current slice: `7.1 canonical handoff`
-
 What worked:
-- Keeping the slice strictly at `explicit handoff record only` was the right boundary. We proved deliberate canonical intent without mutating curated notes, procedures, profile memory, or personal episodes.
-- Reusing Phase 5 promotion state avoided inventing a second approval ladder. `promoted` stayed necessary-but-not-sufficient, and the new handoff record became the explicit second step.
-- Adding the Phase 7 acceptance pack with the first slice prevented a repeat of the early Phase 6 drift where verification was present but too fragmented.
+- Splitting Phase 7 into `explicit handoff` and `historical validity` was the right boundary. The implementation never had to guess whether canonical intent existed, and it never had to fold stale-evidence logic into the handoff write path.
+- Reusing Phase 5 governance state kept the phase additive. `promoted` remained necessary-but-not-sufficient, handoff became the explicit intent record, and historical validity stayed a read-only guard.
+- Adding the Phase 7 acceptance pack early made phase closure straightforward. By the time historical validity landed, the pack only needed one additional slice instead of a last-minute test/benchmark scramble.
+- Reviewer-driven parity work paid off. Phase 7 now has explicit SQLite/PGLite coverage for handoff persistence and target-bound peer filtering, with Postgres parity guarded by the existing `DATABASE_URL` pattern.
 
 What failed or drifted:
-- The first pass under-specified backend consistency. Duplicate handoff conflicts and empty-string filters behaved differently across engines until review forced explicit alignment.
-- The first pass also treated `reviewed_at` validation too loosely. Invalid `Date` objects could still leak low-level runtime failures even though string validation existed.
-- Slice-local tests initially overfit SQLite. That would have left PGLite/Postgres handoff persistence effectively unverified.
+- The first pass under-specified backend consistency. Duplicate handoff conflicts, empty-string filters, and the new `target_object_id` peer filter all needed explicit cross-backend hardening after review.
+- Optional `Date` inputs were easy to validate only halfway. Both handoff and historical-validity paths initially accepted invalid `Date` objects that would have leaked runtime behavior or silently skipped safety checks.
+- Documentation drift reappeared at the slice level. The historical-validity design kept a stale `refresh_evidence` fallback even after the plan and code had narrowed the contract.
+- Early parity tests overfit ordering. Filter tests accidentally asserted one backend-specific row order instead of the actual contract, which is membership plus correct scoping.
 
 Valid review feedback that changed implementation:
 - Service-layer validation needed to reject invalid `Date` objects, not just malformed ISO strings.
 - Duplicate handoff handling had to converge across SQLite, PGLite, and Postgres instead of relying on backend-specific conflict behavior.
 - `list_canonical_handoff_entries` needed explicit non-empty scope validation, and engine filter checks needed to stop treating empty strings as “no filter”.
-- Phase 7 needed real cross-backend persistence coverage, not only SQLite service/operation/benchmark coverage.
+- Historical-validity peer comparison needed to stay same-scope and same-target, and the fallback contract needed to stay limited to `none | supersede | unresolved_conflict`.
+- Phase 7 needed real cross-backend coverage for both handoff persistence and the new `target_object_id` peer filter instead of SQLite-only service tests.
 
-Carry-forward execution rules for the remaining Phase 7 work:
-- Any new canonical-adjacent slice must validate optional timestamp fields for both string and `Date` inputs before the engine layer.
-- When a read surface introduces optional filters, test the empty-string path explicitly so invalid scoped reads cannot widen silently.
-- For any new persistence surface, add at least one SQLite/PGLite/Postgres integration test in the same slice instead of deferring backend coverage.
-- Keep the canonical boundary explicit: record intent first, then add historical validity or stale-control logic as separate slices rather than folding them into one write path.
+Carry-forward execution rules for Phase 8:
+- Any new evaluation or maintenance slice that accepts optional time inputs must validate both ISO strings and `Date` objects before calculating staleness or regressions.
+- When a slice introduces or extends filters, add backend parity tests for the new filter in the same slice. Do not rely on one backend plus benchmark coverage.
+- Keep benchmark contracts narrow and synchronized with the design docs; if a fallback or recommendation is not part of the roadmap slice, do not let it linger in docs or outputs.
+- Prefer contract assertions over ordering assertions in parity tests unless ordering is itself the published behavior.
 
 ## Phase 8
 

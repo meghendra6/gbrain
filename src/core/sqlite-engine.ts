@@ -1569,6 +1569,10 @@ export class SQLiteEngine implements BrainEngine {
       clauses.push('target_object_type = ?');
       params.push(filters.target_object_type);
     }
+    if (filters?.target_object_id !== undefined) {
+      clauses.push('target_object_id = ?');
+      params.push(filters.target_object_id);
+    }
 
     params.push(limit);
     params.push(offset);

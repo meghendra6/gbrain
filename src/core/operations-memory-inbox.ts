@@ -11,6 +11,7 @@ import { captureMapDerivedCandidates } from './services/map-derived-candidate-se
 import { getStructuralContextMapReport } from './services/context-map-report-service.ts';
 import { buildMemoryCandidateReviewBacklog } from './services/memory-candidate-dedup-service.ts';
 import { recordCanonicalHandoff } from './services/canonical-handoff-service.ts';
+import { assessHistoricalValidity } from './services/historical-validity-service.ts';
 import { resolveMemoryCandidateContradiction } from './services/memory-inbox-contradiction-service.ts';
 import { promoteMemoryCandidateEntry } from './services/memory-inbox-promotion-service.ts';
 import { supersedeMemoryCandidateEntry } from './services/memory-inbox-supersession-service.ts';
@@ -546,6 +547,33 @@ export function createMemoryInboxOperations(
     cliHints: { name: 'list-canonical-handoffs', aliases: { n: 'limit' } },
   };
 
+  const assess_historical_validity: Operation = {
+    name: 'assess_historical_validity',
+    description: 'Assess whether a handed-off promoted candidate still represents current evidence for canonical consolidation.',
+    params: {
+      candidate_id: { type: 'string', required: true, description: 'Promoted memory candidate id' },
+    },
+    handler: async (ctx, p) => {
+      if (typeof p.candidate_id !== 'string' || p.candidate_id.trim().length === 0) {
+        throw invalidParams(deps, 'candidate_id must be a non-empty string');
+      }
+      try {
+        return await assessHistoricalValidity(ctx.engine, {
+          candidate_id: p.candidate_id,
+        });
+      } catch (error) {
+        if (error instanceof MemoryInboxServiceError) {
+          if (error.code === 'memory_candidate_not_found') {
+            throw new deps.OperationError('memory_candidate_not_found', error.message);
+          }
+          throw new deps.OperationError('invalid_params', error.message);
+        }
+        throw error;
+      }
+    },
+    cliHints: { name: 'assess-historical-validity' },
+  };
+
   const advance_memory_candidate_status: Operation = {
     name: 'advance_memory_candidate_status',
     description: 'Advance one memory-inbox candidate through the bounded early review lifecycle.',
@@ -829,6 +857,7 @@ export function createMemoryInboxOperations(
     list_memory_candidate_review_backlog,
     record_canonical_handoff,
     list_canonical_handoff_entries,
+    assess_historical_validity,
     advance_memory_candidate_status,
     reject_memory_candidate_entry,
     preflight_promote_memory_candidate,

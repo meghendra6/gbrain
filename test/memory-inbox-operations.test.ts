@@ -22,6 +22,7 @@ test('memory inbox operations can be built from a dedicated domain module', () =
     'list_memory_candidate_review_backlog',
     'record_canonical_handoff',
     'list_canonical_handoff_entries',
+    'assess_historical_validity',
     'advance_memory_candidate_status',
     'reject_memory_candidate_entry',
     'preflight_promote_memory_candidate',
@@ -40,6 +41,7 @@ test('memory inbox operations are registered with CLI hints', () => {
   const reviewBacklog = operations.find((operation) => operation.name === 'list_memory_candidate_review_backlog');
   const recordCanonicalHandoff = operations.find((operation) => operation.name === 'record_canonical_handoff');
   const listCanonicalHandoffs = operations.find((operation) => operation.name === 'list_canonical_handoff_entries');
+  const assessHistoricalValidity = operations.find((operation) => operation.name === 'assess_historical_validity');
   const advance = operations.find((operation) => operation.name === 'advance_memory_candidate_status');
   const reject = operations.find((operation) => operation.name === 'reject_memory_candidate_entry');
   const preflight = operations.find((operation) => operation.name === 'preflight_promote_memory_candidate');
@@ -55,6 +57,7 @@ test('memory inbox operations are registered with CLI hints', () => {
   expect(reviewBacklog?.cliHints?.name).toBe('list-memory-candidate-review-backlog');
   expect(recordCanonicalHandoff?.cliHints?.name).toBe('record-canonical-handoff');
   expect(listCanonicalHandoffs?.cliHints?.name).toBe('list-canonical-handoffs');
+  expect(assessHistoricalValidity?.cliHints?.name).toBe('assess-historical-validity');
   expect(advance?.cliHints?.name).toBe('advance-memory-candidate-status');
   expect(reject?.cliHints?.name).toBe('reject-memory-candidate');
   expect(preflight?.cliHints?.name).toBe('preflight-promote-memory-candidate');

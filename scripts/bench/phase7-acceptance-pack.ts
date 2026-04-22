@@ -10,6 +10,7 @@ interface Phase7BenchmarkSummary {
 
 const BENCHMARKS = [
   { name: 'canonical_handoff', path: 'scripts/bench/phase7-canonical-handoff.ts' },
+  { name: 'historical_validity', path: 'scripts/bench/phase7-historical-validity.ts' },
 ] as const;
 
 const args = new Set(process.argv.slice(2));

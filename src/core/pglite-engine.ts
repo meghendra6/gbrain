@@ -1255,6 +1255,10 @@ export class PGLiteEngine implements BrainEngine {
       params.push(filters.target_object_type);
       clauses.push(`target_object_type = $${params.length}`);
     }
+    if (filters?.target_object_id !== undefined) {
+      params.push(filters.target_object_id);
+      clauses.push(`target_object_id = $${params.length}`);
+    }
 
     params.push(limit);
     params.push(offset);

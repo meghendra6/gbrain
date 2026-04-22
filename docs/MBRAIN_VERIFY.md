@@ -1186,6 +1186,26 @@ Expected:
 - benchmark reports `canonical_handoff_correctness` and `canonical_handoff`
 - `acceptance.phase7_status` matches the local handoff-slice guardrail outcome
 
+## Phase 7 historical validity
+
+Run:
+
+```bash
+bun test test/historical-validity-service.test.ts test/historical-validity-engine.test.ts test/historical-validity-operations.test.ts test/phase7-historical-validity.test.ts test/memory-inbox-operations.test.ts
+bun run bench:phase7-historical-validity --json
+```
+
+Expected:
+
+- historical validity stays read-only and never mutates inbox or canonical target state
+- `target_object_id` peer matching behaves consistently across SQLite, PGLite, and Postgres when `DATABASE_URL` is configured
+- same-scope competing candidates are detected only when they share the exact canonical target binding
+- stale review windows produce `defer` without widening the fallback contract
+- newer promoted peers recommend `supersede`, and staged competing peers recommend `unresolved_conflict`
+- `assess-historical-validity` stays available through the shared operation surface
+- benchmark reports `historical_validity_correctness` and `historical_validity`
+- `acceptance.phase7_status` matches the local historical-validity guardrail outcome
+
 ## Phase 7 acceptance-pack
 
 Run:

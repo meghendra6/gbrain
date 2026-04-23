@@ -164,10 +164,10 @@ describe('S6 — candidate lifecycle → promotion requires provenance', () => {
   });
 
   /**
-   * I4 at the DB/engine level — all three engines (SQLite, PGLite, Postgres)
-   * refuse to promote a candidate whose source_refs is empty via a
-   * `json(b)_array_length(source_refs) > 0` predicate on the promotion UPDATE.
-   * Defense-in-depth behind the service-layer preflight check.
+   * I4 at the DB/engine level — the promotion CAS path must refuse candidates
+   * whose source_refs contains no usable provenance, including empty arrays
+   * and whitespace-only entries. This is defense-in-depth behind the
+   * service-layer preflight check.
    */
   test(
     'engine.promoteMemoryCandidateEntry refuses empty source_refs (I4 at engine level)',
@@ -190,6 +190,29 @@ describe('S6 — candidate lifecycle → promotion requires provenance', () => {
         // candidate with no provenance. Today it does not — so this test
         // currently passes the `expect(promoted).toBeNull()` assertion only
         // once the engine-level check is added.
+        expect(promoted).toBeNull();
+      } finally {
+        await handle.teardown();
+      }
+    },
+  );
+
+  test(
+    'engine.promoteMemoryCandidateEntry refuses whitespace-only source_refs (I4 at engine level)',
+    async () => {
+      const handle = await allocateSqliteBrain('s06-engine-bypass-blank');
+
+      try {
+        await seedMemoryCandidate(handle.engine, {
+          id: 'engine-bypass-blank',
+          status: 'staged_for_review',
+          source_refs: ['   '],
+        });
+
+        const promoted = await handle.engine.promoteMemoryCandidateEntry('engine-bypass-blank', {
+          expected_current_status: 'staged_for_review',
+        });
+
         expect(promoted).toBeNull();
       } finally {
         await handle.teardown();

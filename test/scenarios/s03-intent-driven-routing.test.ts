@@ -9,6 +9,7 @@
 import { describe, expect, test } from 'bun:test';
 import { allocateSqliteBrain, seedWorkTaskThread } from './helpers.ts';
 import { selectRetrievalRoute } from '../../src/core/services/retrieval-route-selector-service.ts';
+import { buildStructuralContextMapEntry } from '../../src/core/services/context-map-service.ts';
 
 describe('S3 — intent-driven routing', () => {
   test('each of the six intents produces a distinct route_kind on a fully-populated brain', async () => {
@@ -42,6 +43,7 @@ describe('S3 — intent-driven routing', () => {
         content_hash: 'hash-scenario-s3',
         extractor_version: 'test',
       });
+      await buildStructuralContextMapEntry(handle.engine);
 
       await handle.engine.upsertProfileMemoryEntry({
         id: 'profile-alex',
@@ -80,6 +82,12 @@ describe('S3 — intent-driven routing', () => {
       });
       expect(precision.route?.route_kind).toBe('precision_lookup');
 
+      const broadSynthesis = await selectRetrievalRoute(handle.engine, {
+        intent: 'broad_synthesis',
+        query: 'scenario',
+      });
+      expect(broadSynthesis.route?.route_kind).toBe('broad_synthesis');
+
       const personalProfile = await selectRetrievalRoute(handle.engine, {
         intent: 'personal_profile_lookup',
         subject: 'alex',
@@ -93,6 +101,15 @@ describe('S3 — intent-driven routing', () => {
         requested_scope: 'personal',
       });
       expect(personalEpisode.route?.route_kind).toBe('personal_episode_lookup');
+
+      const mixedScope = await selectRetrievalRoute(handle.engine, {
+        intent: 'mixed_scope_bridge',
+        requested_scope: 'mixed',
+        query: 'scenario',
+        subject: 'alex',
+        personal_route_kind: 'profile',
+      });
+      expect(mixedScope.route?.route_kind).toBe('mixed_scope_bridge');
     } finally {
       await handle.teardown();
     }

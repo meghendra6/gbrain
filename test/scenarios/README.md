@@ -27,7 +27,7 @@ for the full spec (14 scenarios + invariant catalog + rollout plan).
 | S4  | `s04-personal-scope-deny.test.ts` | I5 | ✅ green |
 | S5  | `s05-mixed-intent-decomposition.test.ts` | L1, I5 | ✅ green + 1 `todo` (L1 classifier gap) |
 | S6  | `s06-promotion-requires-provenance.test.ts` | I4, G1, L6 | ✅ green (includes engine-level I4 fix) |
-| S7  | `s07-supersession-cross-engine.test.ts` | I7, L5 | ✅ green on SQLite + PGLite |
+| S7  | `s07-supersession-cross-engine.test.ts` | I7, L5 | ✅ green on SQLite + PGLite, Postgres when `DATABASE_URL` is set |
 | S8  | `s08-rejection-preserves-provenance.test.ts` | G2, L5 | ✅ green |
 | S9  | `s09-curated-over-map.test.ts` | L2 | 🔲 2 `todo` (ranking step not implemented) |
 | S10 | `s10-precision-degradation.test.ts` | L3 | ✅ green |
@@ -44,9 +44,9 @@ Legend:
 
 - **I4 engine-level enforcement**: `promoteMemoryCandidateEntry` on all three
   engines (SQLite / PGLite / Postgres) now refuses to promote a candidate
-  whose `source_refs` is empty, via a `json(b)_array_length(source_refs) > 0`
-  predicate in the promotion UPDATE. Defense-in-depth behind the service-layer
-  preflight check so direct engine callers cannot bypass I4.
+  unless `source_refs` contains at least one non-blank provenance entry.
+  Defense-in-depth behind the service-layer preflight check so direct engine
+  callers cannot bypass I4.
 
 ## Deferred follow-ups
 

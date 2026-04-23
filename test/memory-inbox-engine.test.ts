@@ -283,6 +283,51 @@ for (const createHarness of [createSqliteHarness, createPgliteHarness]) {
       await harness.cleanup();
     }
   });
+
+  test(`${createHarness.name} refuses promotion when provenance refs are blank-only`, async () => {
+    const harness = await createHarness();
+    const scopeId = 'workspace:default';
+    const id = `memory-candidate:${scopeId}:${harness.label}:blank-provenance`;
+
+    try {
+      await harness.engine.createMemoryCandidateEntry({
+        id,
+        scope_id: scopeId,
+        candidate_type: 'fact',
+        proposed_content: 'Blank-only provenance must not be promotable.',
+        source_refs: ['   '],
+        generated_by: 'manual',
+        extraction_kind: 'manual',
+        confidence_score: 0.95,
+        importance_score: 0.8,
+        recurrence_score: 0.2,
+        sensitivity: 'work',
+        status: 'captured',
+        target_object_type: 'curated_note',
+        target_object_id: 'concepts/note-manifest',
+        reviewed_at: null,
+        review_reason: null,
+      });
+
+      expect((await harness.engine.updateMemoryCandidateEntryStatus(id, {
+        status: 'candidate',
+        reviewed_at: new Date('2026-04-22T06:00:00.000Z'),
+      }))?.status).toBe('candidate');
+      expect((await harness.engine.updateMemoryCandidateEntryStatus(id, {
+        status: 'staged_for_review',
+        reviewed_at: new Date('2026-04-22T06:05:00.000Z'),
+      }))?.status).toBe('staged_for_review');
+
+      expect(await harness.engine.promoteMemoryCandidateEntry(id, {
+        expected_current_status: 'staged_for_review',
+        reviewed_at: new Date('2026-04-22T06:16:00.000Z'),
+        review_reason: 'Blank provenance must not pass the engine CAS guard.',
+      })).toBeNull();
+      expect((await harness.engine.getMemoryCandidateEntry(id))?.status).toBe('staged_for_review');
+    } finally {
+      await harness.cleanup();
+    }
+  });
 }
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -310,6 +355,57 @@ if (databaseUrl) {
       }
       await cleanupEngine.deleteMemoryCandidateEntry(id).catch(() => undefined);
       await reopened.disconnect();
+      await engine.disconnect().catch(() => undefined);
+    }
+  });
+
+  test('postgres refuses promotion when provenance refs are blank-only', async () => {
+    const scopeId = 'workspace:default';
+    const id = `memory-candidate:${scopeId}:postgres:blank-provenance:${Date.now()}`;
+    const engine = new PostgresEngine();
+
+    try {
+      await engine.connect({ engine: 'postgres', database_url: databaseUrl });
+      await engine.initSchema();
+      await engine.createMemoryCandidateEntry({
+        id,
+        scope_id: scopeId,
+        candidate_type: 'fact',
+        proposed_content: 'Blank-only provenance must not be promotable.',
+        source_refs: ['   '],
+        generated_by: 'manual',
+        extraction_kind: 'manual',
+        confidence_score: 0.95,
+        importance_score: 0.8,
+        recurrence_score: 0.2,
+        sensitivity: 'work',
+        status: 'captured',
+        target_object_type: 'curated_note',
+        target_object_id: 'concepts/note-manifest',
+        reviewed_at: null,
+        review_reason: null,
+      });
+
+      expect((await engine.updateMemoryCandidateEntryStatus(id, {
+        status: 'candidate',
+        reviewed_at: new Date('2026-04-22T06:00:00.000Z'),
+      }))?.status).toBe('candidate');
+      expect((await engine.updateMemoryCandidateEntryStatus(id, {
+        status: 'staged_for_review',
+        reviewed_at: new Date('2026-04-22T06:05:00.000Z'),
+      }))?.status).toBe('staged_for_review');
+
+      expect(await engine.promoteMemoryCandidateEntry(id, {
+        expected_current_status: 'staged_for_review',
+        reviewed_at: new Date('2026-04-22T06:16:00.000Z'),
+        review_reason: 'Blank provenance must not pass the engine CAS guard.',
+      })).toBeNull();
+      expect((await engine.getMemoryCandidateEntry(id))?.status).toBe('staged_for_review');
+    } finally {
+      if (!(engine as any)._sql) {
+        await engine.connect({ engine: 'postgres', database_url: databaseUrl });
+      }
+      await engine.deleteMemoryCandidateEntry(id).catch(() => undefined);
       await engine.disconnect().catch(() => undefined);
     }
   });

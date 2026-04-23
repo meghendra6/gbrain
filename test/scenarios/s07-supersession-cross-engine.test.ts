@@ -6,9 +6,10 @@
  * L5 (explicit supersede, not silent deletion).
  *
  * The supersession invariant: updating a candidate's status to 'superseded'
- * without first recording a supersession link must fail. This is enforced
- * via a plpgsql trigger on Postgres/PGLite and via hand-coded logic on
- * SQLite. Both paths must reject the same way.
+ * without first recording a supersession link must fail, even for callers
+ * that bypass the service layer and issue a raw status UPDATE. This is
+ * enforced via a plpgsql trigger on Postgres/PGLite and via hand-coded
+ * trigger logic on SQLite. Both paths must reject the same way.
  */
 
 import { describe, expect, test } from 'bun:test';
@@ -17,24 +18,36 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { SQLiteEngine } from '../../src/core/sqlite-engine.ts';
 import { PGLiteEngine } from '../../src/core/pglite-engine.ts';
+import { PostgresEngine } from '../../src/core/postgres-engine.ts';
 import { supersedeMemoryCandidateEntry } from '../../src/core/services/memory-inbox-supersession-service.ts';
-import type { BrainEngine } from '../../src/core/engine.ts';
 import { seedMemoryCandidate } from './helpers.ts';
 import { promoteMemoryCandidateEntry } from '../../src/core/services/memory-inbox-promotion-service.ts';
 
-async function seedTwoPromotedCandidates(engine: BrainEngine, prefix: string): Promise<void> {
+type ScenarioEngine = SQLiteEngine | PGLiteEngine | PostgresEngine;
+
+function uniqueScenarioId(prefix: string): string {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+async function seedTwoPromotedCandidates(
+  engine: ScenarioEngine,
+  prefix: string,
+): Promise<{ oldId: string; newId: string }> {
+  const oldId = `${prefix}-old`;
+  const newId = `${prefix}-new`;
   await seedMemoryCandidate(engine, {
-    id: `${prefix}-old`,
+    id: oldId,
     status: 'staged_for_review',
     target_object_id: `concepts/${prefix}`,
   });
   await seedMemoryCandidate(engine, {
-    id: `${prefix}-new`,
+    id: newId,
     status: 'staged_for_review',
     target_object_id: `concepts/${prefix}`,
   });
-  await promoteMemoryCandidateEntry(engine, { id: `${prefix}-old` });
-  await promoteMemoryCandidateEntry(engine, { id: `${prefix}-new` });
+  await promoteMemoryCandidateEntry(engine, { id: oldId });
+  await promoteMemoryCandidateEntry(engine, { id: newId });
+  return { oldId, newId };
 }
 
 async function allocateSqlite(label: string): Promise<{ engine: SQLiteEngine; teardown: () => Promise<void> }> {
@@ -65,30 +78,106 @@ async function allocatePglite(label: string): Promise<{ engine: PGLiteEngine; te
   };
 }
 
+const databaseUrl = process.env.DATABASE_URL;
+
+async function allocatePostgres(_label: string): Promise<{ engine: PostgresEngine; teardown: () => Promise<void> }> {
+  if (!databaseUrl) {
+    throw new Error('DATABASE_URL is not configured');
+  }
+
+  const engine = new PostgresEngine();
+  await engine.connect({ engine: 'postgres', database_url: databaseUrl });
+  await engine.initSchema();
+  return {
+    engine,
+    teardown: async () => {
+      await engine.disconnect();
+    },
+  };
+}
+
+async function expectRawSupersededTransitionToFail(engine: ScenarioEngine, candidateId: string): Promise<void> {
+  const invariantPattern = /superseded candidate requires a supersession link record/;
+
+  if (engine instanceof SQLiteEngine) {
+    const db = (engine as any).database;
+    expect(() => {
+      db.query(`
+        UPDATE memory_candidate_entries
+        SET status = 'superseded'
+        WHERE id = ?
+      `).run(candidateId);
+    }).toThrow(invariantPattern);
+    return;
+  }
+
+  if (engine instanceof PGLiteEngine) {
+    const db = (engine as any).db;
+    await expect(db.query(
+      `UPDATE memory_candidate_entries
+       SET status = 'superseded'
+       WHERE id = $1`,
+      [candidateId],
+    )).rejects.toThrow(invariantPattern);
+    return;
+  }
+
+  await expect(
+    engine.sql`
+      UPDATE memory_candidate_entries
+      SET status = 'superseded'
+      WHERE id = ${candidateId}
+    `,
+  ).rejects.toThrow(invariantPattern);
+}
+
 // PGLite cold-starts are ~2-4s (instantiation + 19 migrations). Under full
 // suite load these can exceed the default 5s test timeout. Per-test timeout
 // override is the pattern PR #36 applied to phase8 bench tests.
 const ENGINE_COLD_START_BUDGET_MS = 30_000;
 
-function runEngineSuite(label: 'sqlite' | 'pglite', allocate: (label: string) => Promise<{ engine: BrainEngine; teardown: () => Promise<void> }>) {
+function runEngineSuite(
+  label: 'sqlite' | 'pglite' | 'postgres',
+  allocate: (label: string) => Promise<{ engine: ScenarioEngine; teardown: () => Promise<void> }>,
+) {
   describe(`S7 [${label}] — supersession invariant`, () => {
     test('recording a supersession link succeeds and flips old status to superseded', async () => {
       const handle = await allocate(`succ-${label}`);
       try {
-        await seedTwoPromotedCandidates(handle.engine, 'basic');
+        const ids = await seedTwoPromotedCandidates(handle.engine, uniqueScenarioId(`basic-${label}`));
 
         const result = await supersedeMemoryCandidateEntry(handle.engine, {
-          superseded_candidate_id: 'basic-old',
-          replacement_candidate_id: 'basic-new',
+          superseded_candidate_id: ids.oldId,
+          replacement_candidate_id: ids.newId,
           review_reason: 'Newer claim replaces older one',
         });
 
         expect(result.supersession_entry).not.toBeNull();
-        expect(result.supersession_entry!.superseded_candidate_id).toBe('basic-old');
-        expect(result.supersession_entry!.replacement_candidate_id).toBe('basic-new');
+        expect(result.supersession_entry!.superseded_candidate_id).toBe(ids.oldId);
+        expect(result.supersession_entry!.replacement_candidate_id).toBe(ids.newId);
 
-        const superseded = await handle.engine.getMemoryCandidateEntry('basic-old');
+        const superseded = await handle.engine.getMemoryCandidateEntry(ids.oldId);
         expect(superseded?.status).toBe('superseded');
+      } finally {
+        await handle.teardown();
+      }
+    }, ENGINE_COLD_START_BUDGET_MS);
+
+    test('raw status update to superseded without a supersession link is rejected', async () => {
+      const handle = await allocate(`illegal-${label}`);
+      const candidateId = uniqueScenarioId(`illegal-${label}`);
+
+      try {
+        await seedMemoryCandidate(handle.engine, {
+          id: candidateId,
+          status: 'staged_for_review',
+        });
+        await promoteMemoryCandidateEntry(handle.engine, { id: candidateId });
+
+        await expectRawSupersededTransitionToFail(handle.engine, candidateId);
+
+        const stored = await handle.engine.getMemoryCandidateEntry(candidateId);
+        expect(stored?.status).toBe('promoted');
       } finally {
         await handle.teardown();
       }
@@ -96,17 +185,18 @@ function runEngineSuite(label: 'sqlite' | 'pglite', allocate: (label: string) =>
 
     test('self-supersession (same id as both sides) is rejected', async () => {
       const handle = await allocate(`self-${label}`);
+      const candidateId = uniqueScenarioId(`self-${label}`);
       try {
         await seedMemoryCandidate(handle.engine, {
-          id: 'self-cand',
+          id: candidateId,
           status: 'staged_for_review',
         });
-        await promoteMemoryCandidateEntry(handle.engine, { id: 'self-cand' });
+        await promoteMemoryCandidateEntry(handle.engine, { id: candidateId });
 
         await expect(
           supersedeMemoryCandidateEntry(handle.engine, {
-            superseded_candidate_id: 'self-cand',
-            replacement_candidate_id: 'self-cand',
+            superseded_candidate_id: candidateId,
+            replacement_candidate_id: candidateId,
           }),
         ).rejects.toThrow();
       } finally {
@@ -118,3 +208,10 @@ function runEngineSuite(label: 'sqlite' | 'pglite', allocate: (label: string) =>
 
 runEngineSuite('sqlite', allocateSqlite);
 runEngineSuite('pglite', allocatePglite);
+if (databaseUrl) {
+  runEngineSuite('postgres', allocatePostgres);
+} else {
+  describe('S7 [postgres] — supersession invariant', () => {
+    test.skip('postgres coverage skipped: DATABASE_URL is not configured', () => {});
+  });
+}

@@ -1363,6 +1363,9 @@ export class PostgresEngine implements BrainEngine {
 
   async promoteMemoryCandidateEntry(id: string, patch: MemoryCandidatePromotionPatch = {}): Promise<MemoryCandidateEntry | null> {
     const sql = this.sql;
+    // I4: reject promotion unless the candidate has at least one non-blank
+    // provenance entry. Defense-in-depth behind the service-layer preflight
+    // check.
     const rows = await sql`
       UPDATE memory_candidate_entries
       SET status = 'promoted',
@@ -1371,6 +1374,11 @@ export class PostgresEngine implements BrainEngine {
           updated_at = now()
       WHERE id = ${id}
         AND status = ${patch.expected_current_status ?? 'staged_for_review'}
+        AND EXISTS (
+          SELECT 1
+          FROM jsonb_array_elements_text(memory_candidate_entries.source_refs) AS source_ref(value)
+          WHERE btrim(source_ref.value) <> ''
+        )
       RETURNING id, scope_id, candidate_type, proposed_content, source_refs, generated_by,
                 extraction_kind, confidence_score, importance_score, recurrence_score,
                 sensitivity, status, target_object_type, target_object_id, reviewed_at,

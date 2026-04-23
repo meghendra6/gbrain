@@ -3,6 +3,10 @@ import { vector } from '@electric-sql/pglite/vector';
 import { pg_trgm } from '@electric-sql/pglite/contrib/pg_trgm';
 import type { Transaction } from '@electric-sql/pglite';
 import type { BrainEngine } from './engine.ts';
+import {
+  assertMemoryCandidateCreateStatus,
+  isAllowedMemoryCandidateStatusUpdate,
+} from './memory-inbox-status.ts';
 import { runMigrations } from './migrate.ts';
 import { PGLITE_SCHEMA_SQL } from './pglite-schema.ts';
 import { acquireLock, releaseLock, type LockHandle } from './pglite-lock.ts';
@@ -24,9 +28,17 @@ import type {
   ContextAtlasEntryInput,
   ContextAtlasFilters,
   MemoryCandidateEntry,
+  MemoryCandidateContradictionEntry,
+  MemoryCandidateContradictionEntryInput,
   MemoryCandidateEntryInput,
   MemoryCandidateFilters,
+  MemoryCandidatePromotionPatch,
+  MemoryCandidateSupersessionEntry,
+  MemoryCandidateSupersessionInput,
   MemoryCandidateStatusPatch,
+  CanonicalHandoffEntry,
+  CanonicalHandoffEntryInput,
+  CanonicalHandoffFilters,
   ProfileMemoryEntry,
   ProfileMemoryEntryInput,
   ProfileMemoryFilters,
@@ -64,6 +76,9 @@ import {
   rowToContextAtlasEntry,
   rowToContextMapEntry,
   rowToMemoryCandidateEntry,
+  rowToMemoryCandidateContradictionEntry,
+  rowToMemoryCandidateSupersessionEntry,
+  rowToCanonicalHandoffEntry,
   rowToNoteManifestEntry,
   rowToNoteSectionEntry,
   rowToProfileMemoryEntry,
@@ -1170,6 +1185,7 @@ export class PGLiteEngine implements BrainEngine {
   }
 
   async createMemoryCandidateEntry(input: MemoryCandidateEntryInput): Promise<MemoryCandidateEntry> {
+    const initialStatus = assertMemoryCandidateCreateStatus(input.status);
     const { rows } = await this.db.query(
       `INSERT INTO memory_candidate_entries (
         id, scope_id, candidate_type, proposed_content, source_refs, generated_by,
@@ -1193,7 +1209,7 @@ export class PGLiteEngine implements BrainEngine {
         input.importance_score,
         input.recurrence_score,
         input.sensitivity,
-        input.status,
+        initialStatus,
         input.target_object_type ?? null,
         input.target_object_id ?? null,
         input.reviewed_at instanceof Date ? input.reviewed_at.toISOString() : input.reviewed_at ?? null,
@@ -1239,6 +1255,10 @@ export class PGLiteEngine implements BrainEngine {
       params.push(filters.target_object_type);
       clauses.push(`target_object_type = $${params.length}`);
     }
+    if (filters?.target_object_id !== undefined) {
+      params.push(filters.target_object_id);
+      clauses.push(`target_object_id = $${params.length}`);
+    }
 
     params.push(limit);
     params.push(offset);
@@ -1258,27 +1278,317 @@ export class PGLiteEngine implements BrainEngine {
     return (rows as Record<string, unknown>[]).map(rowToMemoryCandidateEntry);
   }
 
-  async updateMemoryCandidateEntryStatus(id: string, patch: MemoryCandidateStatusPatch): Promise<MemoryCandidateEntry> {
+  async updateMemoryCandidateEntryStatus(id: string, patch: MemoryCandidateStatusPatch): Promise<MemoryCandidateEntry | null> {
+    const current = await this.getMemoryCandidateEntry(id);
+    if (!current) {
+      throw new Error(`Memory candidate entry not found before status update: ${id}`);
+    }
+    if (!isAllowedMemoryCandidateStatusUpdate(current.status, patch.status)) {
+      throw new Error(`Cannot update memory candidate from ${current.status} to ${patch.status}.`);
+    }
+
     const { rows } = await this.db.query(
       `UPDATE memory_candidate_entries
-       SET status = $2,
-           reviewed_at = $3,
-           review_reason = $4,
-           updated_at = now()
-       WHERE id = $1
-       RETURNING id, scope_id, candidate_type, proposed_content, source_refs, generated_by,
-                 extraction_kind, confidence_score, importance_score, recurrence_score,
-                 sensitivity, status, target_object_type, target_object_id, reviewed_at,
+      SET status = $2,
+          reviewed_at = $3,
+          review_reason = $4,
+          updated_at = now()
+      WHERE id = $1
+        AND status = $5
+      RETURNING id, scope_id, candidate_type, proposed_content, source_refs, generated_by,
+                extraction_kind, confidence_score, importance_score, recurrence_score,
+                sensitivity, status, target_object_type, target_object_id, reviewed_at,
                  review_reason, created_at, updated_at`,
       [
         id,
         patch.status,
         patch.reviewed_at instanceof Date ? patch.reviewed_at.toISOString() : patch.reviewed_at ?? null,
         patch.review_reason ?? null,
+        current.status,
       ],
     );
-    if (rows.length === 0) throw new Error(`Memory candidate entry not found after status update: ${id}`);
+    if (rows.length === 0) return null;
     return rowToMemoryCandidateEntry(rows[0] as Record<string, unknown>);
+  }
+
+  async promoteMemoryCandidateEntry(id: string, patch: MemoryCandidatePromotionPatch = {}): Promise<MemoryCandidateEntry | null> {
+    const { rows } = await this.db.query(
+      `UPDATE memory_candidate_entries
+       SET status = 'promoted',
+           reviewed_at = $2,
+           review_reason = $3,
+           updated_at = now()
+       WHERE id = $1
+         AND status = $4
+       RETURNING id, scope_id, candidate_type, proposed_content, source_refs, generated_by,
+                 extraction_kind, confidence_score, importance_score, recurrence_score,
+                 sensitivity, status, target_object_type, target_object_id, reviewed_at,
+                 review_reason, created_at, updated_at`,
+      [
+        id,
+        patch.reviewed_at instanceof Date ? patch.reviewed_at.toISOString() : patch.reviewed_at ?? null,
+        patch.review_reason ?? null,
+        patch.expected_current_status ?? 'staged_for_review',
+      ],
+    );
+    if (rows.length === 0) {
+      return null;
+    }
+    return rowToMemoryCandidateEntry(rows[0] as Record<string, unknown>);
+  }
+
+  async supersedeMemoryCandidateEntry(
+    input: MemoryCandidateSupersessionInput,
+  ): Promise<MemoryCandidateSupersessionEntry | null> {
+    const rollbackSentinel = 'memory_candidate_supersession_invalid_replacement';
+    try {
+      return await this.transaction(async (txBase) => {
+        const tx = txBase as PGLiteEngine;
+        const { rows: supersededRows } = await tx.db.query(
+          `SELECT id, scope_id, status
+           FROM memory_candidate_entries
+           WHERE id = $1
+           FOR UPDATE`,
+          [input.superseded_candidate_id],
+        );
+        const { rows: replacementRows } = await tx.db.query(
+          `SELECT id, scope_id, status
+           FROM memory_candidate_entries
+           WHERE id = $1
+           FOR UPDATE`,
+          [input.replacement_candidate_id],
+        );
+        const supersededCandidate = supersededRows[0] as { id: string; scope_id: string; status: string } | undefined;
+        const replacementCandidate = replacementRows[0] as { id: string; scope_id: string; status: string } | undefined;
+        if (!supersededCandidate || !replacementCandidate) {
+          return null;
+        }
+        if (supersededCandidate.id === replacementCandidate.id) {
+          return null;
+        }
+        if (supersededCandidate.scope_id !== input.scope_id || replacementCandidate.scope_id !== input.scope_id) {
+          return null;
+        }
+        if (supersededCandidate.status !== input.expected_current_status) {
+          return null;
+        }
+        if (replacementCandidate.status !== 'promoted') {
+          return null;
+        }
+
+        const { rows } = await tx.db.query(
+          `INSERT INTO memory_candidate_supersession_entries (
+            id, scope_id, superseded_candidate_id, replacement_candidate_id, reviewed_at, review_reason
+          )
+          VALUES ($1, $2, $3, $4, $5, $6)
+          RETURNING id, scope_id, superseded_candidate_id, replacement_candidate_id,
+                    reviewed_at, review_reason, created_at, updated_at`,
+          [
+            input.id,
+            input.scope_id,
+            input.superseded_candidate_id,
+            input.replacement_candidate_id,
+            input.reviewed_at instanceof Date ? input.reviewed_at.toISOString() : input.reviewed_at ?? null,
+            input.review_reason ?? null,
+          ],
+        );
+        if (rows.length === 0) {
+          throw new Error(rollbackSentinel);
+        }
+
+        const { rows: updatedRows } = await tx.db.query(
+          `UPDATE memory_candidate_entries
+           SET status = 'superseded',
+               reviewed_at = $2,
+               review_reason = $3,
+               updated_at = now()
+           WHERE id = $1
+             AND scope_id = $4
+             AND status = $5
+           RETURNING id`,
+          [
+            input.superseded_candidate_id,
+            input.reviewed_at instanceof Date ? input.reviewed_at.toISOString() : input.reviewed_at ?? null,
+            input.review_reason ?? null,
+            input.scope_id,
+            input.expected_current_status,
+          ],
+        );
+        if (updatedRows.length === 0) {
+          throw new Error(rollbackSentinel);
+        }
+
+        return rowToMemoryCandidateSupersessionEntry(rows[0] as Record<string, unknown>);
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message === rollbackSentinel) {
+        return null;
+      }
+      if (isSupersessionDuplicateConstraint(error)) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  async getMemoryCandidateSupersessionEntry(id: string): Promise<MemoryCandidateSupersessionEntry | null> {
+    const { rows } = await this.db.query(
+      `SELECT id, scope_id, superseded_candidate_id, replacement_candidate_id,
+              reviewed_at, review_reason, created_at, updated_at
+       FROM memory_candidate_supersession_entries
+       WHERE id = $1`,
+      [id],
+    );
+    if (rows.length === 0) {
+      return null;
+    }
+    return rowToMemoryCandidateSupersessionEntry(rows[0] as Record<string, unknown>);
+  }
+
+  async createMemoryCandidateContradictionEntry(
+    input: MemoryCandidateContradictionEntryInput,
+  ): Promise<MemoryCandidateContradictionEntry | null> {
+    const { rows } = await this.db.query(
+      `INSERT INTO memory_candidate_contradiction_entries (
+        id, scope_id, candidate_id, challenged_candidate_id, outcome, supersession_entry_id,
+        reviewed_at, review_reason
+      )
+      SELECT $1, $2, $3, $4, $5, $6, $7, $8
+      WHERE EXISTS (
+        SELECT 1
+        FROM memory_candidate_entries candidate
+        JOIN memory_candidate_entries challenged
+          ON challenged.id = $9
+        WHERE candidate.id = $3
+          AND candidate.scope_id = $2
+          AND challenged.scope_id = $2
+      )
+        AND (
+          $6::text IS NULL
+          OR EXISTS (
+            SELECT 1
+            FROM memory_candidate_supersession_entries
+            WHERE id = $6
+              AND scope_id = $2
+              AND replacement_candidate_id = $3
+              AND superseded_candidate_id = $4
+          )
+        )
+      RETURNING id, scope_id, candidate_id, challenged_candidate_id, outcome, supersession_entry_id,
+                reviewed_at, review_reason, created_at, updated_at`,
+      [
+        input.id,
+        input.scope_id,
+        input.candidate_id,
+        input.challenged_candidate_id,
+        input.outcome,
+        input.supersession_entry_id ?? null,
+        input.reviewed_at instanceof Date ? input.reviewed_at.toISOString() : input.reviewed_at ?? null,
+        input.review_reason ?? null,
+        input.challenged_candidate_id,
+      ],
+    );
+    if (rows.length === 0) {
+      return null;
+    }
+    return rowToMemoryCandidateContradictionEntry(rows[0] as Record<string, unknown>);
+  }
+
+  async getMemoryCandidateContradictionEntry(id: string): Promise<MemoryCandidateContradictionEntry | null> {
+    const { rows } = await this.db.query(
+      `SELECT id, scope_id, candidate_id, challenged_candidate_id, outcome, supersession_entry_id,
+              reviewed_at, review_reason, created_at, updated_at
+       FROM memory_candidate_contradiction_entries
+       WHERE id = $1`,
+      [id],
+    );
+    if (rows.length === 0) {
+      return null;
+    }
+    return rowToMemoryCandidateContradictionEntry(rows[0] as Record<string, unknown>);
+  }
+
+  async createCanonicalHandoffEntry(
+    input: CanonicalHandoffEntryInput,
+  ): Promise<CanonicalHandoffEntry | null> {
+    const { rows } = await this.db.query(
+      `INSERT INTO canonical_handoff_entries (
+        id, scope_id, candidate_id, target_object_type, target_object_id, source_refs,
+        reviewed_at, review_reason
+      )
+      SELECT $1, $2, $3, $4, $5, source_refs, $6, $7
+      FROM memory_candidate_entries
+      WHERE id = $3
+        AND scope_id = $2
+        AND status = 'promoted'
+        AND target_object_type = $4
+        AND target_object_id = $5
+      ON CONFLICT DO NOTHING
+      RETURNING id, scope_id, candidate_id, target_object_type, target_object_id, source_refs,
+                reviewed_at, review_reason, created_at, updated_at`,
+      [
+        input.id,
+        input.scope_id,
+        input.candidate_id,
+        input.target_object_type,
+        input.target_object_id,
+        input.reviewed_at instanceof Date ? input.reviewed_at.toISOString() : input.reviewed_at ?? null,
+        input.review_reason ?? null,
+      ],
+    );
+    if (rows.length === 0) {
+      return null;
+    }
+    return rowToCanonicalHandoffEntry(rows[0] as Record<string, unknown>);
+  }
+
+  async getCanonicalHandoffEntry(id: string): Promise<CanonicalHandoffEntry | null> {
+    const { rows } = await this.db.query(
+      `SELECT id, scope_id, candidate_id, target_object_type, target_object_id, source_refs,
+              reviewed_at, review_reason, created_at, updated_at
+       FROM canonical_handoff_entries
+       WHERE id = $1`,
+      [id],
+    );
+    if (rows.length === 0) {
+      return null;
+    }
+    return rowToCanonicalHandoffEntry(rows[0] as Record<string, unknown>);
+  }
+
+  async listCanonicalHandoffEntries(filters?: CanonicalHandoffFilters): Promise<CanonicalHandoffEntry[]> {
+    const limit = filters?.limit ?? 100;
+    const offset = filters?.offset ?? 0;
+    const params: unknown[] = [];
+    const clauses: string[] = [];
+
+    if (filters?.scope_id !== undefined) {
+      params.push(filters.scope_id);
+      clauses.push(`scope_id = $${params.length}`);
+    }
+    if (filters?.candidate_id !== undefined) {
+      params.push(filters.candidate_id);
+      clauses.push(`candidate_id = $${params.length}`);
+    }
+    if (filters?.target_object_type !== undefined) {
+      params.push(filters.target_object_type);
+      clauses.push(`target_object_type = $${params.length}`);
+    }
+
+    params.push(limit);
+    params.push(offset);
+    const whereClause = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+    const { rows } = await this.db.query(
+      `SELECT id, scope_id, candidate_id, target_object_type, target_object_id, source_refs,
+              reviewed_at, review_reason, created_at, updated_at
+       FROM canonical_handoff_entries
+       ${whereClause}
+       ORDER BY created_at DESC, id ASC
+       LIMIT $${params.length - 1}
+       OFFSET $${params.length}`,
+      params,
+    );
+    return (rows as Record<string, unknown>[]).map(rowToCanonicalHandoffEntry);
   }
 
   async deleteMemoryCandidateEntry(id: string): Promise<void> {
@@ -1745,4 +2055,14 @@ function vectorValueToFloat32(value: unknown): Float32Array | null {
   }
 
   return null;
+}
+
+function isSupersessionDuplicateConstraint(error: unknown): boolean {
+  if (typeof error !== 'object' || error == null) {
+    return false;
+  }
+  const candidate = error as { code?: string; constraint?: string; message?: string };
+  return candidate.code === '23505'
+    && (candidate.constraint === 'memory_candidate_supersession_entries_superseded_candidate_id_key'
+      || candidate.message?.includes('superseded_candidate_id') === true);
 }

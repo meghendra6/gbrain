@@ -306,6 +306,7 @@ export interface ContextMapReport {
   report_kind: 'structural';
   title: string;
   map_id: string;
+  scope_id: string;
   status: string;
   summary_lines: string[];
   recommended_reads: ContextMapReportRead[];
@@ -722,7 +723,14 @@ export type MemoryCandidateStatus =
   | 'captured'
   | 'candidate'
   | 'staged_for_review'
-  | 'rejected';
+  | 'rejected'
+  | 'promoted'
+  | 'superseded';
+
+export type MemoryCandidateCreateStatus =
+  | 'captured'
+  | 'candidate'
+  | 'staged_for_review';
 
 export type MemoryCandidateTargetObjectType =
   | 'curated_note'
@@ -730,6 +738,17 @@ export type MemoryCandidateTargetObjectType =
   | 'profile_memory'
   | 'personal_episode'
   | 'other';
+
+export type MemoryCandidatePromotionPreflightDecision = 'allow' | 'deny' | 'defer';
+
+export type MemoryCandidatePromotionPreflightReason =
+  | 'candidate_not_staged_for_review'
+  | 'candidate_missing_provenance'
+  | 'candidate_missing_target_object'
+  | 'candidate_scope_conflict'
+  | 'candidate_unknown_sensitivity'
+  | 'candidate_requires_revalidation'
+  | 'candidate_ready_for_promotion';
 
 export interface MemoryCandidateEntry {
   id: string;
@@ -764,11 +783,18 @@ export interface MemoryCandidateEntryInput {
   importance_score: number;
   recurrence_score: number;
   sensitivity: MemoryCandidateSensitivity;
-  status: MemoryCandidateStatus;
+  status: MemoryCandidateCreateStatus;
   target_object_type?: MemoryCandidateTargetObjectType | null;
   target_object_id?: string | null;
   reviewed_at?: Date | string | null;
   review_reason?: string | null;
+}
+
+export interface MemoryCandidateScoredEntry {
+  candidate: MemoryCandidateEntry;
+  source_quality_score: number;
+  effective_confidence_score: number;
+  review_priority_score: number;
 }
 
 export interface MemoryCandidateFilters {
@@ -776,14 +802,116 @@ export interface MemoryCandidateFilters {
   status?: MemoryCandidateStatus;
   candidate_type?: MemoryCandidateType;
   target_object_type?: MemoryCandidateTargetObjectType;
+  target_object_id?: string;
   limit?: number;
   offset?: number;
 }
 
 export interface MemoryCandidateStatusPatch {
-  status: MemoryCandidateStatus;
+  status: Exclude<MemoryCandidateStatus, 'promoted' | 'superseded'>;
   reviewed_at?: Date | string | null;
   review_reason?: string | null;
+}
+
+export interface MemoryCandidatePromotionPatch {
+  expected_current_status?: 'staged_for_review';
+  reviewed_at?: Date | string | null;
+  review_reason?: string | null;
+}
+
+export interface MemoryCandidatePromotionPreflightInput {
+  id: string;
+}
+
+export interface MemoryCandidatePromotionPreflightResult {
+  candidate_id: string;
+  decision: MemoryCandidatePromotionPreflightDecision;
+  reasons: MemoryCandidatePromotionPreflightReason[];
+  summary_lines: string[];
+}
+
+export interface MemoryCandidateSupersessionEntry {
+  id: string;
+  scope_id: string;
+  superseded_candidate_id: string;
+  replacement_candidate_id: string;
+  reviewed_at: Date | null;
+  review_reason: string | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface MemoryCandidateSupersessionInput {
+  id: string;
+  scope_id: string;
+  superseded_candidate_id: string;
+  replacement_candidate_id: string;
+  expected_current_status: 'staged_for_review' | 'promoted';
+  reviewed_at?: Date | string | null;
+  review_reason?: string | null;
+}
+
+export type MemoryCandidateContradictionOutcome =
+  | 'rejected'
+  | 'unresolved'
+  | 'superseded';
+
+export type CanonicalHandoffTargetObjectType = Exclude<MemoryCandidateTargetObjectType, 'other'>;
+
+export interface MemoryCandidateContradictionEntry {
+  id: string;
+  scope_id: string;
+  candidate_id: string;
+  challenged_candidate_id: string;
+  outcome: MemoryCandidateContradictionOutcome;
+  supersession_entry_id: string | null;
+  reviewed_at: Date | null;
+  review_reason: string | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface MemoryCandidateContradictionEntryInput {
+  id: string;
+  scope_id: string;
+  candidate_id: string;
+  challenged_candidate_id: string;
+  outcome: MemoryCandidateContradictionOutcome;
+  supersession_entry_id?: string | null;
+  reviewed_at?: Date | string | null;
+  review_reason?: string | null;
+}
+
+export interface CanonicalHandoffEntry {
+  id: string;
+  scope_id: string;
+  candidate_id: string;
+  target_object_type: CanonicalHandoffTargetObjectType;
+  target_object_id: string;
+  source_refs: string[];
+  reviewed_at: Date | null;
+  review_reason: string | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface CanonicalHandoffEntryInput {
+  id: string;
+  scope_id: string;
+  candidate_id: string;
+  target_object_type: CanonicalHandoffTargetObjectType;
+  target_object_id: string;
+  source_refs: string[];
+  reviewed_at?: Date | string | null;
+  review_reason?: string | null;
+}
+
+export interface CanonicalHandoffFilters {
+  scope_id?: string;
+  candidate_id?: string;
+  target_object_type?: CanonicalHandoffTargetObjectType;
+  limit?: number;
+  offset?: number;
 }
 
 export interface PersonalEpisodeLookupRoute {

@@ -3,6 +3,10 @@ import { mkdirSync } from 'fs';
 import { homedir } from 'os';
 import { dirname, join } from 'path';
 import type { BrainEngine } from './engine.ts';
+import {
+  assertMemoryCandidateCreateStatus,
+  isAllowedMemoryCandidateStatusUpdate,
+} from './memory-inbox-status.ts';
 import { LATEST_VERSION } from './migrate.ts';
 import { ensurePageChunks } from './page-chunks.ts';
 import { buildPageCentroid } from './services/page-embedding.ts';
@@ -25,9 +29,17 @@ import type {
   ContextAtlasEntryInput,
   ContextAtlasFilters,
   MemoryCandidateEntry,
+  MemoryCandidateContradictionEntry,
+  MemoryCandidateContradictionEntryInput,
   MemoryCandidateEntryInput,
   MemoryCandidateFilters,
+  MemoryCandidatePromotionPatch,
+  MemoryCandidateSupersessionEntry,
+  MemoryCandidateSupersessionInput,
   MemoryCandidateStatusPatch,
+  CanonicalHandoffEntry,
+  CanonicalHandoffEntryInput,
+  CanonicalHandoffFilters,
   ProfileMemoryEntry,
   ProfileMemoryEntryInput,
   ProfileMemoryFilters,
@@ -1481,6 +1493,7 @@ export class SQLiteEngine implements BrainEngine {
   }
 
   async createMemoryCandidateEntry(input: MemoryCandidateEntryInput): Promise<MemoryCandidateEntry> {
+    const initialStatus = assertMemoryCandidateCreateStatus(input.status);
     const timestamp = nowIso();
     this.database.run(`
       INSERT INTO memory_candidate_entries (
@@ -1501,7 +1514,7 @@ export class SQLiteEngine implements BrainEngine {
       input.importance_score,
       input.recurrence_score,
       input.sensitivity,
-      input.status,
+      initialStatus,
       input.target_object_type ?? null,
       input.target_object_id ?? null,
       toNullableIso(input.reviewed_at),
@@ -1556,6 +1569,10 @@ export class SQLiteEngine implements BrainEngine {
       clauses.push('target_object_type = ?');
       params.push(filters.target_object_type);
     }
+    if (filters?.target_object_id !== undefined) {
+      clauses.push('target_object_id = ?');
+      params.push(filters.target_object_id);
+    }
 
     params.push(limit);
     params.push(offset);
@@ -1574,22 +1591,35 @@ export class SQLiteEngine implements BrainEngine {
     return rows.map(rowToMemoryCandidateEntry);
   }
 
-  async updateMemoryCandidateEntryStatus(id: string, patch: MemoryCandidateStatusPatch): Promise<MemoryCandidateEntry> {
+  async updateMemoryCandidateEntryStatus(id: string, patch: MemoryCandidateStatusPatch): Promise<MemoryCandidateEntry | null> {
+    const current = await this.getMemoryCandidateEntry(id);
+    if (!current) {
+      throw new Error(`Memory candidate entry not found before status update: ${id}`);
+    }
+    if (!isAllowedMemoryCandidateStatusUpdate(current.status, patch.status)) {
+      throw new Error(`Cannot update memory candidate from ${current.status} to ${patch.status}.`);
+    }
+
     const timestamp = nowIso();
-    this.database.run(`
+    const result = this.database.run(`
       UPDATE memory_candidate_entries
       SET status = ?,
           reviewed_at = ?,
           review_reason = ?,
           updated_at = ?
       WHERE id = ?
+        AND status = ?
     `, [
       patch.status,
       toNullableIso(patch.reviewed_at),
       patch.review_reason ?? null,
       timestamp,
       id,
+      current.status,
     ]);
+    if (result.changes === 0) {
+      return null;
+    }
 
     const row = this.database.query(`
       SELECT id, scope_id, candidate_type, proposed_content, source_refs, generated_by,
@@ -1601,6 +1631,324 @@ export class SQLiteEngine implements BrainEngine {
     `).get(id) as Record<string, unknown> | null;
     if (!row) throw new Error(`Memory candidate entry not found after status update: ${id}`);
     return rowToMemoryCandidateEntry(row);
+  }
+
+  async promoteMemoryCandidateEntry(id: string, patch: MemoryCandidatePromotionPatch = {}): Promise<MemoryCandidateEntry | null> {
+    const timestamp = nowIso();
+    const result = this.database.run(`
+      UPDATE memory_candidate_entries
+      SET status = 'promoted',
+          reviewed_at = ?,
+          review_reason = ?,
+          updated_at = ?
+      WHERE id = ?
+        AND status = ?
+    `, [
+      toNullableIso(patch.reviewed_at),
+      patch.review_reason ?? null,
+      timestamp,
+      id,
+      patch.expected_current_status ?? 'staged_for_review',
+    ]);
+    if (result.changes === 0) {
+      return null;
+    }
+
+    const row = this.database.query(`
+      SELECT id, scope_id, candidate_type, proposed_content, source_refs, generated_by,
+             extraction_kind, confidence_score, importance_score, recurrence_score,
+             sensitivity, status, target_object_type, target_object_id, reviewed_at,
+             review_reason, created_at, updated_at
+      FROM memory_candidate_entries
+      WHERE id = ?
+    `).get(id) as Record<string, unknown> | null;
+    if (!row || row.status !== 'promoted') {
+      return null;
+    }
+    return rowToMemoryCandidateEntry(row);
+  }
+
+  async supersedeMemoryCandidateEntry(
+    input: MemoryCandidateSupersessionInput,
+  ): Promise<MemoryCandidateSupersessionEntry | null> {
+    const rollbackSentinel = 'memory_candidate_supersession_invalid_replacement';
+    try {
+      return await this.transaction(async (txBase) => {
+        const tx = txBase as SQLiteEngine;
+        const supersededCandidate = await tx.getMemoryCandidateEntry(input.superseded_candidate_id);
+        const replacementCandidate = await tx.getMemoryCandidateEntry(input.replacement_candidate_id);
+        if (!supersededCandidate || !replacementCandidate) {
+          return null;
+        }
+        if (supersededCandidate.id === replacementCandidate.id) {
+          return null;
+        }
+        if (supersededCandidate.scope_id !== input.scope_id || replacementCandidate.scope_id !== input.scope_id) {
+          return null;
+        }
+        if (supersededCandidate.status !== input.expected_current_status) {
+          return null;
+        }
+        if (replacementCandidate.status !== 'promoted') {
+          return null;
+        }
+
+        const timestamp = nowIso();
+        const insertResult = tx.database.run(`
+          INSERT INTO memory_candidate_supersession_entries (
+            id, scope_id, superseded_candidate_id, replacement_candidate_id, reviewed_at,
+            review_reason, created_at, updated_at
+          )
+          SELECT ?, ?, ?, ?, ?, ?, ?, ?
+          WHERE EXISTS (
+            SELECT 1
+            FROM memory_candidate_entries
+            WHERE id = ?
+              AND scope_id = ?
+              AND status = 'promoted'
+          )
+        `, [
+          input.id,
+          input.scope_id,
+          input.superseded_candidate_id,
+          input.replacement_candidate_id,
+          toNullableIso(input.reviewed_at),
+          input.review_reason ?? null,
+          timestamp,
+          timestamp,
+          input.replacement_candidate_id,
+          input.scope_id,
+        ]);
+        if (insertResult.changes === 0) {
+          throw new Error(rollbackSentinel);
+        }
+
+        const updateResult = tx.database.run(`
+          UPDATE memory_candidate_entries
+          SET status = 'superseded',
+              reviewed_at = ?,
+              review_reason = ?,
+              updated_at = ?
+          WHERE id = ?
+            AND scope_id = ?
+            AND status = ?
+        `, [
+          toNullableIso(input.reviewed_at),
+          input.review_reason ?? null,
+          timestamp,
+          input.superseded_candidate_id,
+          input.scope_id,
+          input.expected_current_status,
+        ]);
+        if (updateResult.changes === 0) {
+          throw new Error(rollbackSentinel);
+        }
+
+        const row = tx.database.query(`
+          SELECT id, scope_id, superseded_candidate_id, replacement_candidate_id,
+                 reviewed_at, review_reason, created_at, updated_at
+          FROM memory_candidate_supersession_entries
+          WHERE id = ?
+        `).get(input.id) as Record<string, unknown> | null;
+        if (!row) {
+          throw new Error(`Memory candidate supersession entry not found after create: ${input.id}`);
+        }
+        return rowToMemoryCandidateSupersessionEntry(row);
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message === rollbackSentinel) {
+        return null;
+      }
+      if (isSupersessionDuplicateConstraint(error)) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  async getMemoryCandidateSupersessionEntry(id: string): Promise<MemoryCandidateSupersessionEntry | null> {
+    const row = this.database.query(`
+      SELECT id, scope_id, superseded_candidate_id, replacement_candidate_id,
+             reviewed_at, review_reason, created_at, updated_at
+      FROM memory_candidate_supersession_entries
+      WHERE id = ?
+    `).get(id) as Record<string, unknown> | null;
+    return row ? rowToMemoryCandidateSupersessionEntry(row) : null;
+  }
+
+  async createMemoryCandidateContradictionEntry(
+    input: MemoryCandidateContradictionEntryInput,
+  ): Promise<MemoryCandidateContradictionEntry | null> {
+    const timestamp = nowIso();
+    const result = this.database.run(`
+      INSERT INTO memory_candidate_contradiction_entries (
+        id, scope_id, candidate_id, challenged_candidate_id, outcome, supersession_entry_id,
+        reviewed_at, review_reason, created_at, updated_at
+      )
+      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+      WHERE EXISTS (
+        SELECT 1
+        FROM memory_candidate_entries candidate
+        JOIN memory_candidate_entries challenged
+          ON challenged.id = ?
+        WHERE candidate.id = ?
+          AND candidate.scope_id = ?
+          AND challenged.scope_id = ?
+      )
+        AND (
+          ? IS NULL
+          OR EXISTS (
+            SELECT 1
+            FROM memory_candidate_supersession_entries
+            WHERE id = ?
+              AND scope_id = ?
+              AND replacement_candidate_id = ?
+              AND superseded_candidate_id = ?
+          )
+        )
+    `, [
+      input.id,
+      input.scope_id,
+      input.candidate_id,
+      input.challenged_candidate_id,
+      input.outcome,
+      input.supersession_entry_id ?? null,
+      toNullableIso(input.reviewed_at),
+      input.review_reason ?? null,
+      timestamp,
+      timestamp,
+      input.challenged_candidate_id,
+      input.candidate_id,
+      input.scope_id,
+      input.scope_id,
+      input.supersession_entry_id ?? null,
+      input.supersession_entry_id ?? null,
+      input.scope_id,
+      input.candidate_id,
+      input.challenged_candidate_id,
+    ]);
+    if (result.changes === 0) {
+      return null;
+    }
+
+    const row = this.database.query(`
+      SELECT id, scope_id, candidate_id, challenged_candidate_id, outcome, supersession_entry_id,
+             reviewed_at, review_reason, created_at, updated_at
+      FROM memory_candidate_contradiction_entries
+      WHERE id = ?
+    `).get(input.id) as Record<string, unknown> | null;
+    if (!row) {
+      throw new Error(`Memory candidate contradiction entry not found after create: ${input.id}`);
+    }
+    return rowToMemoryCandidateContradictionEntry(row);
+  }
+
+  async getMemoryCandidateContradictionEntry(id: string): Promise<MemoryCandidateContradictionEntry | null> {
+    const row = this.database.query(`
+      SELECT id, scope_id, candidate_id, challenged_candidate_id, outcome, supersession_entry_id,
+             reviewed_at, review_reason, created_at, updated_at
+      FROM memory_candidate_contradiction_entries
+      WHERE id = ?
+    `).get(id) as Record<string, unknown> | null;
+    return row ? rowToMemoryCandidateContradictionEntry(row) : null;
+  }
+
+  async createCanonicalHandoffEntry(
+    input: CanonicalHandoffEntryInput,
+  ): Promise<CanonicalHandoffEntry | null> {
+    const timestamp = nowIso();
+    let result;
+    try {
+      result = this.database.run(`
+        INSERT INTO canonical_handoff_entries (
+          id, scope_id, candidate_id, target_object_type, target_object_id, source_refs,
+          reviewed_at, review_reason, created_at, updated_at
+        )
+        SELECT ?, ?, ?, ?, ?, source_refs, ?, ?, ?, ?
+        FROM memory_candidate_entries
+        WHERE id = ?
+          AND scope_id = ?
+          AND status = 'promoted'
+          AND target_object_type = ?
+          AND target_object_id = ?
+      `, [
+        input.id,
+        input.scope_id,
+        input.candidate_id,
+        input.target_object_type,
+        input.target_object_id,
+        toNullableIso(input.reviewed_at),
+        input.review_reason ?? null,
+        timestamp,
+        timestamp,
+        input.candidate_id,
+        input.scope_id,
+        input.target_object_type,
+        input.target_object_id,
+      ]);
+    } catch (error) {
+      if (isCanonicalHandoffDuplicateConstraint(error)) {
+        return null;
+      }
+      throw error;
+    }
+    if (result.changes === 0) {
+      return null;
+    }
+
+    const row = this.database.query(`
+      SELECT id, scope_id, candidate_id, target_object_type, target_object_id, source_refs,
+             reviewed_at, review_reason, created_at, updated_at
+      FROM canonical_handoff_entries
+      WHERE id = ?
+    `).get(input.id) as Record<string, unknown> | null;
+    if (!row) {
+      throw new Error(`Canonical handoff entry not found after create: ${input.id}`);
+    }
+    return rowToCanonicalHandoffEntry(row);
+  }
+
+  async getCanonicalHandoffEntry(id: string): Promise<CanonicalHandoffEntry | null> {
+    const row = this.database.query(`
+      SELECT id, scope_id, candidate_id, target_object_type, target_object_id, source_refs,
+             reviewed_at, review_reason, created_at, updated_at
+      FROM canonical_handoff_entries
+      WHERE id = ?
+    `).get(id) as Record<string, unknown> | null;
+    return row ? rowToCanonicalHandoffEntry(row) : null;
+  }
+
+  async listCanonicalHandoffEntries(filters?: CanonicalHandoffFilters): Promise<CanonicalHandoffEntry[]> {
+    const limit = filters?.limit ?? 100;
+    const offset = filters?.offset ?? 0;
+    const params: unknown[] = [];
+    const clauses: string[] = [];
+
+    if (filters?.scope_id !== undefined) {
+      params.push(filters.scope_id);
+      clauses.push('scope_id = ?');
+    }
+    if (filters?.candidate_id !== undefined) {
+      params.push(filters.candidate_id);
+      clauses.push('candidate_id = ?');
+    }
+    if (filters?.target_object_type !== undefined) {
+      params.push(filters.target_object_type);
+      clauses.push('target_object_type = ?');
+    }
+
+    params.push(limit, offset);
+    const whereClause = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+    const rows = this.database.query(`
+      SELECT id, scope_id, candidate_id, target_object_type, target_object_id, source_refs,
+             reviewed_at, review_reason, created_at, updated_at
+      FROM canonical_handoff_entries
+      ${whereClause}
+      ORDER BY created_at DESC, id ASC
+      LIMIT ?
+      OFFSET ?
+    `).all(...params) as Record<string, unknown>[];
+    return rows.map(rowToCanonicalHandoffEntry);
   }
 
   async deleteMemoryCandidateEntry(id: string): Promise<void> {
@@ -2008,6 +2356,7 @@ export class SQLiteEngine implements BrainEngine {
 
   private async runSqliteMigrations(current: number): Promise<void> {
     for (let version = current + 1; version <= LATEST_VERSION; version += 1) {
+      await this.transaction(async () => {
       switch (version) {
         case 2:
           await this.migrateLegacySlugs();
@@ -2340,53 +2689,223 @@ export class SQLiteEngine implements BrainEngine {
           `);
           break;
         case 16:
+          if (!this.memoryCandidateStatusCheckAllows('rejected')) {
+            this.rebuildMemoryCandidateEntriesTable('memory_candidate_entries_v16', [
+              'captured',
+              'candidate',
+              'staged_for_review',
+              'rejected',
+            ]);
+          } else {
+            this.ensureMemoryCandidateIndexes();
+          }
+          break;
+        case 17:
+          if (!this.memoryCandidateStatusCheckAllows('promoted')) {
+            this.rebuildMemoryCandidateEntriesTable('memory_candidate_entries_v17', [
+              'captured',
+              'candidate',
+              'staged_for_review',
+              'rejected',
+              'promoted',
+            ]);
+          } else {
+            this.ensureMemoryCandidateIndexes();
+          }
+          break;
+        case 18:
+          if (!this.memoryCandidateStatusCheckAllows('superseded')) {
+            this.rebuildMemoryCandidateEntriesTable('memory_candidate_entries_v18', [
+              'captured',
+              'candidate',
+              'staged_for_review',
+              'rejected',
+              'promoted',
+              'superseded',
+            ]);
+          } else {
+            this.ensureMemoryCandidateIndexes();
+          }
+          this.ensureMemoryCandidateSupersessionSchema();
+          break;
+        case 19:
           this.database.exec(`
-            CREATE TABLE memory_candidate_entries_v16 (
+            CREATE TABLE IF NOT EXISTS memory_candidate_contradiction_entries (
               id TEXT PRIMARY KEY,
               scope_id TEXT NOT NULL,
-              candidate_type TEXT NOT NULL CHECK (candidate_type IN ('fact', 'relationship', 'note_update', 'procedure', 'profile_update', 'open_question', 'rationale')),
-              proposed_content TEXT NOT NULL,
+              candidate_id TEXT NOT NULL REFERENCES memory_candidate_entries(id),
+              challenged_candidate_id TEXT NOT NULL REFERENCES memory_candidate_entries(id),
+              outcome TEXT NOT NULL CHECK (outcome IN ('rejected', 'unresolved', 'superseded')),
+              supersession_entry_id TEXT REFERENCES memory_candidate_supersession_entries(id),
+              reviewed_at TEXT,
+              review_reason TEXT,
+              created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+              updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+              CHECK (candidate_id <> challenged_candidate_id),
+              CHECK (
+                (outcome = 'superseded' AND supersession_entry_id IS NOT NULL)
+                OR (outcome IN ('rejected', 'unresolved') AND supersession_entry_id IS NULL)
+              )
+            );
+            CREATE INDEX IF NOT EXISTS idx_memory_candidate_contradiction_scope
+              ON memory_candidate_contradiction_entries(scope_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_memory_candidate_contradiction_candidate
+              ON memory_candidate_contradiction_entries(candidate_id);
+            CREATE INDEX IF NOT EXISTS idx_memory_candidate_contradiction_challenged
+              ON memory_candidate_contradiction_entries(challenged_candidate_id);
+          `);
+          break;
+        case 20:
+          this.database.exec(`
+            CREATE TABLE IF NOT EXISTS canonical_handoff_entries (
+              id TEXT PRIMARY KEY,
+              scope_id TEXT NOT NULL,
+              candidate_id TEXT NOT NULL UNIQUE REFERENCES memory_candidate_entries(id),
+              target_object_type TEXT NOT NULL CHECK (target_object_type IN ('curated_note', 'procedure', 'profile_memory', 'personal_episode')),
+              target_object_id TEXT NOT NULL,
               source_refs TEXT NOT NULL DEFAULT '[]',
-              generated_by TEXT NOT NULL CHECK (generated_by IN ('agent', 'map_analysis', 'dream_cycle', 'manual', 'import')),
-              extraction_kind TEXT NOT NULL CHECK (extraction_kind IN ('extracted', 'inferred', 'ambiguous', 'manual')),
-              confidence_score REAL NOT NULL,
-              importance_score REAL NOT NULL,
-              recurrence_score REAL NOT NULL,
-              sensitivity TEXT NOT NULL CHECK (sensitivity IN ('public', 'work', 'personal', 'secret', 'unknown')),
-              status TEXT NOT NULL CHECK (status IN ('captured', 'candidate', 'staged_for_review', 'rejected')),
-              target_object_type TEXT CHECK (target_object_type IS NULL OR target_object_type IN ('curated_note', 'procedure', 'profile_memory', 'personal_episode', 'other')),
-              target_object_id TEXT,
               reviewed_at TEXT,
               review_reason TEXT,
               created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
               updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
             );
-            INSERT INTO memory_candidate_entries_v16 (
-              id, scope_id, candidate_type, proposed_content, source_refs, generated_by,
-              extraction_kind, confidence_score, importance_score, recurrence_score,
-              sensitivity, status, target_object_type, target_object_id, reviewed_at,
-              review_reason, created_at, updated_at
-            )
-            SELECT
-              id, scope_id, candidate_type, proposed_content, source_refs, generated_by,
-              extraction_kind, confidence_score, importance_score, recurrence_score,
-              sensitivity, status, target_object_type, target_object_id, reviewed_at,
-              review_reason, created_at, updated_at
-            FROM memory_candidate_entries;
-            DROP TABLE memory_candidate_entries;
-            ALTER TABLE memory_candidate_entries_v16 RENAME TO memory_candidate_entries;
-            CREATE INDEX IF NOT EXISTS idx_memory_candidates_scope_status
-              ON memory_candidate_entries(scope_id, status, updated_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_memory_candidates_scope_type
-              ON memory_candidate_entries(scope_id, candidate_type, updated_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_memory_candidates_target
-              ON memory_candidate_entries(target_object_type, target_object_id);
+            CREATE INDEX IF NOT EXISTS idx_canonical_handoff_scope
+              ON canonical_handoff_entries(scope_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_canonical_handoff_target
+              ON canonical_handoff_entries(target_object_type, target_object_id);
           `);
           break;
       }
 
       await this.setConfig('version', String(version));
+      });
     }
+  }
+
+  private memoryCandidateStatusCheckAllows(status: string): boolean {
+    const row = this.database.query(`
+      SELECT sql
+      FROM sqlite_master
+      WHERE type = 'table'
+        AND name = 'memory_candidate_entries'
+    `).get() as { sql: string } | null;
+    return row?.sql.includes(`'${status}'`) ?? false;
+  }
+
+  private rebuildMemoryCandidateEntriesTable(tempTableName: string, statuses: string[]): void {
+    const statusList = statuses.map((status) => `'${status}'`).join(', ');
+    this.recoverInterruptedMemoryCandidateRebuild(tempTableName);
+    this.database.exec(`
+      DROP TABLE IF EXISTS ${tempTableName};
+      CREATE TABLE ${tempTableName} (
+        id TEXT PRIMARY KEY,
+        scope_id TEXT NOT NULL,
+        candidate_type TEXT NOT NULL CHECK (candidate_type IN ('fact', 'relationship', 'note_update', 'procedure', 'profile_update', 'open_question', 'rationale')),
+        proposed_content TEXT NOT NULL,
+        source_refs TEXT NOT NULL DEFAULT '[]',
+        generated_by TEXT NOT NULL CHECK (generated_by IN ('agent', 'map_analysis', 'dream_cycle', 'manual', 'import')),
+        extraction_kind TEXT NOT NULL CHECK (extraction_kind IN ('extracted', 'inferred', 'ambiguous', 'manual')),
+        confidence_score REAL NOT NULL,
+        importance_score REAL NOT NULL,
+        recurrence_score REAL NOT NULL,
+        sensitivity TEXT NOT NULL CHECK (sensitivity IN ('public', 'work', 'personal', 'secret', 'unknown')),
+        status TEXT NOT NULL CHECK (status IN (${statusList})),
+        target_object_type TEXT CHECK (target_object_type IS NULL OR target_object_type IN ('curated_note', 'procedure', 'profile_memory', 'personal_episode', 'other')),
+        target_object_id TEXT,
+        reviewed_at TEXT,
+        review_reason TEXT,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+      );
+      INSERT INTO ${tempTableName} (
+        id, scope_id, candidate_type, proposed_content, source_refs, generated_by,
+        extraction_kind, confidence_score, importance_score, recurrence_score,
+        sensitivity, status, target_object_type, target_object_id, reviewed_at,
+        review_reason, created_at, updated_at
+      )
+      SELECT
+        id, scope_id, candidate_type, proposed_content, source_refs, generated_by,
+        extraction_kind, confidence_score, importance_score, recurrence_score,
+        sensitivity, status, target_object_type, target_object_id, reviewed_at,
+        review_reason, created_at, updated_at
+      FROM memory_candidate_entries;
+      DROP TABLE memory_candidate_entries;
+      ALTER TABLE ${tempTableName} RENAME TO memory_candidate_entries;
+    `);
+    this.ensureMemoryCandidateIndexes();
+  }
+
+  private recoverInterruptedMemoryCandidateRebuild(tempTableName: string): void {
+    const mainExists = this.sqliteTableExists('memory_candidate_entries');
+    const tempExists = this.sqliteTableExists(tempTableName);
+    if (!mainExists && tempExists) {
+      this.database.exec(`ALTER TABLE ${tempTableName} RENAME TO memory_candidate_entries`);
+    }
+  }
+
+  private sqliteTableExists(tableName: string): boolean {
+    const row = this.database.query(`
+      SELECT 1 AS found
+      FROM sqlite_master
+      WHERE type = 'table'
+        AND name = ?
+    `).get(tableName) as { found: number } | null;
+    return Boolean(row);
+  }
+
+  private ensureMemoryCandidateIndexes(): void {
+    this.database.exec(`
+      CREATE INDEX IF NOT EXISTS idx_memory_candidates_scope_status
+        ON memory_candidate_entries(scope_id, status, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_memory_candidates_scope_type
+        ON memory_candidate_entries(scope_id, candidate_type, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_memory_candidates_target
+        ON memory_candidate_entries(target_object_type, target_object_id);
+    `);
+  }
+
+  private ensureMemoryCandidateSupersessionSchema(): void {
+    this.database.exec(`
+      CREATE TABLE IF NOT EXISTS memory_candidate_supersession_entries (
+        id TEXT PRIMARY KEY,
+        scope_id TEXT NOT NULL,
+        superseded_candidate_id TEXT NOT NULL UNIQUE REFERENCES memory_candidate_entries(id),
+        replacement_candidate_id TEXT NOT NULL REFERENCES memory_candidate_entries(id),
+        reviewed_at TEXT,
+        review_reason TEXT,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        CHECK (superseded_candidate_id <> replacement_candidate_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_memory_candidate_supersession_scope
+        ON memory_candidate_supersession_entries(scope_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_memory_candidate_supersession_replacement
+        ON memory_candidate_supersession_entries(replacement_candidate_id);
+      CREATE TRIGGER IF NOT EXISTS trg_memory_candidate_superseded_link_insert
+      BEFORE INSERT ON memory_candidate_entries
+      FOR EACH ROW
+      WHEN NEW.status = 'superseded'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM memory_candidate_supersession_entries
+          WHERE superseded_candidate_id = NEW.id
+        )
+      BEGIN
+        SELECT RAISE(ABORT, 'superseded candidate requires a supersession link record');
+      END;
+      CREATE TRIGGER IF NOT EXISTS trg_memory_candidate_superseded_link_update
+      BEFORE UPDATE ON memory_candidate_entries
+      FOR EACH ROW
+      WHEN NEW.status = 'superseded'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM memory_candidate_supersession_entries
+          WHERE superseded_candidate_id = NEW.id
+        )
+      BEGIN
+        SELECT RAISE(ABORT, 'superseded candidate requires a supersession link record');
+      END;
+    `);
   }
 
   private async migrateLegacySlugs(): Promise<void> {
@@ -2628,6 +3147,26 @@ function nowIso(): string {
 function toNullableIso(value: Date | string | null | undefined): string | null {
   if (value == null) return null;
   return value instanceof Date ? value.toISOString() : String(value);
+}
+
+function isSupersessionDuplicateConstraint(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const code = (error as { code?: string }).code;
+  return typeof code === 'string'
+    && code.startsWith('SQLITE_CONSTRAINT')
+    && error.message.includes('memory_candidate_supersession_entries.superseded_candidate_id');
+}
+
+function isCanonicalHandoffDuplicateConstraint(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const code = (error as { code?: string }).code;
+  return typeof code === 'string'
+    && code.startsWith('SQLITE_CONSTRAINT')
+    && error.message.includes('UNIQUE constraint failed: canonical_handoff_entries.');
 }
 
 function parseVersion(value: string | null): number {
@@ -2939,6 +3478,55 @@ function rowToMemoryCandidateEntry(row: Record<string, unknown>): MemoryCandidat
     review_reason: row.review_reason == null ? null : String(row.review_reason),
     created_at: new Date(String(row.created_at)),
     updated_at: new Date(String(row.updated_at)),
+  };
+}
+
+function rowToMemoryCandidateSupersessionEntry(
+  row: Record<string, unknown>,
+): MemoryCandidateSupersessionEntry {
+  return {
+    id: String(row.id),
+    scope_id: String(row.scope_id),
+    superseded_candidate_id: String(row.superseded_candidate_id),
+    replacement_candidate_id: String(row.replacement_candidate_id),
+    reviewed_at: row.reviewed_at ? new Date(String(row.reviewed_at)) : null,
+    review_reason: row.review_reason == null ? null : String(row.review_reason),
+    created_at: new Date(String(row.created_at)),
+    updated_at: new Date(String(row.updated_at)),
+  };
+}
+
+function rowToMemoryCandidateContradictionEntry(
+  row: Record<string, unknown>,
+): MemoryCandidateContradictionEntry {
+  return {
+    id: String(row.id),
+    scope_id: String(row.scope_id),
+    candidate_id: String(row.candidate_id),
+    challenged_candidate_id: String(row.challenged_candidate_id),
+    outcome: row.outcome as MemoryCandidateContradictionEntry['outcome'],
+    supersession_entry_id: row.supersession_entry_id == null ? null : String(row.supersession_entry_id),
+    reviewed_at: row.reviewed_at ? new Date(String(row.reviewed_at)) : null,
+    review_reason: row.review_reason == null ? null : String(row.review_reason),
+    created_at: new Date(String(row.created_at)),
+    updated_at: new Date(String(row.updated_at)),
+  };
+}
+
+function rowToCanonicalHandoffEntry(
+  row: Record<string, unknown>,
+): CanonicalHandoffEntry {
+  return {
+    id: row.id as string,
+    scope_id: row.scope_id as string,
+    candidate_id: row.candidate_id as string,
+    target_object_type: row.target_object_type as CanonicalHandoffEntry['target_object_type'],
+    target_object_id: row.target_object_id as string,
+    source_refs: parseJsonArray(row.source_refs),
+    reviewed_at: row.reviewed_at ? new Date(row.reviewed_at as string) : null,
+    review_reason: (row.review_reason as string | null) ?? null,
+    created_at: new Date(row.created_at as string),
+    updated_at: new Date(row.updated_at as string),
   };
 }
 

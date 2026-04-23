@@ -388,46 +388,137 @@ const MIGRATIONS: Migration[] = [
     version: 16,
     name: 'memory_inbox_rejection_slice',
     sql: `
-      CREATE TABLE memory_candidate_entries_v16 (
+      ALTER TABLE memory_candidate_entries
+        DROP CONSTRAINT IF EXISTS memory_candidate_entries_status_check;
+      ALTER TABLE memory_candidate_entries
+        ADD CONSTRAINT memory_candidate_entries_status_check
+        CHECK (status IN ('captured', 'candidate', 'staged_for_review', 'rejected'));
+      CREATE INDEX IF NOT EXISTS idx_memory_candidates_scope_status
+        ON memory_candidate_entries(scope_id, status, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_memory_candidates_scope_type
+        ON memory_candidate_entries(scope_id, candidate_type, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_memory_candidates_target
+        ON memory_candidate_entries(target_object_type, target_object_id);
+    `,
+  },
+  {
+    version: 17,
+    name: 'memory_inbox_promotion_slice',
+    sql: `
+      ALTER TABLE memory_candidate_entries
+        DROP CONSTRAINT IF EXISTS memory_candidate_entries_status_check;
+      ALTER TABLE memory_candidate_entries
+        ADD CONSTRAINT memory_candidate_entries_status_check
+        CHECK (status IN ('captured', 'candidate', 'staged_for_review', 'rejected', 'promoted'));
+      CREATE INDEX IF NOT EXISTS idx_memory_candidates_scope_status
+        ON memory_candidate_entries(scope_id, status, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_memory_candidates_scope_type
+        ON memory_candidate_entries(scope_id, candidate_type, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_memory_candidates_target
+        ON memory_candidate_entries(target_object_type, target_object_id);
+    `,
+  },
+  {
+    version: 18,
+    name: 'memory_inbox_supersession_slice',
+    sql: `
+      ALTER TABLE memory_candidate_entries
+        DROP CONSTRAINT IF EXISTS memory_candidate_entries_status_check;
+      ALTER TABLE memory_candidate_entries
+        ADD CONSTRAINT memory_candidate_entries_status_check
+        CHECK (status IN ('captured', 'candidate', 'staged_for_review', 'rejected', 'promoted', 'superseded'));
+      CREATE INDEX IF NOT EXISTS idx_memory_candidates_scope_status
+        ON memory_candidate_entries(scope_id, status, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_memory_candidates_scope_type
+        ON memory_candidate_entries(scope_id, candidate_type, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_memory_candidates_target
+        ON memory_candidate_entries(target_object_type, target_object_id);
+
+      CREATE TABLE IF NOT EXISTS memory_candidate_supersession_entries (
         id TEXT PRIMARY KEY,
         scope_id TEXT NOT NULL,
-        candidate_type TEXT NOT NULL CHECK (candidate_type IN ('fact', 'relationship', 'note_update', 'procedure', 'profile_update', 'open_question', 'rationale')),
-        proposed_content TEXT NOT NULL,
+        superseded_candidate_id TEXT NOT NULL UNIQUE REFERENCES memory_candidate_entries(id),
+        replacement_candidate_id TEXT NOT NULL REFERENCES memory_candidate_entries(id),
+        reviewed_at TIMESTAMPTZ,
+        review_reason TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        CHECK (superseded_candidate_id <> replacement_candidate_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_memory_candidate_supersession_scope
+        ON memory_candidate_supersession_entries(scope_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_memory_candidate_supersession_replacement
+        ON memory_candidate_supersession_entries(replacement_candidate_id);
+      CREATE OR REPLACE FUNCTION enforce_memory_candidate_superseded_link_v18()
+      RETURNS trigger AS $$
+      BEGIN
+        IF NEW.status = 'superseded'
+          AND NOT EXISTS (
+            SELECT 1
+            FROM memory_candidate_supersession_entries
+            WHERE superseded_candidate_id = NEW.id
+          ) THEN
+          RAISE EXCEPTION 'superseded candidate requires a supersession link record';
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+      DROP TRIGGER IF EXISTS trg_memory_candidate_superseded_link_v18 ON memory_candidate_entries;
+      CREATE TRIGGER trg_memory_candidate_superseded_link_v18
+      BEFORE INSERT OR UPDATE ON memory_candidate_entries
+      FOR EACH ROW
+      EXECUTE FUNCTION enforce_memory_candidate_superseded_link_v18();
+    `,
+  },
+  {
+    version: 19,
+    name: 'memory_inbox_contradiction_slice',
+    sql: `
+      CREATE TABLE IF NOT EXISTS memory_candidate_contradiction_entries (
+        id TEXT PRIMARY KEY,
+        scope_id TEXT NOT NULL,
+        candidate_id TEXT NOT NULL REFERENCES memory_candidate_entries(id),
+        challenged_candidate_id TEXT NOT NULL REFERENCES memory_candidate_entries(id),
+        outcome TEXT NOT NULL CHECK (outcome IN ('rejected', 'unresolved', 'superseded')),
+        supersession_entry_id TEXT REFERENCES memory_candidate_supersession_entries(id),
+        reviewed_at TIMESTAMPTZ,
+        review_reason TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        CHECK (candidate_id <> challenged_candidate_id),
+        CHECK (
+          (outcome = 'superseded' AND supersession_entry_id IS NOT NULL)
+          OR (outcome IN ('rejected', 'unresolved') AND supersession_entry_id IS NULL)
+        )
+      );
+      CREATE INDEX IF NOT EXISTS idx_memory_candidate_contradiction_scope
+        ON memory_candidate_contradiction_entries(scope_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_memory_candidate_contradiction_candidate
+        ON memory_candidate_contradiction_entries(candidate_id);
+      CREATE INDEX IF NOT EXISTS idx_memory_candidate_contradiction_challenged
+        ON memory_candidate_contradiction_entries(challenged_candidate_id);
+    `,
+  },
+  {
+    version: 20,
+    name: 'canonical_handoff_records',
+    sql: `
+      CREATE TABLE IF NOT EXISTS canonical_handoff_entries (
+        id TEXT PRIMARY KEY,
+        scope_id TEXT NOT NULL,
+        candidate_id TEXT NOT NULL UNIQUE REFERENCES memory_candidate_entries(id),
+        target_object_type TEXT NOT NULL CHECK (target_object_type IN ('curated_note', 'procedure', 'profile_memory', 'personal_episode')),
+        target_object_id TEXT NOT NULL,
         source_refs JSONB NOT NULL DEFAULT '[]',
-        generated_by TEXT NOT NULL CHECK (generated_by IN ('agent', 'map_analysis', 'dream_cycle', 'manual', 'import')),
-        extraction_kind TEXT NOT NULL CHECK (extraction_kind IN ('extracted', 'inferred', 'ambiguous', 'manual')),
-        confidence_score DOUBLE PRECISION NOT NULL,
-        importance_score DOUBLE PRECISION NOT NULL,
-        recurrence_score DOUBLE PRECISION NOT NULL,
-        sensitivity TEXT NOT NULL CHECK (sensitivity IN ('public', 'work', 'personal', 'secret', 'unknown')),
-        status TEXT NOT NULL CHECK (status IN ('captured', 'candidate', 'staged_for_review', 'rejected')),
-        target_object_type TEXT CHECK (target_object_type IS NULL OR target_object_type IN ('curated_note', 'procedure', 'profile_memory', 'personal_episode', 'other')),
-        target_object_id TEXT,
         reviewed_at TIMESTAMPTZ,
         review_reason TEXT,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
       );
-      INSERT INTO memory_candidate_entries_v16 (
-        id, scope_id, candidate_type, proposed_content, source_refs, generated_by,
-        extraction_kind, confidence_score, importance_score, recurrence_score,
-        sensitivity, status, target_object_type, target_object_id, reviewed_at,
-        review_reason, created_at, updated_at
-      )
-      SELECT
-        id, scope_id, candidate_type, proposed_content, source_refs, generated_by,
-        extraction_kind, confidence_score, importance_score, recurrence_score,
-        sensitivity, status, target_object_type, target_object_id, reviewed_at,
-        review_reason, created_at, updated_at
-      FROM memory_candidate_entries;
-      DROP TABLE memory_candidate_entries;
-      ALTER TABLE memory_candidate_entries_v16 RENAME TO memory_candidate_entries;
-      CREATE INDEX idx_memory_candidates_scope_status
-        ON memory_candidate_entries(scope_id, status, updated_at DESC);
-      CREATE INDEX idx_memory_candidates_scope_type
-        ON memory_candidate_entries(scope_id, candidate_type, updated_at DESC);
-      CREATE INDEX idx_memory_candidates_target
-        ON memory_candidate_entries(target_object_type, target_object_id);
+      CREATE INDEX IF NOT EXISTS idx_canonical_handoff_scope
+        ON canonical_handoff_entries(scope_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_canonical_handoff_target
+        ON canonical_handoff_entries(target_object_type, target_object_id);
     `,
   },
 ];

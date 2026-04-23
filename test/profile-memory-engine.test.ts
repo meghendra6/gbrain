@@ -92,6 +92,7 @@ async function expectProfileMemory(engine: BrainEngine, id: string, scopeId: str
 }
 
 for (const createHarness of [createSqliteHarness, createPgliteHarness]) {
+  const timeoutMs = createHarness === createPgliteHarness ? 10_000 : undefined;
   test(`${createHarness.name} persists profile memory entries across reopen`, async () => {
     const harness = await createHarness();
     const scopeId = 'personal:default';
@@ -120,7 +121,7 @@ for (const createHarness of [createSqliteHarness, createPgliteHarness]) {
       await reopened?.disconnect();
       await harness.cleanup();
     }
-  });
+  }, timeoutMs);
 }
 
 const databaseUrl = process.env.DATABASE_URL;

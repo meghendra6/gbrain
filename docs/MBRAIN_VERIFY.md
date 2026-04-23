@@ -820,6 +820,77 @@ Expected:
 - benchmark reports `memory_inbox_rejection` and `memory_inbox_rejection_correctness`
 - `acceptance.phase5_status` matches the local rejection-slice guardrail outcome
 
+## Phase 5 memory inbox promotion preflight
+
+Run:
+
+```bash
+bun test test/memory-inbox-service.test.ts test/memory-inbox-operations.test.ts test/phase5-memory-inbox-promotion-preflight.test.ts
+bun run bench:phase5-memory-inbox-promotion-preflight --json
+```
+
+Expected:
+
+- promotion preflight stays read-only and deterministic
+- staged candidates with provenance and target binding can return `allow`
+- missing provenance, missing target binding, and scope conflicts return `deny`
+- unknown sensitivity and procedure-sensitive candidates return `defer`
+- `preflight-promote-memory-candidate` stays available through the shared operation surface
+- benchmark reports `memory_inbox_promotion_preflight` and `memory_inbox_promotion_preflight_correctness`
+- `acceptance.phase5_status` matches the local promotion-preflight guardrail outcome
+
+## Phase 5 memory inbox promotion
+
+Run:
+
+```bash
+bun test test/memory-inbox-schema.test.ts test/memory-inbox-engine.test.ts test/memory-inbox-service.test.ts test/memory-inbox-operations.test.ts test/phase5-memory-inbox-promotion.test.ts
+bun run bench:phase5-memory-inbox-promotion --json
+```
+
+Expected:
+
+- `promoted` is a DB-valid canonical memory candidate status across SQLite and PGLite schema initialization
+- only staged candidates that pass promotion preflight can be promoted
+- `promote-memory-candidate` stays available through the shared operation surface
+- benchmark reports `memory_inbox_promotion` and `memory_inbox_promotion_correctness`
+- `acceptance.phase5_status` matches the local promotion-slice guardrail outcome
+
+## Phase 5 memory inbox supersession
+
+Run:
+
+```bash
+bun test test/memory-inbox-schema.test.ts test/memory-inbox-engine.test.ts test/memory-inbox-service.test.ts test/memory-inbox-operations.test.ts test/phase5-memory-inbox-supersession.test.ts
+bun run bench:phase5-memory-inbox-supersession --json
+```
+
+Expected:
+
+- `superseded` is a DB-valid canonical memory candidate status across SQLite and PGLite schema initialization
+- one explicit supersession record links the old candidate to the newer promoted replacement
+- only `staged_for_review` or `promoted` candidates can be superseded, and only by a replacement that is already `promoted`
+- `supersede-memory-candidate` stays available through the shared operation surface
+- benchmark reports `memory_inbox_supersession` and `memory_inbox_supersession_correctness`
+- `acceptance.phase5_status` matches the local supersession-slice guardrail outcome
+
+## Phase 5 memory inbox contradiction
+
+Run:
+
+```bash
+bun test test/memory-inbox-contradiction-service.test.ts test/memory-inbox-contradiction-operations.test.ts test/phase5-memory-inbox-contradiction.test.ts
+bun run bench:phase5-memory-inbox-contradiction --json
+```
+
+Expected:
+
+- contradiction handling stays inside the memory-inbox governance boundary
+- reject, unresolved, and superseded outcomes all remain explicit and auditable
+- `resolve-memory-candidate-contradiction` stays available through the shared operation surface
+- benchmark reports `memory_inbox_contradiction` and `memory_inbox_contradiction_correctness`
+- `acceptance.phase5_status` matches the local contradiction-slice guardrail outcome
+
 ## Phase 5 acceptance-pack
 
 Run:
@@ -835,7 +906,72 @@ Expected:
 - benchmark summarizes every published Phase 5 benchmark slice
 - `acceptance.readiness_status` reports `pass` only when all published Phase 5 slices pass
 - `acceptance.phase5_status` matches the aggregated phase outcome
-- `test:phase5` runs the published Phase 5 suites, the rejection benchmark test, and the acceptance-pack test
+- `test:phase5` runs the published Phase 5 suites, including contradiction handling, and the acceptance-pack test
+
+## Phase 6 candidate scoring
+
+Run:
+
+```bash
+bun test test/memory-candidate-scoring-service.test.ts test/memory-candidate-scoring-operations.test.ts test/phase6-candidate-scoring.test.ts
+bun run bench:phase6-candidate-scoring --json
+```
+
+Expect:
+
+- service tests prove deterministic review scoring, duplicate-provenance normalization, and stable tie-breaking
+- operation tests prove the ranked read surface stays read-only against stored inbox candidates
+- benchmark reports `memory_candidate_scoring_correctness` and `memory_candidate_scoring`
+- `acceptance.phase6_status` matches the local scoring-slice guardrail outcome
+
+## Phase 6 acceptance-pack
+
+Run:
+
+```bash
+bun test test/phase6-acceptance-pack.test.ts
+bun run bench:phase6-acceptance --json
+```
+
+Expect:
+
+- benchmark summarizes every published Phase 6 benchmark slice
+- `acceptance.readiness_status` reports `pass` only when all published Phase 6 slices pass
+- `acceptance.phase6_status` matches the aggregated phase outcome
+- `test:phase6` runs the published Phase 6 suites, starting with candidate scoring
+
+## Phase 6 map-derived candidates
+
+Run:
+
+```bash
+bun test test/map-derived-candidate-service.test.ts test/map-derived-candidate-operations.test.ts test/phase6-map-derived-candidates.test.ts
+bun run bench:phase6-map-derived-candidates --json
+```
+
+Expect:
+
+- ready maps capture `generated_by: map_analysis` candidates with `extraction_kind: inferred`
+- stale maps capture weaker `generated_by: map_analysis` candidates with `extraction_kind: ambiguous`
+- capture writes only inbox candidates and does not mutate the source map entry
+- benchmark reports `map_derived_candidates_correctness` and `map_derived_candidates`
+- `acceptance.phase6_status` matches the local bridge-slice guardrail outcome
+
+## Phase 6 candidate dedup
+
+Run:
+
+```bash
+bun test test/memory-candidate-dedup-service.test.ts test/memory-candidate-dedup-operations.test.ts test/phase6-candidate-dedup.test.ts
+bun run bench:phase6-candidate-dedup --json
+```
+
+Expect:
+
+- service tests prove exact duplicate grouping and recurrence aggregation
+- operation tests prove backlog grouping happens before pagination and does not mutate stored candidates
+- benchmark reports `memory_candidate_dedup_correctness` and `memory_candidate_dedup`
+- `acceptance.phase6_status` matches the local dedup-slice guardrail outcome
 
 ---
 
@@ -1030,3 +1166,131 @@ mbrain check-update --json
 
 If all six return successfully, the installation is healthy. For the full
 end-to-end sync test (4c), push a real change and verify it appears in search.
+
+## Phase 7 canonical handoff
+
+Run:
+
+```bash
+bun test test/canonical-handoff-service.test.ts test/canonical-handoff-engine.test.ts test/canonical-handoff-operations.test.ts test/phase7-canonical-handoff.test.ts test/memory-inbox-operations.test.ts
+bun run bench:phase7-canonical-handoff --json
+```
+
+Expected:
+
+- only `promoted` candidates with eligible canonical targets can record a handoff
+- SQLite, PGLite, and Postgres persistence stay aligned when `DATABASE_URL` is configured
+- handoff rows preserve candidate provenance and target binding
+- recording a handoff does not mutate the promoted candidate row
+- `record-canonical-handoff` and `list-canonical-handoffs` stay available through the shared operation surface
+- benchmark reports `canonical_handoff_correctness` and `canonical_handoff`
+- `acceptance.phase7_status` matches the local handoff-slice guardrail outcome
+
+## Phase 7 historical validity
+
+Run:
+
+```bash
+bun test test/historical-validity-service.test.ts test/historical-validity-engine.test.ts test/historical-validity-operations.test.ts test/phase7-historical-validity.test.ts test/memory-inbox-operations.test.ts
+bun run bench:phase7-historical-validity --json
+```
+
+Expected:
+
+- historical validity stays read-only and never mutates inbox or canonical target state
+- `target_object_id` peer matching behaves consistently across SQLite, PGLite, and Postgres when `DATABASE_URL` is configured
+- same-scope competing candidates are detected only when they share the exact canonical target binding
+- stale review windows produce `defer` without widening the fallback contract
+- newer promoted peers recommend `supersede`, and staged competing peers recommend `unresolved_conflict`
+- `assess-historical-validity` stays available through the shared operation surface
+- benchmark reports `historical_validity_correctness` and `historical_validity`
+- `acceptance.phase7_status` matches the local historical-validity guardrail outcome
+
+## Phase 7 acceptance-pack
+
+Run:
+
+```bash
+bun test test/phase7-acceptance-pack.test.ts
+bun run bench:phase7-acceptance --json
+```
+
+Expected:
+
+- acceptance-pack test passes
+- benchmark summarizes every published Phase 7 benchmark slice
+- `acceptance.readiness_status` reports `pass` only when all published Phase 7 slices pass
+- `acceptance.phase7_status` matches the aggregated phase outcome
+- `test:phase7` runs the published Phase 7 suites and the acceptance-pack test
+
+## Phase 8 longitudinal evaluation
+
+Run:
+
+```bash
+bun test test/phase8-longitudinal-evaluation.test.ts
+bun run bench:phase8-longitudinal --json
+```
+
+Optional full-comparability run:
+
+```bash
+bun run bench:phase8-longitudinal --json --phase1-baseline path/to/phase1-baseline.json
+```
+
+Expected:
+
+- the runner stays read-only and only replays the published Phase 1 through Phase 7 benchmark entrypoints
+- `phase1` reports `pending_baseline` when no comparable baseline artifact is supplied
+- `phase2` through `phase7` must report exact recorded benchmark manifests with no missing, extra, or duplicate names
+- `acceptance.readiness_status` reports `pass` as long as no phase regresses
+- `acceptance.phase8_status` reports:
+  - `pending_baseline` when only Phase 1 lacks a comparable baseline artifact
+  - `pass` when the supplied Phase 1 baseline is comparable and all phases remain green
+  - `fail` when any phase manifest or acceptance status regresses
+- `test:phase8` runs the longitudinal, dream-cycle, acceptance-pack, and memory-inbox operation inventory tests
+
+## Phase 8 dream-cycle maintenance
+
+Run:
+
+```bash
+bun test test/dream-cycle-maintenance-service.test.ts test/dream-cycle-maintenance-operations.test.ts test/phase8-dream-cycle.test.ts
+bun run bench:phase8-dream-cycle --json
+```
+
+Expected:
+
+- dream-cycle maintenance emits only Memory Inbox candidates with `generated_by: dream_cycle`
+- dry-run returns the same bounded suggestion shape without creating candidates
+- `limit` bounds total emitted suggestions and `recap` consumes one slot
+- stale-claim challenges reuse the historical-validity guard instead of writing canonical truth
+- duplicate-merge suggestions reuse the dedup backlog and stay scope-local
+- invalid `now` values are rejected before stale calculations
+- `run-dream-cycle-maintenance` stays available through the shared operation surface
+- benchmark reports `dream_cycle_candidate_only` and `dream_cycle`
+- `acceptance.phase8_status` matches the local dream-cycle guardrail outcome
+
+## Phase 8 acceptance-pack
+
+Run:
+
+```bash
+bun test test/phase8-acceptance-pack.test.ts
+bun run bench:phase8-acceptance --json
+```
+
+Optional full-comparability run:
+
+```bash
+bun run bench:phase8-acceptance --json --phase1-baseline path/to/phase1-baseline.json
+```
+
+Expected:
+
+- benchmark summarizes `longitudinal_evaluation` and `dream_cycle`
+- default `acceptance.readiness_status` and `acceptance.phase8_status` are `pending_baseline` until a comparable Phase 1 baseline is supplied
+- baseline-backed acceptance reports `pass` when longitudinal evaluation and dream-cycle both pass
+- `pending_baseline` exits successfully but must be reported as incomplete evidence, not full closure
+- `fail` exits non-zero
+- `test:phase8` runs the longitudinal, dream-cycle, acceptance-pack, and memory-inbox operation inventory tests

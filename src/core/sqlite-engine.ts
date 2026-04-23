@@ -70,7 +70,13 @@ import type {
 } from './types.ts';
 import { MBrainError } from './types.ts';
 import { buildFrontmatterSearchText, expandTechnicalAliases } from './markdown.ts';
-import { contentHash, importContentHash } from './utils.ts';
+import {
+  contentHash,
+  importContentHash,
+  rowToCanonicalHandoffEntry,
+  rowToMemoryCandidateContradictionEntry,
+  rowToMemoryCandidateSupersessionEntry,
+} from './utils.ts';
 
 const DEFAULT_EMBEDDING_MODEL = 'nomic-embed-text';
 const BASELINE_VERSION = 1;
@@ -1705,9 +1711,9 @@ export class SQLiteEngine implements BrainEngine {
         const insertResult = tx.database.run(`
           INSERT INTO memory_candidate_supersession_entries (
             id, scope_id, superseded_candidate_id, replacement_candidate_id, reviewed_at,
-            review_reason, created_at, updated_at
+            review_reason, interaction_id, created_at, updated_at
           )
-          SELECT ?, ?, ?, ?, ?, ?, ?, ?
+          SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
           WHERE EXISTS (
             SELECT 1
             FROM memory_candidate_entries
@@ -1722,6 +1728,7 @@ export class SQLiteEngine implements BrainEngine {
           input.replacement_candidate_id,
           toNullableIso(input.reviewed_at),
           input.review_reason ?? null,
+          input.interaction_id ?? null,
           timestamp,
           timestamp,
           input.replacement_candidate_id,
@@ -1754,7 +1761,7 @@ export class SQLiteEngine implements BrainEngine {
 
         const row = tx.database.query(`
           SELECT id, scope_id, superseded_candidate_id, replacement_candidate_id,
-                 reviewed_at, review_reason, created_at, updated_at
+                 reviewed_at, review_reason, interaction_id, created_at, updated_at
           FROM memory_candidate_supersession_entries
           WHERE id = ?
         `).get(input.id) as Record<string, unknown> | null;
@@ -1777,7 +1784,7 @@ export class SQLiteEngine implements BrainEngine {
   async getMemoryCandidateSupersessionEntry(id: string): Promise<MemoryCandidateSupersessionEntry | null> {
     const row = this.database.query(`
       SELECT id, scope_id, superseded_candidate_id, replacement_candidate_id,
-             reviewed_at, review_reason, created_at, updated_at
+             reviewed_at, review_reason, interaction_id, created_at, updated_at
       FROM memory_candidate_supersession_entries
       WHERE id = ?
     `).get(id) as Record<string, unknown> | null;
@@ -1791,9 +1798,9 @@ export class SQLiteEngine implements BrainEngine {
     const result = this.database.run(`
       INSERT INTO memory_candidate_contradiction_entries (
         id, scope_id, candidate_id, challenged_candidate_id, outcome, supersession_entry_id,
-        reviewed_at, review_reason, created_at, updated_at
+        reviewed_at, review_reason, interaction_id, created_at, updated_at
       )
-      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
       WHERE EXISTS (
         SELECT 1
         FROM memory_candidate_entries candidate
@@ -1823,6 +1830,7 @@ export class SQLiteEngine implements BrainEngine {
       input.supersession_entry_id ?? null,
       toNullableIso(input.reviewed_at),
       input.review_reason ?? null,
+      input.interaction_id ?? null,
       timestamp,
       timestamp,
       input.challenged_candidate_id,
@@ -1841,7 +1849,7 @@ export class SQLiteEngine implements BrainEngine {
 
     const row = this.database.query(`
       SELECT id, scope_id, candidate_id, challenged_candidate_id, outcome, supersession_entry_id,
-             reviewed_at, review_reason, created_at, updated_at
+             reviewed_at, review_reason, interaction_id, created_at, updated_at
       FROM memory_candidate_contradiction_entries
       WHERE id = ?
     `).get(input.id) as Record<string, unknown> | null;
@@ -1854,7 +1862,7 @@ export class SQLiteEngine implements BrainEngine {
   async getMemoryCandidateContradictionEntry(id: string): Promise<MemoryCandidateContradictionEntry | null> {
     const row = this.database.query(`
       SELECT id, scope_id, candidate_id, challenged_candidate_id, outcome, supersession_entry_id,
-             reviewed_at, review_reason, created_at, updated_at
+             reviewed_at, review_reason, interaction_id, created_at, updated_at
       FROM memory_candidate_contradiction_entries
       WHERE id = ?
     `).get(id) as Record<string, unknown> | null;
@@ -1870,9 +1878,9 @@ export class SQLiteEngine implements BrainEngine {
       result = this.database.run(`
         INSERT INTO canonical_handoff_entries (
           id, scope_id, candidate_id, target_object_type, target_object_id, source_refs,
-          reviewed_at, review_reason, created_at, updated_at
+          reviewed_at, review_reason, interaction_id, created_at, updated_at
         )
-        SELECT ?, ?, ?, ?, ?, source_refs, ?, ?, ?, ?
+        SELECT ?, ?, ?, ?, ?, source_refs, ?, ?, ?, ?, ?
         FROM memory_candidate_entries
         WHERE id = ?
           AND scope_id = ?
@@ -1887,6 +1895,7 @@ export class SQLiteEngine implements BrainEngine {
         input.target_object_id,
         toNullableIso(input.reviewed_at),
         input.review_reason ?? null,
+        input.interaction_id ?? null,
         timestamp,
         timestamp,
         input.candidate_id,
@@ -1906,7 +1915,7 @@ export class SQLiteEngine implements BrainEngine {
 
     const row = this.database.query(`
       SELECT id, scope_id, candidate_id, target_object_type, target_object_id, source_refs,
-             reviewed_at, review_reason, created_at, updated_at
+             reviewed_at, review_reason, interaction_id, created_at, updated_at
       FROM canonical_handoff_entries
       WHERE id = ?
     `).get(input.id) as Record<string, unknown> | null;
@@ -1919,7 +1928,7 @@ export class SQLiteEngine implements BrainEngine {
   async getCanonicalHandoffEntry(id: string): Promise<CanonicalHandoffEntry | null> {
     const row = this.database.query(`
       SELECT id, scope_id, candidate_id, target_object_type, target_object_id, source_refs,
-             reviewed_at, review_reason, created_at, updated_at
+             reviewed_at, review_reason, interaction_id, created_at, updated_at
       FROM canonical_handoff_entries
       WHERE id = ?
     `).get(id) as Record<string, unknown> | null;
@@ -1949,7 +1958,7 @@ export class SQLiteEngine implements BrainEngine {
     const whereClause = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
     const rows = this.database.query(`
       SELECT id, scope_id, candidate_id, target_object_type, target_object_id, source_refs,
-             reviewed_at, review_reason, created_at, updated_at
+             reviewed_at, review_reason, interaction_id, created_at, updated_at
       FROM canonical_handoff_entries
       ${whereClause}
       ORDER BY created_at DESC, id ASC
@@ -2783,6 +2792,29 @@ export class SQLiteEngine implements BrainEngine {
               ON canonical_handoff_entries(target_object_type, target_object_id);
           `);
           break;
+        case 21:
+          {
+            for (const table of [
+              'canonical_handoff_entries',
+              'memory_candidate_supersession_entries',
+              'memory_candidate_contradiction_entries',
+            ]) {
+              const columns = this.database.query(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+              const hasInteractionId = columns.some((column) => column.name === 'interaction_id');
+              if (!hasInteractionId) {
+                this.database.exec(`ALTER TABLE ${table} ADD COLUMN interaction_id TEXT;`);
+              }
+            }
+            this.database.exec(`
+              CREATE INDEX IF NOT EXISTS idx_canonical_handoff_interaction
+                ON canonical_handoff_entries(interaction_id);
+              CREATE INDEX IF NOT EXISTS idx_supersession_interaction
+                ON memory_candidate_supersession_entries(interaction_id);
+              CREATE INDEX IF NOT EXISTS idx_contradiction_interaction
+                ON memory_candidate_contradiction_entries(interaction_id);
+            `);
+          }
+          break;
       }
 
       await this.setConfig('version', String(version));
@@ -3486,55 +3518,6 @@ function rowToMemoryCandidateEntry(row: Record<string, unknown>): MemoryCandidat
     review_reason: row.review_reason == null ? null : String(row.review_reason),
     created_at: new Date(String(row.created_at)),
     updated_at: new Date(String(row.updated_at)),
-  };
-}
-
-function rowToMemoryCandidateSupersessionEntry(
-  row: Record<string, unknown>,
-): MemoryCandidateSupersessionEntry {
-  return {
-    id: String(row.id),
-    scope_id: String(row.scope_id),
-    superseded_candidate_id: String(row.superseded_candidate_id),
-    replacement_candidate_id: String(row.replacement_candidate_id),
-    reviewed_at: row.reviewed_at ? new Date(String(row.reviewed_at)) : null,
-    review_reason: row.review_reason == null ? null : String(row.review_reason),
-    created_at: new Date(String(row.created_at)),
-    updated_at: new Date(String(row.updated_at)),
-  };
-}
-
-function rowToMemoryCandidateContradictionEntry(
-  row: Record<string, unknown>,
-): MemoryCandidateContradictionEntry {
-  return {
-    id: String(row.id),
-    scope_id: String(row.scope_id),
-    candidate_id: String(row.candidate_id),
-    challenged_candidate_id: String(row.challenged_candidate_id),
-    outcome: row.outcome as MemoryCandidateContradictionEntry['outcome'],
-    supersession_entry_id: row.supersession_entry_id == null ? null : String(row.supersession_entry_id),
-    reviewed_at: row.reviewed_at ? new Date(String(row.reviewed_at)) : null,
-    review_reason: row.review_reason == null ? null : String(row.review_reason),
-    created_at: new Date(String(row.created_at)),
-    updated_at: new Date(String(row.updated_at)),
-  };
-}
-
-function rowToCanonicalHandoffEntry(
-  row: Record<string, unknown>,
-): CanonicalHandoffEntry {
-  return {
-    id: row.id as string,
-    scope_id: row.scope_id as string,
-    candidate_id: row.candidate_id as string,
-    target_object_type: row.target_object_type as CanonicalHandoffEntry['target_object_type'],
-    target_object_id: row.target_object_id as string,
-    source_refs: parseJsonArray(row.source_refs),
-    reviewed_at: row.reviewed_at ? new Date(row.reviewed_at as string) : null,
-    review_reason: (row.review_reason as string | null) ?? null,
-    created_at: new Date(row.created_at as string),
-    updated_at: new Date(row.updated_at as string),
   };
 }
 

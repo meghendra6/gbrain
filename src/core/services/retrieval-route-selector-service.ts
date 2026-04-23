@@ -6,6 +6,7 @@ import type {
   PersonalProfileLookupRoute,
   PrecisionLookupRoute,
   ScopeGateDecisionResult,
+  ScopeGateScope,
   RetrievalTrace,
   RetrievalRouteSelection,
   RetrievalRouteSelectorInput,
@@ -27,6 +28,7 @@ export async function selectRetrievalRoute(
     input.requested_scope !== undefined
     || input.intent === 'personal_profile_lookup'
     || input.intent === 'personal_episode_lookup'
+    || (input.persist_trace === true && input.task_id == null)
   );
   const scopeGate = shouldEvaluateScopeGate
     ? await evaluateScopeGate(engine, {
@@ -48,13 +50,13 @@ export async function selectRetrievalRoute(
       scope_gate: scopeGate,
     };
 
-    if (!input.persist_trace || !input.task_id) {
+    if (!input.persist_trace) {
       return denied;
     }
 
     return {
       ...denied,
-      trace: await persistSelectedRouteTrace(engine, input.task_id, denied),
+      trace: await persistSelectedRouteTrace(engine, denied, input.task_id),
     };
   }
 
@@ -81,19 +83,19 @@ export async function selectRetrievalRoute(
     selected.scope_gate = scopeGate;
   }
 
-  if (!input.persist_trace || !input.task_id) {
+  if (!input.persist_trace) {
     return selected;
   }
 
   return {
     ...selected,
-    trace: await persistSelectedRouteTrace(engine, input.task_id, selected),
+    trace: await persistSelectedRouteTrace(engine, selected, input.task_id),
   };
 }
 
 async function selectTaskResumeRoute(
   engine: BrainEngine,
-  taskId: string | undefined,
+  taskId: string | null | undefined,
 ): Promise<RetrievalRouteSelectorResult> {
   if (!taskId) {
     return {
@@ -289,29 +291,37 @@ function buildDelegatedSelection(
 
 async function persistSelectedRouteTrace(
   engine: BrainEngine,
-  taskId: string,
   selected: RetrievalRouteSelectorResult,
+  taskId?: string | null,
 ): Promise<RetrievalTrace> {
-  const thread = await engine.getTaskThread(taskId);
-  if (!thread) {
-    throw new Error(`Task thread not found: ${taskId}`);
-  }
+  const thread = taskId != null ? await engine.getTaskThread(taskId) : null;
+  const threadMissing = taskId != null && thread == null;
+
+  const scope: ScopeGateScope = thread?.scope
+    ?? selected.scope_gate?.resolved_scope
+    ?? 'unknown';
 
   return engine.putRetrievalTrace({
     id: crypto.randomUUID(),
-    task_id: taskId,
-    scope: thread.scope,
+    task_id: thread ? taskId! : null,
+    scope,
     route: selected.route?.retrieval_route ?? [],
     source_refs: collectSourceRefs(selected.route),
     verification: [
       `intent:${selected.selected_intent}`,
       `selection_reason:${selected.selection_reason}`,
       ...buildScopeGateVerification(selected.scope_gate),
+      ...(threadMissing ? [formatMissingTaskVerification(taskId)] : []),
     ],
     outcome: selected.route
       ? `${selected.selected_intent} route selected`
       : `${selected.selected_intent} route unavailable`,
   });
+}
+
+function formatMissingTaskVerification(taskId: string): string {
+  const safeTaskId = /^[\w-]{1,64}$/.test(taskId) ? taskId : '<invalid>';
+  return `task_id_not_found:${safeTaskId}`;
 }
 
 function buildScopeGateVerification(scopeGate: ScopeGateDecisionResult | undefined): string[] {

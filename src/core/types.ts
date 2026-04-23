@@ -837,6 +837,7 @@ export interface MemoryCandidateSupersessionEntry {
   replacement_candidate_id: string;
   reviewed_at: Date | null;
   review_reason: string | null;
+  interaction_id: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -849,6 +850,7 @@ export interface MemoryCandidateSupersessionInput {
   expected_current_status: 'staged_for_review' | 'promoted';
   reviewed_at?: Date | string | null;
   review_reason?: string | null;
+  interaction_id?: string | null;
 }
 
 export type MemoryCandidateContradictionOutcome =
@@ -867,6 +869,7 @@ export interface MemoryCandidateContradictionEntry {
   supersession_entry_id: string | null;
   reviewed_at: Date | null;
   review_reason: string | null;
+  interaction_id: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -880,6 +883,7 @@ export interface MemoryCandidateContradictionEntryInput {
   supersession_entry_id?: string | null;
   reviewed_at?: Date | string | null;
   review_reason?: string | null;
+  interaction_id?: string | null;
 }
 
 export interface CanonicalHandoffEntry {
@@ -891,6 +895,7 @@ export interface CanonicalHandoffEntry {
   source_refs: string[];
   reviewed_at: Date | null;
   review_reason: string | null;
+  interaction_id: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -904,6 +909,7 @@ export interface CanonicalHandoffEntryInput {
   source_refs: string[];
   reviewed_at?: Date | string | null;
   review_reason?: string | null;
+  interaction_id?: string | null;
 }
 
 export interface CanonicalHandoffFilters {
@@ -985,7 +991,7 @@ export interface RetrievalRouteSelection {
 
 export interface RetrievalRouteSelectorInput {
   intent: RetrievalRouteIntent;
-  task_id?: string;
+  task_id?: string | null;
   persist_trace?: boolean;
   requested_scope?: Exclude<ScopeGateScope, 'unknown'>;
   personal_route_kind?: 'profile' | 'episode';
@@ -1020,7 +1026,7 @@ export type ScopeGateIntent = RetrievalRouteIntent;
 export interface ScopeGateDecisionInput {
   intent: ScopeGateIntent;
   requested_scope?: Exclude<ScopeGateScope, 'unknown'>;
-  task_id?: string;
+  task_id?: string | null;
   query?: string;
   repo_path?: string;
   subject?: string;
@@ -1426,7 +1432,8 @@ export interface TaskDecisionInput {
 export interface RetrievalTrace {
   id: string;
   task_id: string | null;
-  scope: TaskScope;
+  // widened from TaskScope — supports task-less traces
+  scope: ScopeGateScope;
   route: string[];
   source_refs: string[];
   verification: string[];
@@ -1437,7 +1444,8 @@ export interface RetrievalTrace {
 export interface RetrievalTraceInput {
   id: string;
   task_id?: string | null;
-  scope: TaskScope;
+  // widened from TaskScope — supports task-less traces
+  scope: ScopeGateScope;
   route?: string[];
   source_refs?: string[];
   verification?: string[];

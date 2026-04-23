@@ -81,6 +81,38 @@ test('canonical handoff service records explicit handoff rows for promoted candi
   }
 });
 
+test('canonical handoff service forwards interaction_id to the engine call', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mbrain-canonical-handoff-service-interaction-'));
+  const databasePath = join(dir, 'brain.db');
+  const engine = new SQLiteEngine();
+
+  try {
+    await engine.connect({ engine: 'sqlite', database_path: databasePath });
+    await engine.initSchema();
+    await seedPromotedCandidate(engine, 'candidate-interaction');
+
+    const originalCreate = engine.createCanonicalHandoffEntry.bind(engine);
+    let capturedInput: Record<string, unknown> | null = null;
+    engine.createCanonicalHandoffEntry = async (input: any) => {
+      capturedInput = input;
+      return originalCreate(input);
+    };
+
+    await recordCanonicalHandoff(engine, {
+      candidate_id: 'candidate-interaction',
+      interaction_id: 'interaction-123',
+      review_reason: 'Forward interaction context into canonical handoff storage.',
+    });
+
+    expect(capturedInput).toMatchObject({
+      interaction_id: 'interaction-123',
+    });
+  } finally {
+    await engine.disconnect();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('canonical handoff service rejects non-promoted, null-target, and duplicate handoff routes', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'mbrain-canonical-handoff-service-invalid-'));
   const databasePath = join(dir, 'brain.db');

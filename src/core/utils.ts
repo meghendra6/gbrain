@@ -268,6 +268,7 @@ export function rowToMemoryCandidateSupersessionEntry(
     replacement_candidate_id: row.replacement_candidate_id as string,
     reviewed_at: row.reviewed_at ? new Date(row.reviewed_at as string) : null,
     review_reason: (row.review_reason as string | null) ?? null,
+    interaction_id: row.interaction_id == null ? null : String(row.interaction_id),
     created_at: new Date(row.created_at as string),
     updated_at: new Date(row.updated_at as string),
   };
@@ -285,6 +286,7 @@ export function rowToMemoryCandidateContradictionEntry(
     supersession_entry_id: (row.supersession_entry_id as string | null) ?? null,
     reviewed_at: row.reviewed_at ? new Date(row.reviewed_at as string) : null,
     review_reason: (row.review_reason as string | null) ?? null,
+    interaction_id: row.interaction_id == null ? null : String(row.interaction_id),
     created_at: new Date(row.created_at as string),
     updated_at: new Date(row.updated_at as string),
   };
@@ -302,6 +304,7 @@ export function rowToCanonicalHandoffEntry(
     source_refs: parseJsonStringArray(row.source_refs),
     reviewed_at: row.reviewed_at ? new Date(row.reviewed_at as string) : null,
     review_reason: (row.review_reason as string | null) ?? null,
+    interaction_id: row.interaction_id == null ? null : String(row.interaction_id),
     created_at: new Date(row.created_at as string),
     updated_at: new Date(row.updated_at as string),
   };

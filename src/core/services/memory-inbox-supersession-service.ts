@@ -13,6 +13,7 @@ export interface SupersedeMemoryCandidateEntryInput {
   replacement_candidate_id: string;
   reviewed_at?: Date | string | null;
   review_reason?: string | null;
+  interaction_id?: string | null;
 }
 
 export interface SupersedeMemoryCandidateEntryResult {
@@ -78,6 +79,7 @@ export async function supersedeMemoryCandidateEntry(
     expected_current_status: supersededCandidate.status,
     reviewed_at: reviewedAt,
     review_reason: input.review_reason ?? null,
+    interaction_id: input.interaction_id ?? null,
   });
 
   if (!supersessionEntry) {

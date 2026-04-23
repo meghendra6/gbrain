@@ -109,6 +109,40 @@ test('memory inbox service advances candidate to staged_for_review with review m
   }
 });
 
+test('memory inbox supersession service forwards interaction_id to the engine call', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mbrain-memory-inbox-service-supersession-interaction-'));
+  const databasePath = join(dir, 'brain.db');
+  const engine = new SQLiteEngine();
+
+  try {
+    await engine.connect({ engine: 'sqlite', database_path: databasePath });
+    await engine.initSchema();
+    await seedPromotedCandidate(engine, 'superseded-interaction');
+    await seedPromotedCandidate(engine, 'replacement-interaction');
+
+    const originalSupersede = engine.supersedeMemoryCandidateEntry.bind(engine);
+    let capturedInput: Record<string, unknown> | null = null;
+    engine.supersedeMemoryCandidateEntry = async (input: any) => {
+      capturedInput = input;
+      return originalSupersede(input);
+    };
+
+    await supersedeMemoryCandidateEntry(engine, {
+      superseded_candidate_id: 'superseded-interaction',
+      replacement_candidate_id: 'replacement-interaction',
+      interaction_id: 'interaction-456',
+      review_reason: 'Forward interaction context into supersession storage.',
+    });
+
+    expect(capturedInput).toMatchObject({
+      interaction_id: 'interaction-456',
+    });
+  } finally {
+    await engine.disconnect();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('memory inbox service preserves explicit null reviewed_at when staging for review', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'mbrain-memory-inbox-service-null-reviewed-at-'));
   const databasePath = join(dir, 'brain.db');

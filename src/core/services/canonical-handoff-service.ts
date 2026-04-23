@@ -12,6 +12,7 @@ export interface RecordCanonicalHandoffInput {
   candidate_id: string;
   reviewed_at?: Date | string | null;
   review_reason?: string | null;
+  interaction_id?: string | null;
 }
 
 export interface RecordCanonicalHandoffResult {
@@ -56,6 +57,7 @@ export async function recordCanonicalHandoff(
     source_refs: [...candidate.source_refs],
     reviewed_at: reviewedAt,
     review_reason: input.review_reason ?? null,
+    interaction_id: input.interaction_id ?? null,
   });
   if (!handoff) {
     throw new MemoryInboxServiceError(

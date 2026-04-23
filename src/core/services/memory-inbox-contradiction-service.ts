@@ -18,6 +18,7 @@ export interface ResolveMemoryCandidateContradictionInput {
   outcome: MemoryCandidateContradictionOutcome;
   reviewed_at?: Date | string | null;
   review_reason?: string | null;
+  interaction_id?: string | null;
 }
 
 export interface ResolveMemoryCandidateContradictionResult {
@@ -93,6 +94,7 @@ export async function resolveMemoryCandidateContradiction(
           supersession_entry_id: null,
           reviewed_at: reviewedAt,
           review_reason: reviewReason,
+          interaction_id: input.interaction_id ?? null,
         });
         if (!contradictionEntry) {
           throw new MemoryInboxServiceError(
@@ -117,6 +119,7 @@ export async function resolveMemoryCandidateContradiction(
           supersession_entry_id: null,
           reviewed_at: reviewedAt,
           review_reason: reviewReason,
+          interaction_id: input.interaction_id ?? null,
         });
         if (!contradictionEntry) {
           throw new MemoryInboxServiceError(
@@ -137,6 +140,7 @@ export async function resolveMemoryCandidateContradiction(
           replacement_candidate_id: candidate.id,
           reviewed_at: reviewedAt,
           review_reason: reviewReason,
+          interaction_id: input.interaction_id ?? null,
         });
         const contradictionEntry = await tx.createMemoryCandidateContradictionEntry({
           id: contradictionId,
@@ -147,6 +151,7 @@ export async function resolveMemoryCandidateContradiction(
           supersession_entry_id: supersession.supersession_entry.id,
           reviewed_at: reviewedAt,
           review_reason: reviewReason,
+          interaction_id: input.interaction_id ?? null,
         });
         if (!contradictionEntry) {
           throw new MemoryInboxServiceError(

@@ -59,6 +59,51 @@ test('memory inbox contradiction service resolves rejected, unresolved, and supe
   }
 });
 
+test('memory inbox contradiction service forwards interaction_id to supersession and contradiction engine calls', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mbrain-memory-inbox-contradiction-service-interaction-'));
+  const databasePath = join(dir, 'brain.db');
+  const engine = new SQLiteEngine();
+
+  try {
+    await engine.connect({ engine: 'sqlite', database_path: databasePath });
+    await engine.initSchema();
+
+    await seedPromotedCandidate(engine, 'challenged-interaction');
+    await seedPromotedCandidate(engine, 'challenger-interaction');
+
+    const originalSupersede = engine.supersedeMemoryCandidateEntry.bind(engine);
+    const originalCreateContradiction = engine.createMemoryCandidateContradictionEntry.bind(engine);
+    let capturedSupersedeInput: Record<string, unknown> | null = null;
+    let capturedContradictionInput: Record<string, unknown> | null = null;
+    engine.supersedeMemoryCandidateEntry = async (input: any) => {
+      capturedSupersedeInput = input;
+      return originalSupersede(input);
+    };
+    engine.createMemoryCandidateContradictionEntry = async (input: any) => {
+      capturedContradictionInput = input;
+      return originalCreateContradiction(input);
+    };
+
+    await resolveMemoryCandidateContradiction(engine, {
+      candidate_id: 'challenger-interaction',
+      challenged_candidate_id: 'challenged-interaction',
+      outcome: 'superseded',
+      interaction_id: 'interaction-789',
+      review_reason: 'Forward interaction context through contradiction resolution.',
+    });
+
+    expect(capturedSupersedeInput).toMatchObject({
+      interaction_id: 'interaction-789',
+    });
+    expect(capturedContradictionInput).toMatchObject({
+      interaction_id: 'interaction-789',
+    });
+  } finally {
+    await engine.disconnect();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('memory inbox contradiction service rejects invalid contradiction routes', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'mbrain-memory-inbox-contradiction-service-invalid-'));
   const databasePath = join(dir, 'brain.db');

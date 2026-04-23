@@ -23,6 +23,7 @@ export function assertMemoryCandidateCreateStatus(
   return status;
 }
 
+// Governs generic status patches only; promotion and supersession use dedicated CAS methods.
 export function isAllowedMemoryCandidateStatusUpdate(
   currentStatus: MemoryCandidateStatus,
   nextStatus: MemoryCandidateStatusPatch['status'],
@@ -36,6 +37,13 @@ export function isAllowedMemoryCandidateStatusUpdate(
       return nextStatus === 'rejected';
     case 'rejected':
     case 'promoted':
+    case 'superseded':
       return false;
+    default:
+      return assertNeverMemoryCandidateStatus(currentStatus);
   }
+}
+
+function assertNeverMemoryCandidateStatus(status: never): never {
+  throw new Error(`Unhandled memory candidate status: ${status}`);
 }

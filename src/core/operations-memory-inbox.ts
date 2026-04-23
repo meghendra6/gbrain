@@ -82,13 +82,13 @@ function normalizeSourceRefs(
     if (params.source_refs.some((entry) => entry.trim().length === 0)) {
       throw invalidParams(deps, 'source_refs entries must be non-empty strings');
     }
-    return [...params.source_refs];
+    return params.source_refs.map((entry) => entry.trim());
   }
   if (typeof params.source_ref === 'string') {
     if (params.source_ref.trim().length === 0) {
       throw invalidParams(deps, 'source_ref must be a non-empty string');
     }
-    return [params.source_ref];
+    return [params.source_ref.trim()];
   }
   if (params.source_ref == null && params.source_refs == null) {
     return [];
@@ -157,7 +157,7 @@ function normalizeOptionalTargetObjectId(
   if (typeof value !== 'string' || value.trim().length === 0) {
     throw invalidParams(deps, 'target_object_id must be a non-empty string');
   }
-  return value;
+  return value.trim();
 }
 
 function normalizeOptionalIsoTimestamp(

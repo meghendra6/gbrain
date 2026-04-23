@@ -283,8 +283,15 @@ function getAllowedAdvanceTargetStatus(
       return ALLOWED_TRANSITIONS[status];
     case 'rejected':
     case 'promoted':
+    case 'superseded':
       return null;
+    default:
+      return assertNeverMemoryCandidateStatus(status);
   }
+}
+
+function assertNeverMemoryCandidateStatus(status: never): never {
+  throw new Error(`Unhandled memory candidate status: ${status}`);
 }
 
 function formatReasonLabel(reason: MemoryCandidatePromotionPreflightReason): string {

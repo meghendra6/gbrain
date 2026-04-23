@@ -570,6 +570,29 @@ test('memory inbox create accepts source_refs arrays and rejects future-only sta
       'Meeting notes, Architecture Sync, 2026-04-23 1:20 PM KST',
     ]);
 
+    const trimmed = await create.handler({
+      engine,
+      config: {} as any,
+      logger: console,
+      dryRun: false,
+    }, {
+      id: 'candidate-trimmed-boundaries',
+      candidate_type: 'fact',
+      proposed_content: 'Operation boundaries normalize provenance and target ids before persistence.',
+      source_refs: [
+        ' User, direct message, 2026-04-23 1:25 PM KST ',
+        ' Meeting notes, Architecture Sync, 2026-04-23 1:30 PM KST ',
+      ],
+      target_object_type: 'curated_note',
+      target_object_id: ' concepts/normalized-target ',
+    });
+
+    expect((trimmed as any).source_refs).toEqual([
+      'User, direct message, 2026-04-23 1:25 PM KST',
+      'Meeting notes, Architecture Sync, 2026-04-23 1:30 PM KST',
+    ]);
+    expect((trimmed as any).target_object_id).toBe('concepts/normalized-target');
+
     await expect(create.handler({
       engine,
       config: {} as any,

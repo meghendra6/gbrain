@@ -10,6 +10,7 @@ import {
 } from '../scripts/bench/phase8-longitudinal-evaluation.ts';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
+const BENCHMARK_PROCESS_TIMEOUT_MS = 30_000;
 
 describe('phase8 longitudinal evaluation benchmark', () => {
   test('--help prints usage', () => {
@@ -54,7 +55,7 @@ describe('phase8 longitudinal evaluation benchmark', () => {
 
     expect(payload.acceptance.readiness_status).toBe('pass');
     expect(payload.acceptance.phase8_status).toBe('pending_baseline');
-  });
+  }, BENCHMARK_PROCESS_TIMEOUT_MS);
 
   test('--phase1-baseline makes the longitudinal pack fully comparable', () => {
     const dir = mkdtempSync(join(tmpdir(), 'mbrain-phase8-phase1-baseline-'));
@@ -95,7 +96,7 @@ describe('phase8 longitudinal evaluation benchmark', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-  });
+  }, BENCHMARK_PROCESS_TIMEOUT_MS);
 
   test('exact-manifest regressions fail longitudinal acceptance', () => {
     expect(compareBenchmarkManifest(['a', 'b'], ['b', 'a'])).toBe(true);

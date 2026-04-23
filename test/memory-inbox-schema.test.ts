@@ -123,6 +123,12 @@ describe('memory-inbox schema', () => {
        WHERE id = $1`,
       [`${prefix}-replacement`],
     )).resolves.toBeDefined();
+    await expect(db.query(
+      `UPDATE memory_candidate_entries
+       SET status = 'superseded'
+       WHERE id = $1`,
+      [`${prefix}-supersedable`],
+    )).rejects.toThrow(/superseded candidate requires a supersession link record/);
     await db.query(
       `INSERT INTO memory_candidate_supersession_entries (
         id,

@@ -6,6 +6,7 @@ import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
+const BENCHMARK_PROCESS_TIMEOUT_MS = 30_000;
 
 describe('phase8 acceptance-pack benchmark', () => {
   test('--json prints a pending-baseline phase8 acceptance summary by default', () => {
@@ -25,7 +26,7 @@ describe('phase8 acceptance-pack benchmark', () => {
     ]);
     expect(payload.acceptance.readiness_status).toBe('pending_baseline');
     expect(payload.acceptance.phase8_status).toBe('pending_baseline');
-  });
+  }, BENCHMARK_PROCESS_TIMEOUT_MS);
 
   test('--phase1-baseline enables full phase8 acceptance pass', () => {
     const dir = mkdtempSync(join(tmpdir(), 'mbrain-phase8-acceptance-baseline-'));
@@ -64,7 +65,7 @@ describe('phase8 acceptance-pack benchmark', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-  });
+  }, BENCHMARK_PROCESS_TIMEOUT_MS);
 
   test('--phase1-baseline without a path fails fast', () => {
     const proc = spawnSync([

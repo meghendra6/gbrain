@@ -1430,7 +1430,8 @@ export class PostgresEngine implements BrainEngine {
 
         const rows = await sql`
           INSERT INTO memory_candidate_supersession_entries (
-            id, scope_id, superseded_candidate_id, replacement_candidate_id, reviewed_at, review_reason
+            id, scope_id, superseded_candidate_id, replacement_candidate_id, reviewed_at, review_reason,
+            interaction_id
           )
           VALUES (
             ${input.id},
@@ -1438,10 +1439,11 @@ export class PostgresEngine implements BrainEngine {
             ${input.superseded_candidate_id},
             ${input.replacement_candidate_id},
             ${input.reviewed_at instanceof Date ? input.reviewed_at.toISOString() : input.reviewed_at ?? null},
-            ${input.review_reason ?? null}
+            ${input.review_reason ?? null},
+            ${input.interaction_id ?? null}
           )
           RETURNING id, scope_id, superseded_candidate_id, replacement_candidate_id,
-                    reviewed_at, review_reason, created_at, updated_at
+                    reviewed_at, review_reason, interaction_id, created_at, updated_at
         `;
         if (rows.length === 0) {
           throw new Error(rollbackSentinel);
@@ -1479,7 +1481,7 @@ export class PostgresEngine implements BrainEngine {
     const sql = this.sql;
     const rows = await sql`
       SELECT id, scope_id, superseded_candidate_id, replacement_candidate_id,
-             reviewed_at, review_reason, created_at, updated_at
+             reviewed_at, review_reason, interaction_id, created_at, updated_at
       FROM memory_candidate_supersession_entries
       WHERE id = ${id}
     `;
@@ -1496,7 +1498,7 @@ export class PostgresEngine implements BrainEngine {
     const rows = await sql`
       INSERT INTO memory_candidate_contradiction_entries (
         id, scope_id, candidate_id, challenged_candidate_id, outcome, supersession_entry_id,
-        reviewed_at, review_reason
+        reviewed_at, review_reason, interaction_id
       )
       SELECT
         ${input.id},
@@ -1506,7 +1508,8 @@ export class PostgresEngine implements BrainEngine {
         ${input.outcome},
         ${input.supersession_entry_id ?? null},
         ${input.reviewed_at instanceof Date ? input.reviewed_at.toISOString() : input.reviewed_at ?? null},
-        ${input.review_reason ?? null}
+        ${input.review_reason ?? null},
+        ${input.interaction_id ?? null}
       WHERE EXISTS (
         SELECT 1
         FROM memory_candidate_entries candidate
@@ -1528,7 +1531,7 @@ export class PostgresEngine implements BrainEngine {
           )
         )
       RETURNING id, scope_id, candidate_id, challenged_candidate_id, outcome, supersession_entry_id,
-                reviewed_at, review_reason, created_at, updated_at
+                reviewed_at, review_reason, interaction_id, created_at, updated_at
     `;
     if (rows.length === 0) {
       return null;
@@ -1540,7 +1543,7 @@ export class PostgresEngine implements BrainEngine {
     const sql = this.sql;
     const rows = await sql`
       SELECT id, scope_id, candidate_id, challenged_candidate_id, outcome, supersession_entry_id,
-             reviewed_at, review_reason, created_at, updated_at
+             reviewed_at, review_reason, interaction_id, created_at, updated_at
       FROM memory_candidate_contradiction_entries
       WHERE id = ${id}
     `;
@@ -1557,7 +1560,7 @@ export class PostgresEngine implements BrainEngine {
     const rows = await sql`
       INSERT INTO canonical_handoff_entries (
         id, scope_id, candidate_id, target_object_type, target_object_id, source_refs,
-        reviewed_at, review_reason
+        reviewed_at, review_reason, interaction_id
       )
       SELECT
         ${input.id},
@@ -1567,7 +1570,8 @@ export class PostgresEngine implements BrainEngine {
         ${input.target_object_id},
         source_refs,
         ${input.reviewed_at instanceof Date ? input.reviewed_at.toISOString() : input.reviewed_at ?? null},
-        ${input.review_reason ?? null}
+        ${input.review_reason ?? null},
+        ${input.interaction_id ?? null}
       FROM memory_candidate_entries
       WHERE id = ${input.candidate_id}
         AND scope_id = ${input.scope_id}
@@ -1576,7 +1580,7 @@ export class PostgresEngine implements BrainEngine {
         AND target_object_id = ${input.target_object_id}
       ON CONFLICT DO NOTHING
       RETURNING id, scope_id, candidate_id, target_object_type, target_object_id, source_refs,
-                reviewed_at, review_reason, created_at, updated_at
+                reviewed_at, review_reason, interaction_id, created_at, updated_at
     `;
     if (rows.length === 0) {
       return null;
@@ -1588,7 +1592,7 @@ export class PostgresEngine implements BrainEngine {
     const sql = this.sql;
     const rows = await sql`
       SELECT id, scope_id, candidate_id, target_object_type, target_object_id, source_refs,
-             reviewed_at, review_reason, created_at, updated_at
+             reviewed_at, review_reason, interaction_id, created_at, updated_at
       FROM canonical_handoff_entries
       WHERE id = ${id}
     `;
@@ -1623,7 +1627,7 @@ export class PostgresEngine implements BrainEngine {
     const whereClause = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
     const rows = await sql.unsafe(
       `SELECT id, scope_id, candidate_id, target_object_type, target_object_id, source_refs,
-              reviewed_at, review_reason, created_at, updated_at
+              reviewed_at, review_reason, interaction_id, created_at, updated_at
        FROM canonical_handoff_entries
        ${whereClause}
        ORDER BY created_at DESC, id ASC

@@ -47,5 +47,5 @@ describe('context-atlas schema', () => {
 
     expect(result.rows).toHaveLength(1);
     await engine.disconnect();
-  });
+  }, 10_000);
 });

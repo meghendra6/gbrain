@@ -8,6 +8,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { SQLiteEngine } from '../../src/core/sqlite-engine.ts';
 import { PGLiteEngine } from '../../src/core/pglite-engine.ts';
+import { PostgresEngine } from '../../src/core/postgres-engine.ts';
 import { seedMemoryCandidate } from './helpers.ts';
 import { promoteMemoryCandidateEntry } from '../../src/core/services/memory-inbox-promotion-service.ts';
 import { supersedeMemoryCandidateEntry } from '../../src/core/services/memory-inbox-supersession-service.ts';
@@ -46,9 +47,27 @@ async function allocatePglite(label: string): Promise<{ engine: PGLiteEngine; te
   };
 }
 
+const databaseUrl = process.env.DATABASE_URL;
+
+async function allocatePostgres(_label: string): Promise<{ engine: PostgresEngine; teardown: () => Promise<void> }> {
+  if (!databaseUrl) {
+    throw new Error('DATABASE_URL is not configured');
+  }
+
+  const engine = new PostgresEngine();
+  await engine.connect({ engine: 'postgres', database_url: databaseUrl });
+  await engine.initSchema();
+  return {
+    engine,
+    teardown: async () => {
+      await engine.disconnect();
+    },
+  };
+}
+
 function runEngineSuite(
-  label: 'sqlite' | 'pglite',
-  allocate: (l: string) => Promise<{ engine: SQLiteEngine | PGLiteEngine; teardown: () => Promise<void> }>,
+  label: 'sqlite' | 'pglite' | 'postgres',
+  allocate: (l: string) => Promise<{ engine: SQLiteEngine | PGLiteEngine | PostgresEngine; teardown: () => Promise<void> }>,
 ) {
   describe(`S19 [${label}] — supersession carries interaction_id`, () => {
     test(
@@ -95,3 +114,10 @@ function runEngineSuite(
 
 runEngineSuite('sqlite', allocateSqlite);
 runEngineSuite('pglite', allocatePglite);
+if (databaseUrl) {
+  runEngineSuite('postgres', allocatePostgres);
+} else {
+  describe('S19 [postgres] — supersession carries interaction_id', () => {
+    test.skip('postgres coverage skipped: DATABASE_URL is not configured', () => {});
+  });
+}

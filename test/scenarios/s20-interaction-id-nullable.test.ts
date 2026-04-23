@@ -25,6 +25,8 @@ describe('S20 — absent interaction_id is valid', () => {
         candidate_id: 'cand-s20-h',
       });
       expect(handoff.interaction_id).toBeNull();
+      const stored = await handle.engine.getCanonicalHandoffEntry(handoff.id);
+      expect(stored?.interaction_id).toBeNull();
     } finally {
       await handle.teardown();
     }
@@ -51,6 +53,8 @@ describe('S20 — absent interaction_id is valid', () => {
         replacement_candidate_id: 'cand-s20-new',
       });
       expect(result.supersession_entry?.interaction_id).toBeNull();
+      const stored = await handle.engine.getMemoryCandidateSupersessionEntry(result.supersession_entry!.id);
+      expect(stored?.interaction_id).toBeNull();
     } finally {
       await handle.teardown();
     }

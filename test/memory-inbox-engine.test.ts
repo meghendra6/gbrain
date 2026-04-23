@@ -14,6 +14,8 @@ interface EngineHarness {
   cleanup: () => Promise<void>;
 }
 
+const ENGINE_COLD_START_BUDGET_MS = 30_000;
+
 async function createSqliteHarness(): Promise<EngineHarness> {
   const dir = mkdtempSync(join(tmpdir(), 'mbrain-memory-inbox-sqlite-'));
   const databasePath = join(dir, 'brain.db');
@@ -99,6 +101,10 @@ async function expectMemoryCandidate(engine: BrainEngine, id: string, scopeId: s
 }
 
 for (const createHarness of [createSqliteHarness, createPgliteHarness]) {
+  const timeoutMs = createHarness === createPgliteHarness
+    ? ENGINE_COLD_START_BUDGET_MS
+    : undefined;
+
   test(`${createHarness.name} persists memory candidate entries across reopen`, async () => {
     const harness = await createHarness();
     const scopeId = 'workspace:default';
@@ -282,7 +288,7 @@ for (const createHarness of [createSqliteHarness, createPgliteHarness]) {
       await reopened?.disconnect();
       await harness.cleanup();
     }
-  });
+  }, timeoutMs);
 
   test(`${createHarness.name} refuses promotion when provenance refs are blank-only`, async () => {
     const harness = await createHarness();
@@ -327,7 +333,7 @@ for (const createHarness of [createSqliteHarness, createPgliteHarness]) {
     } finally {
       await harness.cleanup();
     }
-  });
+  }, timeoutMs);
 }
 
 const databaseUrl = process.env.DATABASE_URL;

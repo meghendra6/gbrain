@@ -1385,11 +1385,12 @@ export class PGLiteEngine implements BrainEngine {
 
         const { rows } = await tx.db.query(
           `INSERT INTO memory_candidate_supersession_entries (
-            id, scope_id, superseded_candidate_id, replacement_candidate_id, reviewed_at, review_reason
+            id, scope_id, superseded_candidate_id, replacement_candidate_id, reviewed_at, review_reason,
+            interaction_id
           )
-          VALUES ($1, $2, $3, $4, $5, $6)
+          VALUES ($1, $2, $3, $4, $5, $6, $7)
           RETURNING id, scope_id, superseded_candidate_id, replacement_candidate_id,
-                    reviewed_at, review_reason, created_at, updated_at`,
+                    reviewed_at, review_reason, interaction_id, created_at, updated_at`,
           [
             input.id,
             input.scope_id,
@@ -1397,6 +1398,7 @@ export class PGLiteEngine implements BrainEngine {
             input.replacement_candidate_id,
             input.reviewed_at instanceof Date ? input.reviewed_at.toISOString() : input.reviewed_at ?? null,
             input.review_reason ?? null,
+            input.interaction_id ?? null,
           ],
         );
         if (rows.length === 0) {
@@ -1441,7 +1443,7 @@ export class PGLiteEngine implements BrainEngine {
   async getMemoryCandidateSupersessionEntry(id: string): Promise<MemoryCandidateSupersessionEntry | null> {
     const { rows } = await this.db.query(
       `SELECT id, scope_id, superseded_candidate_id, replacement_candidate_id,
-              reviewed_at, review_reason, created_at, updated_at
+              reviewed_at, review_reason, interaction_id, created_at, updated_at
        FROM memory_candidate_supersession_entries
        WHERE id = $1`,
       [id],
@@ -1458,14 +1460,14 @@ export class PGLiteEngine implements BrainEngine {
     const { rows } = await this.db.query(
       `INSERT INTO memory_candidate_contradiction_entries (
         id, scope_id, candidate_id, challenged_candidate_id, outcome, supersession_entry_id,
-        reviewed_at, review_reason
+        reviewed_at, review_reason, interaction_id
       )
-      SELECT $1, $2, $3, $4, $5, $6, $7, $8
+      SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9
       WHERE EXISTS (
         SELECT 1
         FROM memory_candidate_entries candidate
         JOIN memory_candidate_entries challenged
-          ON challenged.id = $9
+          ON challenged.id = $10
         WHERE candidate.id = $3
           AND candidate.scope_id = $2
           AND challenged.scope_id = $2
@@ -1482,7 +1484,7 @@ export class PGLiteEngine implements BrainEngine {
           )
         )
       RETURNING id, scope_id, candidate_id, challenged_candidate_id, outcome, supersession_entry_id,
-                reviewed_at, review_reason, created_at, updated_at`,
+                reviewed_at, review_reason, interaction_id, created_at, updated_at`,
       [
         input.id,
         input.scope_id,
@@ -1492,6 +1494,7 @@ export class PGLiteEngine implements BrainEngine {
         input.supersession_entry_id ?? null,
         input.reviewed_at instanceof Date ? input.reviewed_at.toISOString() : input.reviewed_at ?? null,
         input.review_reason ?? null,
+        input.interaction_id ?? null,
         input.challenged_candidate_id,
       ],
     );
@@ -1504,7 +1507,7 @@ export class PGLiteEngine implements BrainEngine {
   async getMemoryCandidateContradictionEntry(id: string): Promise<MemoryCandidateContradictionEntry | null> {
     const { rows } = await this.db.query(
       `SELECT id, scope_id, candidate_id, challenged_candidate_id, outcome, supersession_entry_id,
-              reviewed_at, review_reason, created_at, updated_at
+              reviewed_at, review_reason, interaction_id, created_at, updated_at
        FROM memory_candidate_contradiction_entries
        WHERE id = $1`,
       [id],
@@ -1521,9 +1524,9 @@ export class PGLiteEngine implements BrainEngine {
     const { rows } = await this.db.query(
       `INSERT INTO canonical_handoff_entries (
         id, scope_id, candidate_id, target_object_type, target_object_id, source_refs,
-        reviewed_at, review_reason
+        reviewed_at, review_reason, interaction_id
       )
-      SELECT $1, $2, $3, $4, $5, source_refs, $6, $7
+      SELECT $1, $2, $3, $4, $5, source_refs, $6, $7, $8
       FROM memory_candidate_entries
       WHERE id = $3
         AND scope_id = $2
@@ -1532,7 +1535,7 @@ export class PGLiteEngine implements BrainEngine {
         AND target_object_id = $5
       ON CONFLICT DO NOTHING
       RETURNING id, scope_id, candidate_id, target_object_type, target_object_id, source_refs,
-                reviewed_at, review_reason, created_at, updated_at`,
+                reviewed_at, review_reason, interaction_id, created_at, updated_at`,
       [
         input.id,
         input.scope_id,
@@ -1541,6 +1544,7 @@ export class PGLiteEngine implements BrainEngine {
         input.target_object_id,
         input.reviewed_at instanceof Date ? input.reviewed_at.toISOString() : input.reviewed_at ?? null,
         input.review_reason ?? null,
+        input.interaction_id ?? null,
       ],
     );
     if (rows.length === 0) {
@@ -1552,7 +1556,7 @@ export class PGLiteEngine implements BrainEngine {
   async getCanonicalHandoffEntry(id: string): Promise<CanonicalHandoffEntry | null> {
     const { rows } = await this.db.query(
       `SELECT id, scope_id, candidate_id, target_object_type, target_object_id, source_refs,
-              reviewed_at, review_reason, created_at, updated_at
+              reviewed_at, review_reason, interaction_id, created_at, updated_at
        FROM canonical_handoff_entries
        WHERE id = $1`,
       [id],
@@ -1587,7 +1591,7 @@ export class PGLiteEngine implements BrainEngine {
     const whereClause = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
     const { rows } = await this.db.query(
       `SELECT id, scope_id, candidate_id, target_object_type, target_object_id, source_refs,
-              reviewed_at, review_reason, created_at, updated_at
+              reviewed_at, review_reason, interaction_id, created_at, updated_at
        FROM canonical_handoff_entries
        ${whereClause}
        ORDER BY created_at DESC, id ASC

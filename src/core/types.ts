@@ -837,6 +837,7 @@ export interface MemoryCandidateSupersessionEntry {
   replacement_candidate_id: string;
   reviewed_at: Date | null;
   review_reason: string | null;
+  interaction_id: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -849,6 +850,7 @@ export interface MemoryCandidateSupersessionInput {
   expected_current_status: 'staged_for_review' | 'promoted';
   reviewed_at?: Date | string | null;
   review_reason?: string | null;
+  interaction_id?: string | null;
 }
 
 export type MemoryCandidateContradictionOutcome =
@@ -867,6 +869,7 @@ export interface MemoryCandidateContradictionEntry {
   supersession_entry_id: string | null;
   reviewed_at: Date | null;
   review_reason: string | null;
+  interaction_id: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -880,6 +883,7 @@ export interface MemoryCandidateContradictionEntryInput {
   supersession_entry_id?: string | null;
   reviewed_at?: Date | string | null;
   review_reason?: string | null;
+  interaction_id?: string | null;
 }
 
 export interface CanonicalHandoffEntry {
@@ -891,6 +895,7 @@ export interface CanonicalHandoffEntry {
   source_refs: string[];
   reviewed_at: Date | null;
   review_reason: string | null;
+  interaction_id: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -904,6 +909,7 @@ export interface CanonicalHandoffEntryInput {
   source_refs: string[];
   reviewed_at?: Date | string | null;
   review_reason?: string | null;
+  interaction_id?: string | null;
 }
 
 export interface CanonicalHandoffFilters {

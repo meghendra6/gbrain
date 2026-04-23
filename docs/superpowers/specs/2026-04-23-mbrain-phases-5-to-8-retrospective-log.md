@@ -77,4 +77,28 @@ Carry-forward execution rules for Phase 8:
 
 ## Phase 8
 
-Pending.
+What worked:
+- Splitting Phase 8 into `longitudinal_evaluation -> dream_cycle_maintenance -> acceptance_closure` kept the final system layer measurable instead of turning it into another feature-growth phase.
+- The longitudinal pack reused published Phase 1 through Phase 7 benchmark contracts instead of inventing a second metrics layer.
+- The dream-cycle slice stayed inside governance state by writing only `generated_by: dream_cycle` Memory Inbox candidates.
+- Review pressure improved the maintenance boundary: `limit=0` now short-circuits before reads, write mode is transactional, prior dream-cycle outputs are ignored as inputs, and each run uses a bounded maintenance window.
+
+What failed or drifted:
+- The first acceptance-closure draft incorrectly treated `pending_baseline` as readiness-pass. That would have overstated final roadmap closure without a comparable Phase 1 baseline.
+- The first dream-cycle implementation bounded emitted suggestions but not the raw maintenance input window.
+- The first regression-path test for Phase 8.1 briefly widened the published CLI with a fixture fallback before review forced that test hook into a separate harness.
+
+Valid review feedback that changed implementation:
+- Phase 8.1 needed an end-to-end regression-path proof for non-zero process behavior without widening the public benchmark CLI.
+- Phase 8.2 needed exact `limit` semantics, cross-scope negative tests, transaction-backed candidate writes, prior-dream-output filtering, and a bounded raw read window.
+- Phase 8.3 needed `pending_baseline` to propagate into readiness, not just phase status.
+
+Remaining risks:
+- Full Phase 8 acceptance remains `pending_baseline` unless `bench:phase8-acceptance` is run with a comparable Phase 1 baseline artifact.
+- Postgres parity paths still depend on `DATABASE_URL` in the local environment.
+- The dream-cycle maintenance window is intentionally capped at `100` raw candidates per run; wider maintenance should be handled by scheduled repeated runs or a future paginated maintenance policy.
+
+Intentionally deferred work:
+- Automatic Phase 1 baseline capture and publication policy.
+- Scheduled dream-cycle execution.
+- Semantic duplicate detection beyond exact normalized candidate grouping.

@@ -1248,7 +1248,7 @@ Expected:
   - `pending_baseline` when only Phase 1 lacks a comparable baseline artifact
   - `pass` when the supplied Phase 1 baseline is comparable and all phases remain green
   - `fail` when any phase manifest or acceptance status regresses
-- `test:phase8` currently runs the longitudinal evaluation slice
+- `test:phase8` runs the longitudinal, dream-cycle, acceptance-pack, and memory-inbox operation inventory tests
 
 ## Phase 8 dream-cycle maintenance
 
@@ -1270,3 +1270,27 @@ Expected:
 - `run-dream-cycle-maintenance` stays available through the shared operation surface
 - benchmark reports `dream_cycle_candidate_only` and `dream_cycle`
 - `acceptance.phase8_status` matches the local dream-cycle guardrail outcome
+
+## Phase 8 acceptance-pack
+
+Run:
+
+```bash
+bun test test/phase8-acceptance-pack.test.ts
+bun run bench:phase8-acceptance --json
+```
+
+Optional full-comparability run:
+
+```bash
+bun run bench:phase8-acceptance --json --phase1-baseline path/to/phase1-baseline.json
+```
+
+Expected:
+
+- benchmark summarizes `longitudinal_evaluation` and `dream_cycle`
+- default `acceptance.readiness_status` and `acceptance.phase8_status` are `pending_baseline` until a comparable Phase 1 baseline is supplied
+- baseline-backed acceptance reports `pass` when longitudinal evaluation and dream-cycle both pass
+- `pending_baseline` exits successfully but must be reported as incomplete evidence, not full closure
+- `fail` exits non-zero
+- `test:phase8` runs the longitudinal, dream-cycle, acceptance-pack, and memory-inbox operation inventory tests

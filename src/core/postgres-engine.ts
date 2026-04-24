@@ -91,6 +91,12 @@ import {
 
 const INTERACTION_ID_LOOKUP_BATCH_SIZE = 500;
 
+type PostgresParam = string | number | boolean | null | Date | Uint8Array | string[];
+
+function jsonParam(value: unknown): postgres.JSONValue {
+  return value as postgres.JSONValue;
+}
+
 export class PostgresEngine implements BrainEngine {
   private _sql: ReturnType<typeof postgres> | null = null;
 
@@ -170,7 +176,7 @@ export class PostgresEngine implements BrainEngine {
 
   async transaction<T>(fn: (engine: BrainEngine) => Promise<T>): Promise<T> {
     const conn = this.sql;
-    return conn.begin(async (tx) => {
+    return conn.begin<Promise<T>>(async (tx) => {
       // Create a scoped engine with tx as its connection, no shared state mutation
       const txEngine = Object.create(this) as PostgresEngine;
       Object.defineProperty(txEngine, 'sql', { get: () => tx });
@@ -199,7 +205,7 @@ export class PostgresEngine implements BrainEngine {
 
     const rows = await sql`
       INSERT INTO pages (slug, type, title, compiled_truth, timeline, search_text, frontmatter, content_hash, updated_at)
-      VALUES (${slug}, ${page.type}, ${page.title}, ${page.compiled_truth}, ${page.timeline || ''}, ${searchText}, ${sql.json(frontmatter)}, ${hash}, now())
+      VALUES (${slug}, ${page.type}, ${page.title}, ${page.compiled_truth}, ${page.timeline || ''}, ${searchText}, ${sql.json(jsonParam(frontmatter))}, ${hash}, now())
       ON CONFLICT (slug) DO UPDATE SET
         type = EXCLUDED.type,
         title = EXCLUDED.title,
@@ -307,7 +313,7 @@ export class PostgresEngine implements BrainEngine {
   // Search
   async searchKeyword(query: string, opts?: SearchOpts): Promise<SearchResult[]> {
     const limit = opts?.limit || 20;
-    const params: unknown[] = [query];
+    const params: PostgresParam[] = [query];
     let filterSql = '';
 
     if (opts?.type) {
@@ -368,7 +374,7 @@ export class PostgresEngine implements BrainEngine {
   async searchVector(embedding: Float32Array, opts?: SearchOpts): Promise<SearchResult[]> {
     const limit = opts?.limit || 20;
     const vecStr = '[' + Array.from(embedding).join(',') + ']';
-    const params: unknown[] = [vecStr];
+    const params: PostgresParam[] = [vecStr];
     let filterSql = '';
 
     if (opts?.type) {
@@ -426,7 +432,7 @@ export class PostgresEngine implements BrainEngine {
     // This avoids per-row round-trips and reduces lock contention under parallel workers
     const cols = '(page_id, chunk_index, chunk_text, chunk_source, embedding, model, token_count, embedded_at)';
     const rows: string[] = [];
-    const params: unknown[] = [];
+    const params: PostgresParam[] = [];
     let paramIdx = 1;
 
     for (const chunk of chunks) {
@@ -465,7 +471,7 @@ export class PostgresEngine implements BrainEngine {
       WHERE p.slug = ${slug}
       ORDER BY cc.chunk_index
     `;
-    return rows.map(rowToChunk);
+    return rows.map(row => rowToChunk(row, false));
   }
 
   async deleteChunks(slug: string): Promise<void> {
@@ -681,7 +687,7 @@ export class PostgresEngine implements BrainEngine {
     const sql = this.sql;
     await sql`
       INSERT INTO raw_data (page_id, source, data)
-      SELECT id, ${source}, ${sql.json(data)}
+      SELECT id, ${source}, ${sql.json(jsonParam(data))}
       FROM pages WHERE slug = ${slug}
       ON CONFLICT (page_id, source) DO UPDATE SET
         data = EXCLUDED.data,
@@ -771,7 +777,7 @@ export class PostgresEngine implements BrainEngine {
       UPDATE pages
       SET compiled_truth = ${version.compiled_truth},
           search_text = ${searchText},
-          frontmatter = ${sql.json(frontmatter)},
+          frontmatter = ${sql.json(jsonParam(frontmatter))},
           content_hash = ${hash},
           updated_at = now()
       WHERE slug = ${slug}
@@ -849,7 +855,7 @@ export class PostgresEngine implements BrainEngine {
     const sql = this.sql;
     await sql`
       INSERT INTO ingest_log (source_type, source_ref, pages_updated, summary)
-      VALUES (${entry.source_type}, ${entry.source_ref}, ${sql.json(entry.pages_updated)}, ${entry.summary})
+      VALUES (${entry.source_type}, ${entry.source_ref}, ${sql.json(jsonParam(entry.pages_updated))}, ${entry.summary})
     `;
   }
 
@@ -907,7 +913,7 @@ export class PostgresEngine implements BrainEngine {
     const sql = this.sql;
     const limit = filters?.limit ?? 50;
     const offset = filters?.offset ?? 0;
-    const params: unknown[] = [];
+    const params: PostgresParam[] = [];
     const clauses: string[] = [];
 
     if (filters?.scope) {
@@ -963,12 +969,12 @@ export class PostgresEngine implements BrainEngine {
         task_id, active_paths, active_symbols, blockers, open_questions, next_steps, verification_notes, last_verified_at, updated_at
       ) VALUES (
         ${input.task_id},
-        ${sql.json(input.active_paths ?? [])},
-        ${sql.json(input.active_symbols ?? [])},
-        ${sql.json(input.blockers ?? [])},
-        ${sql.json(input.open_questions ?? [])},
-        ${sql.json(input.next_steps ?? [])},
-        ${sql.json(input.verification_notes ?? [])},
+        ${sql.json(jsonParam(input.active_paths ?? []))},
+        ${sql.json(jsonParam(input.active_symbols ?? []))},
+        ${sql.json(jsonParam(input.blockers ?? []))},
+        ${sql.json(jsonParam(input.open_questions ?? []))},
+        ${sql.json(jsonParam(input.next_steps ?? []))},
+        ${sql.json(jsonParam(input.verification_notes ?? []))},
         ${input.last_verified_at instanceof Date ? input.last_verified_at.toISOString() : input.last_verified_at ?? null},
         now()
       )
@@ -996,8 +1002,8 @@ export class PostgresEngine implements BrainEngine {
         ${input.task_id},
         ${input.summary},
         ${input.outcome},
-        ${sql.json(input.applicability_context ?? {})},
-        ${sql.json(input.evidence ?? [])}
+        ${sql.json(jsonParam(input.applicability_context ?? {}))},
+        ${sql.json(jsonParam(input.evidence ?? []))}
       )
       RETURNING id, task_id, summary, outcome, applicability_context, evidence, created_at
     `;
@@ -1026,8 +1032,8 @@ export class PostgresEngine implements BrainEngine {
         ${input.task_id},
         ${input.summary},
         ${input.rationale},
-        ${sql.json(input.consequences ?? [])},
-        ${sql.json(input.validity_context ?? {})}
+        ${sql.json(jsonParam(input.consequences ?? []))},
+        ${sql.json(jsonParam(input.validity_context ?? {}))}
       )
       RETURNING id, task_id, summary, rationale, consequences, validity_context, created_at
     `;
@@ -1056,10 +1062,10 @@ export class PostgresEngine implements BrainEngine {
         ${input.id},
         ${input.task_id ?? null},
         ${input.scope},
-        ${sql.json(input.route ?? [])},
-        ${sql.json(input.source_refs ?? [])},
-        ${sql.json(input.derived_consulted ?? [])},
-        ${sql.json(input.verification ?? [])},
+        ${sql.json(jsonParam(input.route ?? []))},
+        ${sql.json(jsonParam(input.source_refs ?? []))},
+        ${sql.json(jsonParam(input.derived_consulted ?? []))},
+        ${sql.json(jsonParam(input.verification ?? []))},
         ${input.write_outcome ?? 'no_durable_write'},
         ${input.selected_intent ?? null},
         ${input.scope_gate_policy ?? null},
@@ -1087,7 +1093,7 @@ export class PostgresEngine implements BrainEngine {
 
   async listRetrievalTracesByWindow(filters: RetrievalTraceWindowFilters): Promise<RetrievalTrace[]> {
     const sql = this.sql;
-    const params: unknown[] = [filters.since.toISOString(), filters.until.toISOString()];
+    const params: PostgresParam[] = [filters.since.toISOString(), filters.until.toISOString()];
     const clauses = ['created_at >= $1', 'created_at < $2'];
 
     if (filters.task_id !== undefined) {
@@ -1126,7 +1132,7 @@ export class PostgresEngine implements BrainEngine {
         ${input.profile_type},
         ${input.subject},
         ${input.content},
-        ${sql.json(input.source_refs ?? [])},
+        ${sql.json(jsonParam(input.source_refs ?? []))},
         ${input.sensitivity},
         ${input.export_status},
         ${input.last_confirmed_at instanceof Date ? input.last_confirmed_at.toISOString() : input.last_confirmed_at ?? null},
@@ -1165,7 +1171,7 @@ export class PostgresEngine implements BrainEngine {
     const sql = this.sql;
     const limit = filters?.limit ?? 100;
     const offset = filters?.offset ?? 0;
-    const params: unknown[] = [];
+    const params: PostgresParam[] = [];
     const clauses: string[] = [];
 
     if (filters?.scope_id) {
@@ -1218,8 +1224,8 @@ export class PostgresEngine implements BrainEngine {
         ${input.end_time instanceof Date ? input.end_time.toISOString() : input.end_time ?? null},
         ${input.source_kind},
         ${input.summary},
-        ${sql.json(input.source_refs ?? [])},
-        ${sql.json(input.candidate_ids ?? [])}
+        ${sql.json(jsonParam(input.source_refs ?? []))},
+        ${sql.json(jsonParam(input.candidate_ids ?? []))}
       )
       RETURNING id, scope_id, title, start_time, end_time, source_kind, summary,
                 source_refs, candidate_ids, created_at, updated_at
@@ -1243,7 +1249,7 @@ export class PostgresEngine implements BrainEngine {
     const sql = this.sql;
     const limit = filters?.limit ?? 100;
     const offset = filters?.offset ?? 0;
-    const params: unknown[] = [];
+    const params: PostgresParam[] = [];
     const clauses: string[] = [];
 
     if (filters?.scope_id) {
@@ -1297,7 +1303,7 @@ export class PostgresEngine implements BrainEngine {
         ${input.scope_id},
         ${input.candidate_type},
         ${input.proposed_content},
-        ${sql.json(input.source_refs ?? [])},
+        ${sql.json(jsonParam(input.source_refs ?? []))},
         ${input.generated_by},
         ${input.extraction_kind},
         ${input.confidence_score},
@@ -1707,7 +1713,7 @@ export class PostgresEngine implements BrainEngine {
     const sql = this.sql;
     const limit = filters?.limit ?? 100;
     const offset = filters?.offset ?? 0;
-    const params: unknown[] = [];
+    const params: PostgresParam[] = [];
     const clauses: string[] = [];
 
     if (filters?.scope_id !== undefined) {
@@ -1782,13 +1788,13 @@ export class PostgresEngine implements BrainEngine {
         ${input.path},
         ${input.page_type},
         ${input.title},
-        ${sql.json(input.frontmatter ?? {})},
-        ${sql.json(input.aliases ?? [])},
-        ${sql.json(input.tags ?? [])},
-        ${sql.json(input.outgoing_wikilinks ?? [])},
-        ${sql.json(input.outgoing_urls ?? [])},
-        ${sql.json(input.source_refs ?? [])},
-        ${sql.json(input.heading_index ?? [])},
+        ${sql.json(jsonParam(input.frontmatter ?? {}))},
+        ${sql.json(jsonParam(input.aliases ?? []))},
+        ${sql.json(jsonParam(input.tags ?? []))},
+        ${sql.json(jsonParam(input.outgoing_wikilinks ?? []))},
+        ${sql.json(jsonParam(input.outgoing_urls ?? []))},
+        ${sql.json(jsonParam(input.source_refs ?? []))},
+        ${sql.json(jsonParam(input.heading_index ?? []))},
         ${input.content_hash},
         ${input.extractor_version},
         now()
@@ -1832,7 +1838,7 @@ export class PostgresEngine implements BrainEngine {
     const sql = this.sql;
     const limit = filters?.limit ?? 100;
     const offset = filters?.offset ?? 0;
-    const params: unknown[] = [];
+    const params: PostgresParam[] = [];
     const clauses: string[] = [];
 
     if (filters?.scope_id) {
@@ -1897,15 +1903,15 @@ export class PostgresEngine implements BrainEngine {
           ${entry.section_id},
           ${entry.parent_section_id ?? null},
           ${entry.heading_slug},
-          ${sql.json(entry.heading_path ?? [])},
+          ${sql.json(jsonParam(entry.heading_path ?? []))},
           ${entry.heading_text},
           ${entry.depth},
           ${entry.line_start},
           ${entry.line_end},
           ${entry.section_text},
-          ${sql.json(entry.outgoing_wikilinks ?? [])},
-          ${sql.json(entry.outgoing_urls ?? [])},
-          ${sql.json(entry.source_refs ?? [])},
+          ${sql.json(jsonParam(entry.outgoing_wikilinks ?? []))},
+          ${sql.json(jsonParam(entry.outgoing_urls ?? []))},
+          ${sql.json(jsonParam(entry.source_refs ?? []))},
           ${entry.content_hash},
           ${entry.extractor_version},
           ${timestamp}
@@ -1937,7 +1943,7 @@ export class PostgresEngine implements BrainEngine {
     const sql = this.sql;
     const limit = filters?.limit ?? 100;
     const offset = filters?.offset ?? 0;
-    const params: unknown[] = [];
+    const params: PostgresParam[] = [];
     const clauses: string[] = [];
 
     if (filters?.scope_id) {
@@ -1997,7 +2003,7 @@ export class PostgresEngine implements BrainEngine {
         ${input.node_count},
         ${input.edge_count},
         ${input.community_count ?? 0},
-        ${sql.json(input.graph_json ?? {})},
+        ${sql.json(jsonParam(input.graph_json ?? {}))},
         now(),
         ${input.stale_reason ?? null}
       )
@@ -2038,7 +2044,7 @@ export class PostgresEngine implements BrainEngine {
   async listContextMapEntries(filters?: ContextMapFilters): Promise<ContextMapEntry[]> {
     const sql = this.sql;
     const limit = filters?.limit ?? 100;
-    const params: unknown[] = [];
+    const params: PostgresParam[] = [];
     const clauses: string[] = [];
 
     if (filters?.scope_id) {
@@ -2085,7 +2091,7 @@ export class PostgresEngine implements BrainEngine {
         ${input.kind},
         ${input.title},
         ${input.freshness},
-        ${sql.json(input.entrypoints ?? [])},
+        ${sql.json(jsonParam(input.entrypoints ?? []))},
         ${input.budget_hint},
         now()
       )
@@ -2117,7 +2123,7 @@ export class PostgresEngine implements BrainEngine {
   async listContextAtlasEntries(filters?: ContextAtlasFilters): Promise<ContextAtlasEntry[]> {
     const sql = this.sql;
     const limit = filters?.limit ?? 100;
-    const params: unknown[] = [];
+    const params: PostgresParam[] = [];
     const clauses: string[] = [];
 
     if (filters?.scope_id) {

@@ -574,7 +574,7 @@ export class SQLiteEngine implements BrainEngine {
     sql += ` ORDER BY p.updated_at DESC, p.id DESC LIMIT ? OFFSET ?`;
     params.push(limit, offset);
 
-    const rows = this.database.query(sql).all(...params) as Record<string, unknown>[];
+    const rows = this.database.query(sql).all(...sqliteBindings(params)) as Record<string, unknown>[];
     return rows.map(rowToPage);
   }
 
@@ -650,7 +650,7 @@ export class SQLiteEngine implements BrainEngine {
     params.push(limit);
 
     try {
-      const rows = this.database.query(sql).all(...params) as Record<string, unknown>[];
+      const rows = this.database.query(sql).all(...sqliteBindings(params)) as Record<string, unknown>[];
       return rows.map(row => rowToSearchResult(row, query));
     } catch {
       // Malformed FTS5 queries (special chars, unmatched quotes) degrade to empty results
@@ -727,7 +727,7 @@ export class SQLiteEngine implements BrainEngine {
       WHERE p.slug = ?
       ORDER BY cc.chunk_index
     `).all(validateSlug(slug)) as Record<string, unknown>[];
-    return rows.map(rowToChunk);
+    return rows.map(row => rowToChunk(row, false));
   }
 
   async getChunksWithEmbeddings(slug: string): Promise<Chunk[]> {
@@ -766,7 +766,7 @@ export class SQLiteEngine implements BrainEngine {
 
     sql += ` ORDER BY slug`;
 
-    return this.database.query(sql).all(...params).map((row) => ({
+    return this.database.query(sql).all(...sqliteBindings(params)).map((row) => ({
       page_id: Number((row as Record<string, unknown>).page_id),
       slug: String((row as Record<string, unknown>).slug),
       embedding: blobToFloat32((row as Record<string, unknown>).page_embedding),
@@ -913,7 +913,7 @@ export class SQLiteEngine implements BrainEngine {
     sql += ` ORDER BY te.date DESC LIMIT ?`;
     params.push(opts?.limit ?? 100);
 
-    const rows = this.database.query(sql).all(...params) as Record<string, unknown>[];
+    const rows = this.database.query(sql).all(...sqliteBindings(params)) as Record<string, unknown>[];
     return rows.map(rowToTimelineEntry);
   }
 
@@ -944,7 +944,7 @@ export class SQLiteEngine implements BrainEngine {
     }
 
     sql += ` ORDER BY rd.source`;
-    const rows = this.database.query(sql).all(...params) as Record<string, unknown>[];
+    const rows = this.database.query(sql).all(...sqliteBindings(params)) as Record<string, unknown>[];
     return rows.map(rowToRawData);
   }
 
@@ -1004,7 +1004,7 @@ export class SQLiteEngine implements BrainEngine {
       UPDATE pages
       SET compiled_truth = ?, search_text = ?, frontmatter = ?, content_hash = ?, updated_at = ?
       WHERE slug = ?
-    `, [row.compiled_truth, searchText, JSON.stringify(frontmatter), hash, nowIso(), normalizedSlug]);
+    `, [String(row.compiled_truth), searchText, JSON.stringify(frontmatter), hash, nowIso(), normalizedSlug]);
 
     const page = await this.requirePage(normalizedSlug);
     await ensurePageChunks(this, page);
@@ -1169,7 +1169,7 @@ export class SQLiteEngine implements BrainEngine {
       ${where}
       ORDER BY updated_at DESC, id DESC
       LIMIT ? OFFSET ?
-    `).all(...params) as Record<string, unknown>[];
+    `).all(...sqliteBindings(params)) as Record<string, unknown>[];
 
     return rows.map(rowToTaskThread);
   }
@@ -1369,7 +1369,7 @@ export class SQLiteEngine implements BrainEngine {
       WHERE ${clauses.join(' AND ')}
       ORDER BY created_at DESC, id DESC
       LIMIT ? OFFSET ?
-    `).all(...params) as Record<string, unknown>[];
+    `).all(...sqliteBindings(params)) as Record<string, unknown>[];
     return rows.map(rowToRetrievalTrace);
   }
 
@@ -1456,7 +1456,7 @@ export class SQLiteEngine implements BrainEngine {
       ORDER BY updated_at DESC, id ASC
       LIMIT ?
       OFFSET ?
-    `).all(...params) as Record<string, unknown>[];
+    `).all(...sqliteBindings(params)) as Record<string, unknown>[];
     return rows.map(rowToProfileMemoryEntry);
   }
 
@@ -1535,7 +1535,7 @@ export class SQLiteEngine implements BrainEngine {
       ORDER BY start_time DESC, id ASC
       LIMIT ?
       OFFSET ?
-    `).all(...params) as Record<string, unknown>[];
+    `).all(...sqliteBindings(params)) as Record<string, unknown>[];
     return rows.map(rowToPersonalEpisodeEntry);
   }
 
@@ -1654,7 +1654,7 @@ export class SQLiteEngine implements BrainEngine {
       ORDER BY updated_at DESC, id ASC
       LIMIT ?
       OFFSET ?
-    `).all(...params) as Record<string, unknown>[];
+    `).all(...sqliteBindings(params)) as Record<string, unknown>[];
     return rows.map(rowToMemoryCandidateEntry);
   }
 
@@ -2063,7 +2063,7 @@ export class SQLiteEngine implements BrainEngine {
       ORDER BY created_at DESC, id ASC
       LIMIT ?
       OFFSET ?
-    `).all(...params) as Record<string, unknown>[];
+    `).all(...sqliteBindings(params)) as Record<string, unknown>[];
     return rows.map(rowToCanonicalHandoffEntry);
   }
 
@@ -2181,7 +2181,7 @@ export class SQLiteEngine implements BrainEngine {
       ORDER BY last_indexed_at DESC, slug ASC
       LIMIT ?
       OFFSET ?
-    `).all(...params) as Record<string, unknown>[];
+    `).all(...sqliteBindings(params)) as Record<string, unknown>[];
     return rows.map(rowToNoteManifestEntry);
   }
 
@@ -2213,7 +2213,7 @@ export class SQLiteEngine implements BrainEngine {
     const timestamp = nowIso();
 
     for (const entry of entries) {
-      insert.run([
+      insert.run(...sqliteBindings([
         scopeId,
         entry.page_id,
         validateSlug(entry.page_slug),
@@ -2233,7 +2233,7 @@ export class SQLiteEngine implements BrainEngine {
         entry.content_hash,
         entry.extractor_version,
         timestamp,
-      ]);
+      ]));
     }
 
     return this.listNoteSectionEntries({
@@ -2285,7 +2285,7 @@ export class SQLiteEngine implements BrainEngine {
       ORDER BY page_slug ASC, line_start ASC, section_id ASC
       LIMIT ?
       OFFSET ?
-    `).all(...params) as Record<string, unknown>[];
+    `).all(...sqliteBindings(params)) as Record<string, unknown>[];
     return rows.map(rowToNoteSectionEntry);
   }
 
@@ -2381,7 +2381,7 @@ export class SQLiteEngine implements BrainEngine {
       ${whereClause}
       ORDER BY generated_at DESC, id ASC
       LIMIT ?
-    `).all(...params) as Record<string, unknown>[];
+    `).all(...sqliteBindings(params)) as Record<string, unknown>[];
     return rows.map(rowToContextMapEntry);
   }
 
@@ -2456,7 +2456,7 @@ export class SQLiteEngine implements BrainEngine {
       ${whereClause}
       ORDER BY generated_at DESC, id ASC
       LIMIT ?
-    `).all(...params) as Record<string, unknown>[];
+    `).all(...sqliteBindings(params)) as Record<string, unknown>[];
     return rows.map(rowToContextAtlasEntry);
   }
 
@@ -3286,7 +3286,7 @@ export class SQLiteEngine implements BrainEngine {
       params.push(...opts.exclude_slugs.map(slug => validateSlug(slug)));
     }
 
-    const rows = this.database.query(sql).all(...params) as Record<string, unknown>[];
+    const rows = this.database.query(sql).all(...sqliteBindings(params)) as Record<string, unknown>[];
     if (rows.length === 0) return [];
 
     const candidates = rows.map((row) => ({
@@ -3337,7 +3337,7 @@ export class SQLiteEngine implements BrainEngine {
       params.push(...pageIds);
     }
 
-    return this.database.query(sql).all(...params) as Record<string, unknown>[];
+    return this.database.query(sql).all(...sqliteBindings(params)) as Record<string, unknown>[];
   }
 
   private getOmittedLocalVectorChunkIds(
@@ -3371,7 +3371,7 @@ export class SQLiteEngine implements BrainEngine {
       params.push(...pageIds);
     }
 
-    const rows = this.database.query(sql).all(...params) as Record<string, unknown>[];
+    const rows = this.database.query(sql).all(...sqliteBindings(params)) as Record<string, unknown>[];
     return selectLocalVectorChunkIds(
       embedding,
       rows.map((row) => ({
@@ -3511,6 +3511,24 @@ function parseVersion(value: string | null): number {
 
 function escapeLike(value: string): string {
   return value.replace(/([\\%_])/g, '\\$1');
+}
+
+type SqliteBinding = string | number | bigint | boolean | null | Uint8Array;
+
+function sqliteBindings(values: unknown[]): SqliteBinding[] {
+  return values.map((value) => {
+    if (
+      typeof value === 'string'
+      || typeof value === 'number'
+      || typeof value === 'bigint'
+      || typeof value === 'boolean'
+      || value === null
+      || value instanceof Uint8Array
+    ) {
+      return value;
+    }
+    throw new TypeError(`Unsupported SQLite binding: ${typeof value}`);
+  });
 }
 
 function prepareFtsQuery(query: string): string {

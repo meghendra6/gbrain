@@ -97,7 +97,7 @@ export async function initSchema(): Promise<void> {
 
 export async function withTransaction<T>(fn: (tx: ReturnType<typeof postgres>) => Promise<T>): Promise<T> {
   const conn = getConnection();
-  return conn.begin(async (tx) => {
+  return conn.begin<Promise<T>>(async (tx) => {
     return fn(tx as unknown as ReturnType<typeof postgres>);
   });
 }

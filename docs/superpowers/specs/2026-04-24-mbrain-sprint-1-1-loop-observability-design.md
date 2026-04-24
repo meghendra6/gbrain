@@ -2,7 +2,7 @@
 
 **Author:** scott.lee@rebellions.ai
 **Date:** 2026-04-24
-**Status:** Design — ready for implementation plan
+**Status:** Implemented — PR #40 and PR #42
 **Depends on:** `2026-04-24-mbrain-sprint-1-0-interaction-identity-design.md` (must land first)
 **Supersedes portion of:** `2026-04-24-mbrain-sprint-1-loop-observability-design.md` (superseded)
 

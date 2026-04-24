@@ -269,9 +269,6 @@ CREATE TABLE IF NOT EXISTS retrieval_traces (
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 CREATE INDEX IF NOT EXISTS idx_retrieval_traces_task_created ON retrieval_traces(task_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_retrieval_traces_write_outcome ON retrieval_traces(write_outcome, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_retrieval_traces_selected_intent ON retrieval_traces(selected_intent, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_retrieval_traces_gate_policy ON retrieval_traces(scope_gate_policy, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS note_manifest_entries (
   scope_id TEXT NOT NULL,

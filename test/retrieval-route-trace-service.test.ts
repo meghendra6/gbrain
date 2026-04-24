@@ -279,6 +279,7 @@ test('retrieval route selector persists scope-gate evidence when explicit scope 
     expect(result.route).toBeNull();
     expect(result.scope_gate?.resolved_scope).toBe('personal');
     expect(result.scope_gate?.policy).toBe('deny');
+    expect(result.trace?.scope).toBe('personal');
     expect(result.trace?.verification).toContain('scope_gate:deny');
     expect(result.trace?.verification).toContain('scope_gate_reason:unsupported_scope_intent');
     expect(result.trace?.scope_gate_policy).toBe('deny');

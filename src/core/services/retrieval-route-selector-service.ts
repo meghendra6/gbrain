@@ -297,8 +297,8 @@ async function persistSelectedRouteTrace(
   const thread = taskId != null ? await engine.getTaskThread(taskId) : null;
   const threadMissing = taskId != null && thread == null;
 
-  const scope: ScopeGateScope = thread?.scope
-    ?? selected.scope_gate?.resolved_scope
+  const scope: ScopeGateScope = selected.scope_gate?.resolved_scope
+    ?? thread?.scope
     ?? 'unknown';
 
   return engine.putRetrievalTrace({

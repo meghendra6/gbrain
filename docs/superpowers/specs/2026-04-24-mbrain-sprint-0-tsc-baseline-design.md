@@ -2,7 +2,7 @@
 
 **Author:** scott.lee@rebellions.ai
 **Date:** 2026-04-24
-**Status:** Design — ready for implementation plan
+**Status:** Design — implementation plan refreshed on 2026-04-25
 
 ---
 
@@ -14,13 +14,29 @@ The repo has `"strict": true` in `tsconfig.json`, but CI only runs `bun install 
 - `as any` casts hiding enum mismatch.
 - Non-exhaustive switches returning `undefined` where the signature says `boolean`.
 
-Running `bunx tsc --noEmit --pretty false` locally reports **836 distinct errors across 1487 output lines** (each error spans multiple lines of explanation). Baseline measured on:
+Running `bunx tsc --noEmit --pretty false` locally originally reported **836 distinct errors across 1487 output lines** (each error spans multiple lines of explanation). Baseline measured on:
 
 - Branch: `scenario-test-suite`
 - Commit: `3f624b8` (the commit that introduces these specs)
 - Upstream base: `master` at `4643db8` (PR #36 merge)
 
 Errors are spread across core modules (`src/commands/migrate-engine.ts`, `src/core/engine-factory.ts`, `src/core/db.ts`, `src/core/postgres-engine.ts`, `test/scenarios/helpers.ts`, and more). A single "clean baseline" commit is therefore infeasible; it would bundle repo-wide cleanup with whatever feature ships alongside and make reviews unreadable. The slice estimates in §4.1 below are proportional to these 836 errors — implementers should re-measure against the current tip before picking up a slice and adjust if the distribution has shifted.
+
+### 1.1 Current baseline addendum — 2026-04-25
+
+After PR #42 (`528b07d`) the current `origin/master` baseline was re-measured:
+
+```bash
+bunx tsc --noEmit --pretty false 2>&1 | rg -c "error TS"
+```
+
+Current output:
+
+```text
+851
+```
+
+The implementation plan is refreshed in `docs/superpowers/plans/2026-04-25-mbrain-sprint-0-tsc-baseline-current-plan.md`. That plan supersedes the exact PR ordering in §4.1 below while preserving this spec's core constraint: cleanup must be mechanical, sliced, and behavior-preserving.
 
 ## 2. Goal
 
@@ -36,7 +52,9 @@ Land a repo where `bunx tsc --noEmit` is green, then enable it in CI — without
 
 Cleanup is split by **domain**, not by file. Each PR owns one coherent slice of the error inventory so reviewers can keep the slice in their head.
 
-### 4.1 Proposed PR sequence
+### 4.1 Original proposed PR sequence
+
+This table is retained as historical slice rationale. For exact execution order after PR #42, use `docs/superpowers/plans/2026-04-25-mbrain-sprint-0-tsc-baseline-current-plan.md`.
 
 | PR | Slice | Likely hotspots | Approx. errors cleared |
 |---|---|---|---|

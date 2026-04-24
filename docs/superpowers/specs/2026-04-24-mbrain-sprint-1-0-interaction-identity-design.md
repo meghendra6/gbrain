@@ -2,7 +2,7 @@
 
 **Author:** scott.lee@rebellions.ai
 **Date:** 2026-04-24
-**Status:** Design — ready for implementation plan
+**Status:** Implemented — PR #38
 **Supersedes portion of:** `2026-04-24-mbrain-sprint-1-loop-observability-design.md` (superseded)
 **Blocks:** `2026-04-24-mbrain-sprint-1-1-loop-observability-design.md`
 

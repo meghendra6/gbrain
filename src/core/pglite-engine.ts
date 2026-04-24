@@ -93,6 +93,7 @@ import {
 } from './utils.ts';
 
 type PGLiteDB = PGlite;
+const INTERACTION_ID_LOOKUP_BATCH_SIZE = 500;
 
 export class PGLiteEngine implements BrainEngine {
   private _db: PGLiteDB | null = null;
@@ -1498,16 +1499,20 @@ export class PGLiteEngine implements BrainEngine {
     interactionIds: string[],
   ): Promise<MemoryCandidateSupersessionEntry[]> {
     if (interactionIds.length === 0) return [];
-    const placeholders = interactionIds.map((_, index) => `$${index + 1}`).join(', ');
-    const { rows } = await this.db.query(
-      `SELECT id, scope_id, superseded_candidate_id, replacement_candidate_id,
-              reviewed_at, review_reason, interaction_id, created_at, updated_at
-       FROM memory_candidate_supersession_entries
-       WHERE interaction_id IN (${placeholders})
-       ORDER BY created_at DESC, id ASC`,
-      interactionIds,
-    );
-    return (rows as Record<string, unknown>[]).map(rowToMemoryCandidateSupersessionEntry);
+    const entries: MemoryCandidateSupersessionEntry[] = [];
+    for (const chunk of chunkInteractionIds(interactionIds)) {
+      const placeholders = chunk.map((_, index) => `$${index + 1}`).join(', ');
+      const { rows } = await this.db.query(
+        `SELECT id, scope_id, superseded_candidate_id, replacement_candidate_id,
+                reviewed_at, review_reason, interaction_id, created_at, updated_at
+         FROM memory_candidate_supersession_entries
+         WHERE interaction_id IN (${placeholders})
+         ORDER BY created_at DESC, id ASC`,
+        chunk,
+      );
+      entries.push(...(rows as Record<string, unknown>[]).map(rowToMemoryCandidateSupersessionEntry));
+    }
+    return sortByCreatedAtDescIdAsc(entries);
   }
 
   async createMemoryCandidateContradictionEntry(
@@ -1578,16 +1583,20 @@ export class PGLiteEngine implements BrainEngine {
     interactionIds: string[],
   ): Promise<MemoryCandidateContradictionEntry[]> {
     if (interactionIds.length === 0) return [];
-    const placeholders = interactionIds.map((_, index) => `$${index + 1}`).join(', ');
-    const { rows } = await this.db.query(
-      `SELECT id, scope_id, candidate_id, challenged_candidate_id, outcome, supersession_entry_id,
-              reviewed_at, review_reason, interaction_id, created_at, updated_at
-       FROM memory_candidate_contradiction_entries
-       WHERE interaction_id IN (${placeholders})
-       ORDER BY created_at DESC, id ASC`,
-      interactionIds,
-    );
-    return (rows as Record<string, unknown>[]).map(rowToMemoryCandidateContradictionEntry);
+    const entries: MemoryCandidateContradictionEntry[] = [];
+    for (const chunk of chunkInteractionIds(interactionIds)) {
+      const placeholders = chunk.map((_, index) => `$${index + 1}`).join(', ');
+      const { rows } = await this.db.query(
+        `SELECT id, scope_id, candidate_id, challenged_candidate_id, outcome, supersession_entry_id,
+                reviewed_at, review_reason, interaction_id, created_at, updated_at
+         FROM memory_candidate_contradiction_entries
+         WHERE interaction_id IN (${placeholders})
+         ORDER BY created_at DESC, id ASC`,
+        chunk,
+      );
+      entries.push(...(rows as Record<string, unknown>[]).map(rowToMemoryCandidateContradictionEntry));
+    }
+    return sortByCreatedAtDescIdAsc(entries);
   }
 
   async createCanonicalHandoffEntry(
@@ -1678,16 +1687,20 @@ export class PGLiteEngine implements BrainEngine {
     interactionIds: string[],
   ): Promise<CanonicalHandoffEntry[]> {
     if (interactionIds.length === 0) return [];
-    const placeholders = interactionIds.map((_, index) => `$${index + 1}`).join(', ');
-    const { rows } = await this.db.query(
-      `SELECT id, scope_id, candidate_id, target_object_type, target_object_id, source_refs,
-              reviewed_at, review_reason, interaction_id, created_at, updated_at
-       FROM canonical_handoff_entries
-       WHERE interaction_id IN (${placeholders})
-       ORDER BY created_at DESC, id ASC`,
-      interactionIds,
-    );
-    return (rows as Record<string, unknown>[]).map(rowToCanonicalHandoffEntry);
+    const entries: CanonicalHandoffEntry[] = [];
+    for (const chunk of chunkInteractionIds(interactionIds)) {
+      const placeholders = chunk.map((_, index) => `$${index + 1}`).join(', ');
+      const { rows } = await this.db.query(
+        `SELECT id, scope_id, candidate_id, target_object_type, target_object_id, source_refs,
+                reviewed_at, review_reason, interaction_id, created_at, updated_at
+         FROM canonical_handoff_entries
+         WHERE interaction_id IN (${placeholders})
+         ORDER BY created_at DESC, id ASC`,
+        chunk,
+      );
+      entries.push(...(rows as Record<string, unknown>[]).map(rowToCanonicalHandoffEntry));
+    }
+    return sortByCreatedAtDescIdAsc(entries);
   }
 
   async deleteMemoryCandidateEntry(id: string): Promise<void> {
@@ -2134,6 +2147,21 @@ export class PGLiteEngine implements BrainEngine {
 
 function vectorLiteral(embedding: Float32Array): string {
   return `[${Array.from(embedding).join(',')}]`;
+}
+
+function chunkInteractionIds(interactionIds: string[]): string[][] {
+  const chunks: string[][] = [];
+  for (let index = 0; index < interactionIds.length; index += INTERACTION_ID_LOOKUP_BATCH_SIZE) {
+    chunks.push(interactionIds.slice(index, index + INTERACTION_ID_LOOKUP_BATCH_SIZE));
+  }
+  return chunks;
+}
+
+function sortByCreatedAtDescIdAsc<T extends { created_at: Date; id: string }>(entries: T[]): T[] {
+  return entries.sort((a, b) => {
+    const createdDelta = b.created_at.getTime() - a.created_at.getTime();
+    return createdDelta !== 0 ? createdDelta : a.id.localeCompare(b.id);
+  });
 }
 
 function vectorValueToFloat32(value: unknown): Float32Array | null {

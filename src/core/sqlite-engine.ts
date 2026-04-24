@@ -81,6 +81,7 @@ import {
 
 const DEFAULT_EMBEDDING_MODEL = 'nomic-embed-text';
 const BASELINE_VERSION = 1;
+const INTERACTION_ID_LOOKUP_BATCH_SIZE = 500;
 
 const SCHEMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -1839,15 +1840,19 @@ export class SQLiteEngine implements BrainEngine {
     interactionIds: string[],
   ): Promise<MemoryCandidateSupersessionEntry[]> {
     if (interactionIds.length === 0) return [];
-    const placeholders = interactionIds.map(() => '?').join(', ');
-    const rows = this.database.query(`
-      SELECT id, scope_id, superseded_candidate_id, replacement_candidate_id,
-             reviewed_at, review_reason, interaction_id, created_at, updated_at
-      FROM memory_candidate_supersession_entries
-      WHERE interaction_id IN (${placeholders})
-      ORDER BY created_at DESC, id ASC
-    `).all(...interactionIds) as Record<string, unknown>[];
-    return rows.map(rowToMemoryCandidateSupersessionEntry);
+    const entries: MemoryCandidateSupersessionEntry[] = [];
+    for (const chunk of chunkInteractionIds(interactionIds)) {
+      const placeholders = chunk.map(() => '?').join(', ');
+      const rows = this.database.query(`
+        SELECT id, scope_id, superseded_candidate_id, replacement_candidate_id,
+               reviewed_at, review_reason, interaction_id, created_at, updated_at
+        FROM memory_candidate_supersession_entries
+        WHERE interaction_id IN (${placeholders})
+        ORDER BY created_at DESC, id ASC
+      `).all(...chunk) as Record<string, unknown>[];
+      entries.push(...rows.map(rowToMemoryCandidateSupersessionEntry));
+    }
+    return sortByCreatedAtDescIdAsc(entries);
   }
 
   async createMemoryCandidateContradictionEntry(
@@ -1932,15 +1937,19 @@ export class SQLiteEngine implements BrainEngine {
     interactionIds: string[],
   ): Promise<MemoryCandidateContradictionEntry[]> {
     if (interactionIds.length === 0) return [];
-    const placeholders = interactionIds.map(() => '?').join(', ');
-    const rows = this.database.query(`
-      SELECT id, scope_id, candidate_id, challenged_candidate_id, outcome, supersession_entry_id,
-             reviewed_at, review_reason, interaction_id, created_at, updated_at
-      FROM memory_candidate_contradiction_entries
-      WHERE interaction_id IN (${placeholders})
-      ORDER BY created_at DESC, id ASC
-    `).all(...interactionIds) as Record<string, unknown>[];
-    return rows.map(rowToMemoryCandidateContradictionEntry);
+    const entries: MemoryCandidateContradictionEntry[] = [];
+    for (const chunk of chunkInteractionIds(interactionIds)) {
+      const placeholders = chunk.map(() => '?').join(', ');
+      const rows = this.database.query(`
+        SELECT id, scope_id, candidate_id, challenged_candidate_id, outcome, supersession_entry_id,
+               reviewed_at, review_reason, interaction_id, created_at, updated_at
+        FROM memory_candidate_contradiction_entries
+        WHERE interaction_id IN (${placeholders})
+        ORDER BY created_at DESC, id ASC
+      `).all(...chunk) as Record<string, unknown>[];
+      entries.push(...rows.map(rowToMemoryCandidateContradictionEntry));
+    }
+    return sortByCreatedAtDescIdAsc(entries);
   }
 
   async createCanonicalHandoffEntry(
@@ -2046,15 +2055,19 @@ export class SQLiteEngine implements BrainEngine {
     interactionIds: string[],
   ): Promise<CanonicalHandoffEntry[]> {
     if (interactionIds.length === 0) return [];
-    const placeholders = interactionIds.map(() => '?').join(', ');
-    const rows = this.database.query(`
-      SELECT id, scope_id, candidate_id, target_object_type, target_object_id, source_refs,
-             reviewed_at, review_reason, interaction_id, created_at, updated_at
-      FROM canonical_handoff_entries
-      WHERE interaction_id IN (${placeholders})
-      ORDER BY created_at DESC, id ASC
-    `).all(...interactionIds) as Record<string, unknown>[];
-    return rows.map(rowToCanonicalHandoffEntry);
+    const entries: CanonicalHandoffEntry[] = [];
+    for (const chunk of chunkInteractionIds(interactionIds)) {
+      const placeholders = chunk.map(() => '?').join(', ');
+      const rows = this.database.query(`
+        SELECT id, scope_id, candidate_id, target_object_type, target_object_id, source_refs,
+               reviewed_at, review_reason, interaction_id, created_at, updated_at
+        FROM canonical_handoff_entries
+        WHERE interaction_id IN (${placeholders})
+        ORDER BY created_at DESC, id ASC
+      `).all(...chunk) as Record<string, unknown>[];
+      entries.push(...rows.map(rowToCanonicalHandoffEntry));
+    }
+    return sortByCreatedAtDescIdAsc(entries);
   }
 
   async deleteMemoryCandidateEntry(id: string): Promise<void> {
@@ -3382,6 +3395,21 @@ function validateSlug(slug: string): string {
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+function chunkInteractionIds(interactionIds: string[]): string[][] {
+  const chunks: string[][] = [];
+  for (let index = 0; index < interactionIds.length; index += INTERACTION_ID_LOOKUP_BATCH_SIZE) {
+    chunks.push(interactionIds.slice(index, index + INTERACTION_ID_LOOKUP_BATCH_SIZE));
+  }
+  return chunks;
+}
+
+function sortByCreatedAtDescIdAsc<T extends { created_at: Date; id: string }>(entries: T[]): T[] {
+  return entries.sort((a, b) => {
+    const createdDelta = b.created_at.getTime() - a.created_at.getTime();
+    return createdDelta !== 0 ? createdDelta : a.id.localeCompare(b.id);
+  });
 }
 
 function toNullableIso(value: Date | string | null | undefined): string | null {

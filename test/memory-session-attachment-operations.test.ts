@@ -218,7 +218,7 @@ describe('memory session attachment operations', () => {
         realm_id: 'realm:session-flow',
         operation: 'attach_memory_realm_to_session',
         target_kind: 'memory_session_attachment',
-        target_id: 'session-flow:realm:session-flow',
+        target_id: 'memory_session_attachment:v1:session-flow:realm%3Asession-flow',
         result: 'applied',
         dry_run: false,
         metadata: {
@@ -339,7 +339,7 @@ describe('memory session attachment operations', () => {
 
       const dryRunTargetIds = [
         'session-dry-create',
-        'session-dry-existing:realm:dry-run',
+        'memory_session_attachment:v1:session-dry-existing:realm%3Adry-run',
       ];
       for (const target_id of dryRunTargetIds) {
         expect(await harness.engine.listMemoryMutationEvents({
@@ -349,7 +349,7 @@ describe('memory session attachment operations', () => {
       }
       expect(await harness.engine.listMemoryMutationEvents({
         operation: 'attach_memory_realm_to_session' as any,
-        target_id: 'session-dry-existing:realm:dry-run',
+        target_id: 'memory_session_attachment:v1:session-dry-existing:realm%3Adry-run',
       })).toEqual([]);
       expect(await harness.engine.listMemoryMutationEvents({
         operation: 'close_memory_session' as any,
@@ -459,7 +459,7 @@ describe('memory session attachment operations', () => {
       })).toEqual([]);
       expect(await harness.engine.listMemoryMutationEvents({
         operation: 'attach_memory_realm_to_session' as any,
-        target_id: 'session-expired:realm:expired-session',
+        target_id: 'memory_session_attachment:v1:session-expired:realm%3Aexpired-session',
       })).toEqual([]);
     } finally {
       await harness.cleanup();
@@ -714,7 +714,7 @@ describe('memory session attachment operations', () => {
       })).toEqual([]);
       expect(await harness.engine.listMemoryMutationEvents({
         operation: 'attach_memory_realm_to_session' as any,
-        target_id: 'session-attach-validation:realm:attach-validation',
+        target_id: 'memory_session_attachment:v1:session-attach-validation:realm%3Aattach-validation',
       })).toEqual([]);
     } finally {
       await harness.cleanup();

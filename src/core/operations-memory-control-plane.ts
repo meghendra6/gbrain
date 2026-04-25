@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import type { Operation } from './operations.ts';
 import { recordMemoryMutationEvent } from './services/memory-mutation-ledger-service.ts';
+import { memorySessionAttachmentTargetId } from './services/target-snapshot-hash-service.ts';
 import type {
   MemoryAccessMode,
   MemoryRealmFilters,
@@ -583,7 +584,7 @@ export function createMemoryControlPlaneOperations(
           actor: session.actor_ref ?? DEFAULT_REALM_UPSERT_ACTOR,
           operation: 'attach_memory_realm_to_session',
           target_kind: 'memory_session_attachment',
-          target_id: `${attachment.session_id}:${attachment.realm_id}`,
+          target_id: memorySessionAttachmentTargetId(attachment),
           scope_id: realm.scope,
           source_refs: sourceRefs,
           result: 'applied',

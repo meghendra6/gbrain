@@ -62,6 +62,7 @@ const VOLATILE_STORAGE_KEYS = new Set([
   'embedded_at',
   'snapshot_at',
 ]);
+const MEMORY_SESSION_ATTACHMENT_TARGET_ID_PREFIX = 'memory_session_attachment:v1:';
 
 export function canonicalJson(value: unknown): string {
   return JSON.stringify(canonicalizeForHash(value));
@@ -69,6 +70,18 @@ export function canonicalJson(value: unknown): string {
 
 export function hashCanonicalJson(value: unknown): string {
   return sha256Hex(canonicalJson(value));
+}
+
+export function memorySessionAttachmentTargetId(input: {
+  session_id: string;
+  realm_id: string;
+}): string {
+  return [
+    MEMORY_SESSION_ATTACHMENT_TARGET_ID_PREFIX,
+    encodeURIComponent(input.session_id),
+    ':',
+    encodeURIComponent(input.realm_id),
+  ].join('');
 }
 
 export async function resolveTargetSnapshotHash(
@@ -148,7 +161,7 @@ export async function resolveTargetSnapshotHash(
   }
 }
 
-function canonicalizeForHash(value: unknown): unknown {
+function canonicalizeForHash(value: unknown, depth = 0): unknown {
   if (value === null || value === undefined) return null;
   if (value instanceof Date) {
     if (Number.isNaN(value.getTime())) {
@@ -167,16 +180,23 @@ function canonicalizeForHash(value: unknown): unknown {
     return value;
   }
   if (typeof value === 'boolean') return value;
-  if (Array.isArray(value)) return value.map(canonicalizeForHash);
+  if (typeof value === 'bigint') {
+    throw new Error('Cannot hash unsupported JSON value type: bigint');
+  }
+  if (Array.isArray(value)) return value.map((nested) => canonicalizeForHash(nested, depth + 1));
   if (typeof value === 'object') {
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) {
+      const name = value.constructor?.name ?? 'object';
+      throw new Error(`Cannot hash unsupported object value: ${name}`);
+    }
     return Object.fromEntries(
       Object.entries(value as Record<string, unknown>)
-        .filter(([key]) => !VOLATILE_STORAGE_KEYS.has(key))
+        .filter(([key]) => depth > 0 || !VOLATILE_STORAGE_KEYS.has(key))
         .sort(([left], [right]) => left.localeCompare(right))
-        .map(([key, nested]) => [key, canonicalizeForHash(nested)]),
+        .map(([key, nested]) => [key, canonicalizeForHash(nested, depth + 1)]),
     );
   }
-  if (typeof value === 'bigint') return value.toString();
   throw new Error(`Cannot hash unsupported JSON value type: ${typeof value}`);
 }
 
@@ -401,6 +421,10 @@ function parseMemorySessionAttachmentTargetIdCandidates(targetId: string): Array
   session_id: string;
   realm_id: string;
 }> {
+  if (targetId.startsWith(MEMORY_SESSION_ATTACHMENT_TARGET_ID_PREFIX)) {
+    return [parseEncodedMemorySessionAttachmentTargetId(targetId)];
+  }
+
   // Ledger target ids currently use `${session_id}:${realm_id}`. Both ids may
   // contain colons, so resolution tries each legal split and accepts one match.
   const candidates: Array<{ session_id: string; realm_id: string }> = [];
@@ -415,4 +439,31 @@ function parseMemorySessionAttachmentTargetIdCandidates(targetId: string): Array
     throw new Error('memory_session_attachment target_id must use session_id:realm_id');
   }
   return candidates;
+}
+
+function parseEncodedMemorySessionAttachmentTargetId(targetId: string): {
+  session_id: string;
+  realm_id: string;
+} {
+  const encoded = targetId.slice(MEMORY_SESSION_ATTACHMENT_TARGET_ID_PREFIX.length);
+  const delimiter = encoded.indexOf(':');
+  if (delimiter <= 0 || delimiter === encoded.length - 1 || delimiter !== encoded.lastIndexOf(':')) {
+    throw new Error('encoded memory_session_attachment target_id must use memory_session_attachment:v1:{session_id}:{realm_id}');
+  }
+  try {
+    const sessionId = decodeURIComponent(encoded.slice(0, delimiter));
+    const realmId = decodeURIComponent(encoded.slice(delimiter + 1));
+    if (sessionId.length === 0 || realmId.length === 0) {
+      throw new Error('decoded memory_session_attachment target_id parts must be non-empty');
+    }
+    return {
+      session_id: sessionId,
+      realm_id: realmId,
+    };
+  } catch (error) {
+    if (error instanceof URIError) {
+      throw new Error('encoded memory_session_attachment target_id contains invalid URI encoding');
+    }
+    throw error;
+  }
 }

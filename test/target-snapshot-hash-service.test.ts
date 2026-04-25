@@ -51,6 +51,26 @@ async function createPgliteHarness(): Promise<EngineHarness> {
 }
 
 async function seedRepresentativeTargets(engine: BrainEngine): Promise<void> {
+  await engine.createTaskThread({
+    id: 'task:snapshot',
+    scope: 'work',
+    title: 'Snapshot Task',
+    goal: 'Exercise all non-page target hash payloads.',
+    status: 'active',
+    repo_path: '/repo/mbrain',
+    branch_name: 'phase9-memory-operations-control-plane',
+    current_summary: 'Target snapshot hash parity should cover operational memory records.',
+  });
+  await engine.upsertTaskWorkingSet({
+    task_id: 'task:snapshot',
+    active_paths: ['src/core/services/target-snapshot-hash-service.ts'],
+    active_symbols: ['resolveTargetSnapshotHash'],
+    blockers: [],
+    open_questions: ['Does parity cover JSON payload records?'],
+    next_steps: ['Keep target hashes deterministic across engines.'],
+    verification_notes: ['Parity test seeded the working set.'],
+    last_verified_at: new Date('2026-04-24T08:09:10.000Z'),
+  });
   await engine.upsertMemoryRealm({
     id: 'realm:snapshot',
     name: 'Snapshot Realm',
@@ -115,6 +135,41 @@ async function seedRepresentativeTargets(engine: BrainEngine): Promise<void> {
     reviewed_at: new Date('2026-04-24T05:06:07.000Z'),
     review_reason: 'Representative target for hash parity.',
   });
+  await engine.upsertContextMapEntry({
+    id: 'context-map:snapshot',
+    scope_id: 'workspace:default',
+    kind: 'structural',
+    title: 'Snapshot Context Map',
+    build_mode: 'test',
+    status: 'ready',
+    source_set_hash: 'source-set:snapshot',
+    extractor_version: 'target-snapshot-test',
+    node_count: 1,
+    edge_count: 0,
+    community_count: 1,
+    graph_json: {
+      nodes: [{
+        id: 'node:snapshot',
+        label: 'Snapshot Node',
+        created_at: '2026-04-24T08:09:10.000Z',
+      }],
+      edges: [],
+      metadata: {
+        created_at: '2026-04-24T08:09:11.000Z',
+      },
+    },
+    stale_reason: null,
+  });
+  await engine.upsertContextAtlasEntry({
+    id: 'context-atlas:snapshot',
+    map_id: 'context-map:snapshot',
+    scope_id: 'workspace:default',
+    kind: 'structural',
+    title: 'Snapshot Context Atlas',
+    freshness: 'fresh',
+    entrypoints: ['node:snapshot'],
+    budget_hint: 512,
+  });
 }
 
 describe('target snapshot hash service canonical JSON', () => {
@@ -148,6 +203,30 @@ describe('target snapshot hash service canonical JSON', () => {
     expect(canonicalJson({ at: new Date('2026-04-25T01:02:03.000Z') })).toBe(
       canonicalJson({ at: '2026-04-25T01:02:03Z' }),
     );
+  });
+
+  test('top-level volatile storage keys are omitted without dropping semantic nested fields', () => {
+    expect(hashCanonicalJson({
+      id: 'context-map:snapshot',
+      created_at: '2026-04-25T01:02:03.000Z',
+      graph_json: { nodes: [{ id: 'node:snapshot' }] },
+    })).toBe(hashCanonicalJson({
+      id: 'context-map:snapshot',
+      created_at: '2026-04-26T01:02:03.000Z',
+      graph_json: { nodes: [{ id: 'node:snapshot' }] },
+    }));
+
+    expect(hashCanonicalJson({
+      graph_json: { nodes: [{ id: 'node:snapshot', created_at: '2026-04-25T01:02:03.000Z' }] },
+    })).not.toBe(hashCanonicalJson({
+      graph_json: { nodes: [{ id: 'node:snapshot', created_at: '2026-04-26T01:02:03.000Z' }] },
+    }));
+  });
+
+  test('unsupported object values and bigint values are rejected', () => {
+    expect(() => hashCanonicalJson({ value: new Map([['key', 'value']]) })).toThrow(/unsupported object/i);
+    expect(() => hashCanonicalJson({ value: /unsupported/ })).toThrow(/unsupported object/i);
+    expect(() => hashCanonicalJson({ value: 1n })).toThrow(/unsupported JSON value type: bigint/i);
   });
 });
 
@@ -266,6 +345,55 @@ describe('target snapshot hash resolution', () => {
     }
   });
 
+  test('memory session attachment target ids support injective encoded form', async () => {
+    const harness = await createSqliteHarness();
+    try {
+      await harness.engine.upsertMemoryRealm({
+        id: 'b:c:d',
+        name: 'Legacy Ambiguous Realm',
+        scope: 'work',
+      });
+      await harness.engine.upsertMemoryRealm({
+        id: 'c:d',
+        name: 'Encoded Realm',
+        scope: 'work',
+      });
+      await harness.engine.createMemorySession({ id: 'a' });
+      await harness.engine.createMemorySession({ id: 'a:b' });
+      await harness.engine.attachMemoryRealmToSession({
+        session_id: 'a',
+        realm_id: 'b:c:d',
+        access: 'read_only',
+        instructions: 'Legacy ambiguous attachment.',
+      });
+      await harness.engine.attachMemoryRealmToSession({
+        session_id: 'a:b',
+        realm_id: 'c:d',
+        access: 'read_write',
+        instructions: 'Encoded target id should select this attachment.',
+      });
+
+      const result = await resolveTargetSnapshotHash(harness.engine, {
+        target_kind: 'memory_session_attachment',
+        target_id: 'memory_session_attachment:v1:a%3Ab:c%3Ad',
+      });
+
+      expect(result).toEqual({
+        target_kind: 'memory_session_attachment',
+        target_id: 'memory_session_attachment:v1:a%3Ab:c%3Ad',
+        target_snapshot_hash: hashCanonicalJson({
+          session_id: 'a:b',
+          realm_id: 'c:d',
+          access: 'read_write',
+          instructions: 'Encoded target id should select this attachment.',
+        }),
+        hash_source: 'canonical_json',
+      });
+    } finally {
+      await harness.cleanup();
+    }
+  });
+
   test('SQLite and PGLite produce identical hashes for representative non-page records', async () => {
     const sqlite = await createSqliteHarness();
     const pglite = await createPgliteHarness();
@@ -280,6 +408,10 @@ describe('target snapshot hash resolution', () => {
         { target_kind: 'profile_memory', target_id: 'profile:snapshot' },
         { target_kind: 'personal_episode', target_id: 'episode:snapshot' },
         { target_kind: 'memory_candidate', target_id: 'candidate:snapshot' },
+        { target_kind: 'task_thread', target_id: 'task:snapshot' },
+        { target_kind: 'working_set', target_id: 'task:snapshot' },
+        { target_kind: 'context_map', target_id: 'context-map:snapshot' },
+        { target_kind: 'context_atlas', target_id: 'context-atlas:snapshot' },
       ];
 
       for (const target of targets) {

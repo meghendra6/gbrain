@@ -12,6 +12,7 @@ export interface SqliteCliHarness {
   brainRepoDir: string;
   exportDir: string;
   dbPath: string;
+  env: Record<string, string>;
   run: (args: string[], options?: { cwd?: string; input?: string }) => CliResult;
   runJson: <T = any>(args: string[], options?: { cwd?: string; input?: string }) => T;
   call: <T = any>(tool: string, params?: Record<string, unknown>) => T;
@@ -76,6 +77,7 @@ export function createSqliteCliHarness(label: string): SqliteCliHarness {
     brainRepoDir,
     exportDir,
     dbPath,
+    env,
     run,
     runJson,
     call: <T = any>(tool: string, params: Record<string, unknown> = {}) =>

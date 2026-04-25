@@ -11,7 +11,19 @@
  */
 
 import { describe, test, expect } from 'bun:test';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { operations } from '../../src/core/operations.ts';
+import { assertOk, createSqliteCliHarness, parseJsonSuffix } from './sqlite-cli-helpers.ts';
+
+const repoRoot = new URL('../..', import.meta.url).pathname;
+
+function parseMcpText<T = any>(result: any): T {
+  expect(result.isError).not.toBe(true);
+  const text = result.content?.find((entry: any) => entry.type === 'text')?.text;
+  expect(typeof text).toBe('string');
+  return parseJsonSuffix<T>(text);
+}
 
 describe('E2E: MCP Tool Generation', () => {
   test('operations generate valid MCP tool definitions', () => {
@@ -64,4 +76,161 @@ describe('E2E: MCP Tool Generation', () => {
     expect(typeof mod.startMcpServer).toBe('function');
     expect(typeof mod.handleToolCall).toBe('function');
   });
+
+  test('stdio MCP server exposes and executes local SQLite memory lifecycle tools', async () => {
+    const h = createSqliteCliHarness('mcp');
+    const init = h.run(['init', '--local', '--json']);
+    assertOk(init, ['init', '--local', '--json']);
+
+    const transport = new StdioClientTransport({
+      command: 'bun',
+      args: ['run', 'src/cli.ts', 'serve'],
+      cwd: repoRoot,
+      env: h.env,
+      stderr: 'pipe',
+    });
+    const client = new Client(
+      { name: 'mbrain-e2e', version: '0.0.0' },
+      { capabilities: {} },
+    );
+
+    try {
+      await client.connect(transport);
+
+      const tools = await client.listTools();
+      const byName = new Map(tools.tools.map((tool) => [tool.name, tool]));
+      for (const name of [
+        'write_profile_memory_entry',
+        'get_profile_memory_entry',
+        'delete_profile_memory_entry',
+        'write_personal_episode_entry',
+        'get_personal_episode_entry',
+        'delete_personal_episode_entry',
+        'create_memory_candidate_entry',
+        'get_memory_candidate_entry',
+        'delete_memory_candidate_entry',
+        'record_canonical_handoff',
+      ]) {
+        expect(byName.has(name)).toBe(true);
+      }
+      expect((byName.get('record_canonical_handoff')?.inputSchema.properties as any).interaction_id.type).toBe('string');
+
+      const profileId = 'mcp-profile-delete-me';
+      const profile = parseMcpText<any>(await client.callTool({
+        name: 'write_profile_memory_entry',
+        arguments: {
+          id: profileId,
+          requested_scope: 'personal',
+          profile_type: 'preference',
+          subject: 'mcp sqlite lifecycle',
+          content: 'MCP writes profile memory into the local SQLite brain.',
+          source_ref: 'MCP E2E, direct tool call, 2026-04-25 18:50 KST',
+        },
+      }));
+      expect(profile.id).toBe(profileId);
+      expect(parseMcpText<any>(await client.callTool({
+        name: 'get_profile_memory_entry',
+        arguments: { id: profileId },
+      })).content).toContain('local SQLite brain');
+      expect(parseMcpText<any>(await client.callTool({
+        name: 'delete_profile_memory_entry',
+        arguments: { id: profileId },
+      }))).toMatchObject({ status: 'deleted', id: profileId });
+      expect(parseMcpText<any | null>(await client.callTool({
+        name: 'get_profile_memory_entry',
+        arguments: { id: profileId },
+      }))).toBeNull();
+
+      const episodeId = 'mcp-episode-delete-me';
+      expect(parseMcpText<any>(await client.callTool({
+        name: 'write_personal_episode_entry',
+        arguments: {
+          id: episodeId,
+          requested_scope: 'personal',
+          title: 'MCP SQLite episode lifecycle',
+          start_time: '2026-04-25T09:50:00Z',
+          source_kind: 'chat',
+          summary: 'MCP writes an episode into the local SQLite brain.',
+          source_ref: 'MCP E2E, direct tool call, 2026-04-25 18:50 KST',
+        },
+      })).id).toBe(episodeId);
+      expect(parseMcpText<any>(await client.callTool({
+        name: 'delete_personal_episode_entry',
+        arguments: { id: episodeId },
+      }))).toMatchObject({ status: 'deleted', id: episodeId });
+      expect(parseMcpText<any | null>(await client.callTool({
+        name: 'get_personal_episode_entry',
+        arguments: { id: episodeId },
+      }))).toBeNull();
+
+      const candidateId = 'mcp-candidate-delete-me';
+      expect(parseMcpText<any>(await client.callTool({
+        name: 'create_memory_candidate_entry',
+        arguments: {
+          id: candidateId,
+          candidate_type: 'fact',
+          proposed_content: 'MCP writes a memory candidate into the local SQLite brain.',
+          source_ref: 'MCP E2E, direct tool call, 2026-04-25 18:50 KST',
+          target_object_type: 'profile_memory',
+          target_object_id: profileId,
+          interaction_id: 'mcp-trace-delete',
+        },
+      })).id).toBe(candidateId);
+      expect(parseMcpText<any>(await client.callTool({
+        name: 'get_memory_candidate_entry',
+        arguments: { id: candidateId },
+      })).source_refs).toContain('MCP E2E, direct tool call, 2026-04-25 18:50 KST');
+      expect(parseMcpText<any>(await client.callTool({
+        name: 'delete_memory_candidate_entry',
+        arguments: { id: candidateId },
+      }))).toMatchObject({ status: 'deleted', id: candidateId });
+      expect(parseMcpText<any | null>(await client.callTool({
+        name: 'get_memory_candidate_entry',
+        arguments: { id: candidateId },
+      }))).toBeNull();
+
+      const handoffCandidateId = 'mcp-candidate-handoff';
+      parseMcpText(await client.callTool({
+        name: 'create_memory_candidate_entry',
+        arguments: {
+          id: handoffCandidateId,
+          candidate_type: 'fact',
+          proposed_content: 'MCP handoff candidate preserves interaction attribution.',
+          source_ref: 'MCP E2E, handoff provenance, 2026-04-25 18:51 KST',
+          sensitivity: 'personal',
+          target_object_type: 'profile_memory',
+          target_object_id: 'mcp-profile-handoff',
+          interaction_id: 'mcp-trace-handoff',
+        },
+      }));
+      parseMcpText(await client.callTool({
+        name: 'advance_memory_candidate_status',
+        arguments: { id: handoffCandidateId, next_status: 'candidate', interaction_id: 'mcp-trace-handoff' },
+      }));
+      parseMcpText(await client.callTool({
+        name: 'advance_memory_candidate_status',
+        arguments: { id: handoffCandidateId, next_status: 'staged_for_review', interaction_id: 'mcp-trace-handoff' },
+      }));
+      parseMcpText(await client.callTool({
+        name: 'promote_memory_candidate_entry',
+        arguments: {
+          id: handoffCandidateId,
+          review_reason: 'MCP promotion path preserves provenance.',
+          interaction_id: 'mcp-trace-handoff',
+        },
+      }));
+      const handoff = parseMcpText<any>(await client.callTool({
+        name: 'record_canonical_handoff',
+        arguments: {
+          candidate_id: handoffCandidateId,
+          review_reason: 'MCP canonical handoff attribution.',
+          interaction_id: 'mcp-trace-handoff',
+        },
+      }));
+      expect(handoff.handoff.interaction_id).toBe('mcp-trace-handoff');
+    } finally {
+      await client.close();
+      h.teardown();
+    }
+  }, 60_000);
 });

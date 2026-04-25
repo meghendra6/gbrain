@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 
 const repoRoot = new URL('..', import.meta.url).pathname;
@@ -68,5 +68,26 @@ describe('SQLite-first product messaging', () => {
       expect(guide).toContain('local/offline');
       expect(guide).toContain('managed/Postgres');
     }
+  });
+
+  test('repository no longer ships historical RFC docs as current guidance', () => {
+    const rfcDir = join(repoRoot, 'docs', 'rfcs');
+    const rfcFiles = existsSync(rfcDir)
+      ? readdirSync(rfcDir).filter((name) => name.endsWith('.md'))
+      : [];
+
+    expect(rfcFiles).toEqual([]);
+  });
+
+  test('current guidance does not link to deleted RFC docs', () => {
+    const guidance = [
+      readRepoFile('README.md'),
+      readRepoFile('docs/ENGINES.md'),
+      readRepoFile('docs/MCP_INSTRUCTIONS.md'),
+      readRepoFile('src/core/operations.ts'),
+    ].join('\n');
+
+    expect(guidance).not.toContain('docs/rfcs');
+    expect(guidance).not.toContain('rfcs/');
   });
 });

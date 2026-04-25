@@ -1421,34 +1421,34 @@ const put_page: Operation = {
       const previousHash = existing?.content_hash ?? null;
 
       if (expectedContentHash !== undefined && !existing) {
-        await recordPutPageConflict(tx, audit, {
-          slug,
-          expectedContentHash,
-          currentContentHash: null,
-          conflictInfo: {
-            reason: 'missing_page',
-            expected_content_hash: expectedContentHash,
-          },
-        });
         return {
           kind: 'conflict' as const,
+          conflict: {
+            slug,
+            expectedContentHash,
+            currentContentHash: null,
+            conflictInfo: {
+              reason: 'missing_page',
+              expected_content_hash: expectedContentHash,
+            },
+          },
           error: new OperationError('write_conflict', `Page not found for expected content hash: ${slug}`),
         };
       }
 
       if (expectedContentHash !== undefined && previousHash !== expectedContentHash) {
-        await recordPutPageConflict(tx, audit, {
-          slug,
-          expectedContentHash,
-          currentContentHash: previousHash,
-          conflictInfo: {
-            reason: 'content_hash_mismatch',
-            expected_content_hash: expectedContentHash,
-            current_content_hash: previousHash,
-          },
-        });
         return {
           kind: 'conflict' as const,
+          conflict: {
+            slug,
+            expectedContentHash,
+            currentContentHash: previousHash,
+            conflictInfo: {
+              reason: 'content_hash_mismatch',
+              expected_content_hash: expectedContentHash,
+              current_content_hash: previousHash,
+            },
+          },
           error: new OperationError('write_conflict', `content hash mismatch for ${slug}`),
         };
       }
@@ -1515,6 +1515,7 @@ const put_page: Operation = {
     });
 
     if (outcome.kind === 'conflict') {
+      await recordPutPageConflict(ctx.engine, audit, outcome.conflict);
       throw outcome.error;
     }
     return putPageOperationResult(outcome.result);

@@ -265,6 +265,73 @@ describe('put_page content hash preconditions and mutation ledger', () => {
     });
   });
 
+  test('stale expected_content_hash records conflict ledger after precondition transaction exits', async () => {
+    await withSqliteEngine(async (ctx) => {
+      const put = getOperation('put_page');
+      const slug = 'concepts/conflict-ledger-outside-transaction';
+      const sessionId = 'put-page-conflict-ledger-outside-transaction-session';
+
+      await put.handler(ctx, {
+        slug,
+        content: pageContent(
+          'Conflict Ledger Outside Transaction',
+          'Original compiled truth.',
+          '- 2026-04-25 | Initial evidence.',
+        ),
+      });
+      const before = await ctx.engine.getPage(slug);
+      expect(before?.content_hash).toBeTruthy();
+
+      let inTransaction = false;
+      const conflictLedgerTransactionStates: boolean[] = [];
+      const originalTransaction = ctx.engine.transaction.bind(ctx.engine);
+      const originalCreateMemoryMutationEvent = ctx.engine.createMemoryMutationEvent.bind(ctx.engine);
+
+      ctx.engine.transaction = async <T>(fn: (engine: BrainEngine) => Promise<T>): Promise<T> => {
+        return originalTransaction(async (tx) => {
+          inTransaction = true;
+          try {
+            return await fn(tx);
+          } finally {
+            inTransaction = false;
+          }
+        });
+      };
+
+      ctx.engine.createMemoryMutationEvent = async (input) => {
+        if (input.session_id === sessionId && input.result === 'conflict') {
+          conflictLedgerTransactionStates.push(inTransaction);
+        }
+        return originalCreateMemoryMutationEvent(input);
+      };
+
+      let error: unknown;
+      try {
+        await put.handler(ctx, {
+          slug,
+          content: pageContent(
+            'Conflict Ledger Outside Transaction',
+            'This content should not be written.',
+            '- 2026-04-25 | Transaction state attempted update.',
+          ),
+          expected_content_hash: STALE_HASH,
+          session_id: sessionId,
+          source_refs: ['Source: conflict ledger transaction state test'],
+        });
+      } catch (caught) {
+        error = caught;
+      }
+
+      expect(error).toBeInstanceOf(OperationError);
+      expect((error as OperationError).code).toBe('write_conflict');
+      expect(conflictLedgerTransactionStates).toEqual([false]);
+      expect(await ctx.engine.getPage(slug)).toMatchObject({
+        content_hash: before?.content_hash,
+        compiled_truth: before?.compiled_truth,
+      });
+    });
+  });
+
   test('correct expected_content_hash allows update and records applied event with final hash', async () => {
     await withSqliteEngine(async (ctx) => {
       const put = getOperation('put_page');

@@ -1244,6 +1244,26 @@ const get_page: Operation = {
   cliHints: { name: 'get', positional: ['slug'] },
 };
 
+const SOURCE_ATTRIBUTION_RE = /\[Source:\s*([^\]\n]*)\]/g;
+
+function hasUsableSourceAttribution(content: string): boolean {
+  SOURCE_ATTRIBUTION_RE.lastIndex = 0;
+  for (const match of content.matchAll(SOURCE_ATTRIBUTION_RE)) {
+    if ((match[1] ?? '').trim()) return true;
+  }
+  return false;
+}
+
+function assertPutPageSourceAttribution(content: string): void {
+  if (hasUsableSourceAttribution(content)) return;
+  throw new OperationError(
+    'invalid_params',
+    'put_page content must include at least one non-empty [Source: ...] attribution.',
+    'Add a provenance citation such as [Source: User, direct message, 2026-04-26 09:00 AM KST] to the compiled truth or timeline before writing durable memory.',
+    'docs/guides/source-attribution.md',
+  );
+}
+
 const put_page: Operation = {
   name: 'put_page',
   description: 'Create or update a knowledge page to record new information about people, companies, concepts, or systems discovered during the conversation. Markdown with YAML frontmatter; content should follow the compiled truth + timeline pattern. Chunks, embeds, and reconciles tags.',
@@ -1253,8 +1273,10 @@ const put_page: Operation = {
   },
   mutating: true,
   handler: async (ctx, p) => {
+    const content = String(p.content);
     if (ctx.dryRun) return { dry_run: true, action: 'put_page', slug: p.slug };
-    const result = await importFromContent(ctx.engine, p.slug as string, p.content as string);
+    assertPutPageSourceAttribution(content);
+    const result = await importFromContent(ctx.engine, p.slug as string, content);
     return { slug: result.slug, status: result.status === 'imported' ? 'created_or_updated' : result.status, chunks: result.chunks };
   },
   cliHints: { name: 'put', positional: ['slug'], stdin: 'content' },
@@ -2931,7 +2953,7 @@ const select_retrieval_route: Operation = {
   params: {
     intent: { type: 'string', required: true, description: 'One of task_resume, broad_synthesis, precision_lookup, mixed_scope_bridge, personal_profile_lookup, personal_episode_lookup' },
     task_id: { type: 'string', description: 'Task id for task_resume intent' },
-    persist_trace: { type: 'boolean', description: 'Persist a task-scoped Retrieval Trace for the selected route' },
+    persist_trace: { type: 'boolean', description: 'Persist a Retrieval Trace for the selected route; task_id is optional and task-less traces are stored with task_id=null' },
     requested_scope: { type: 'string', description: 'Optional explicit scope override', enum: ['work', 'personal', 'mixed'] },
     personal_route_kind: { type: 'string', description: 'Personal-side route kind for mixed_scope_bridge intent', enum: ['profile', 'episode'] },
     map_id: { type: 'string', description: 'Optional context map id for broad_synthesis intent' },
@@ -2997,10 +3019,6 @@ const select_retrieval_route: Operation = {
         throw new OperationError('invalid_params', 'precision_lookup intent requires slug, path, section_id, or source_ref.');
       }
     }
-    if (p.persist_trace === true && typeof p.task_id !== 'string') {
-      throw new OperationError('invalid_params', 'persist_trace requires task_id.');
-    }
-
     return selectRetrievalRoute(ctx.engine, {
       intent,
       task_id: typeof p.task_id === 'string' ? p.task_id : undefined,

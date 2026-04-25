@@ -232,6 +232,40 @@ describe('target snapshot hash resolution', () => {
     }
   });
 
+  test('memory session attachment target ids resolve when both ids contain colons', async () => {
+    const harness = await createSqliteHarness();
+    try {
+      await harness.engine.upsertMemoryRealm({
+        id: 'realm:colon:snapshot',
+        name: 'Colon Snapshot Realm',
+        scope: 'work',
+      });
+      await harness.engine.createMemorySession({
+        id: 'session:colon:snapshot',
+      });
+      await harness.engine.attachMemoryRealmToSession({
+        session_id: 'session:colon:snapshot',
+        realm_id: 'realm:colon:snapshot',
+        access: 'read_only',
+        instructions: 'Attachment target id parser must handle colons.',
+      });
+
+      const result = await resolveTargetSnapshotHash(harness.engine, {
+        target_kind: 'memory_session_attachment',
+        target_id: 'session:colon:snapshot:realm:colon:snapshot',
+      });
+
+      expect(result).toMatchObject({
+        target_kind: 'memory_session_attachment',
+        target_id: 'session:colon:snapshot:realm:colon:snapshot',
+        hash_source: 'canonical_json',
+      });
+      expect(result?.target_snapshot_hash).toMatch(/^[a-f0-9]{64}$/);
+    } finally {
+      await harness.cleanup();
+    }
+  });
+
   test('SQLite and PGLite produce identical hashes for representative non-page records', async () => {
     const sqlite = await createSqliteHarness();
     const pglite = await createPgliteHarness();

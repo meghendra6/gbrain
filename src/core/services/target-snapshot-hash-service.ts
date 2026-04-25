@@ -205,13 +205,19 @@ async function memorySessionAttachmentTargetSnapshotHash(
   engine: BrainEngine,
   targetId: string,
 ): Promise<TargetSnapshotHashResult | null> {
-  const parsed = parseMemorySessionAttachmentTargetId(targetId);
-  const attachments = await engine.listMemorySessionAttachments({
-    session_id: parsed.session_id,
-    realm_id: parsed.realm_id,
-    limit: 1,
-  });
-  const attachment = attachments[0];
+  const matches: MemorySessionAttachment[] = [];
+  for (const parsed of parseMemorySessionAttachmentTargetIdCandidates(targetId)) {
+    const attachments = await engine.listMemorySessionAttachments({
+      session_id: parsed.session_id,
+      realm_id: parsed.realm_id,
+      limit: 1,
+    });
+    if (attachments[0]) matches.push(attachments[0]);
+  }
+  if (matches.length > 1) {
+    throw new Error(`ambiguous memory_session_attachment target_id: ${targetId}`);
+  }
+  const attachment = matches[0];
   if (!attachment) return null;
   return targetSnapshotResult(
     'memory_session_attachment',
@@ -391,18 +397,22 @@ function taskWorkingSetPayload(workingSet: TaskWorkingSet): Record<string, unkno
   };
 }
 
-function parseMemorySessionAttachmentTargetId(targetId: string): {
+function parseMemorySessionAttachmentTargetIdCandidates(targetId: string): Array<{
   session_id: string;
   realm_id: string;
-} {
-  // Ledger target ids currently use `${session_id}:${realm_id}`. Split only on
-  // the first colon so realm ids such as `realm:work` remain intact.
-  const delimiter = targetId.indexOf(':');
-  if (delimiter <= 0 || delimiter === targetId.length - 1) {
+}> {
+  // Ledger target ids currently use `${session_id}:${realm_id}`. Both ids may
+  // contain colons, so resolution tries each legal split and accepts one match.
+  const candidates: Array<{ session_id: string; realm_id: string }> = [];
+  for (let delimiter = targetId.indexOf(':'); delimiter !== -1; delimiter = targetId.indexOf(':', delimiter + 1)) {
+    if (delimiter <= 0 || delimiter === targetId.length - 1) continue;
+    candidates.push({
+      session_id: targetId.slice(0, delimiter),
+      realm_id: targetId.slice(delimiter + 1),
+    });
+  }
+  if (candidates.length === 0) {
     throw new Error('memory_session_attachment target_id must use session_id:realm_id');
   }
-  return {
-    session_id: targetId.slice(0, delimiter),
-    realm_id: targetId.slice(delimiter + 1),
-  };
+  return candidates;
 }

@@ -78,7 +78,7 @@ Ledger recording is an internal transactional invariant of mutating services. Or
 
 ### Operation and Target Namespaces
 
-Operation names are stable snake_case names. Ledger operation names should map to the MCP/CLI service operation that caused the mutation where one exists, not to loose prose labels.
+Operation names are stable snake_case names. Ledger operation names must use the existing MCP/CLI service operation name where that operation already exists. New aliases require a deliberate migration and compatibility decision; Phase 9 must not introduce replacement names silently.
 
 | Category | Operation Names |
 |---|---|
@@ -87,8 +87,8 @@ Operation names are stable snake_case names. Ledger operation names should map t
 | Patch candidate | `create_memory_patch_candidate`, `dry_run_memory_patch_candidate`, `review_memory_patch_candidate`, `apply_memory_patch_candidate` |
 | Redaction | `create_redaction_plan`, `dry_run_redaction_plan`, `execute_redaction_plan` |
 | Canonical page mutation | `put_page`, `delete_page` |
-| Profile and personal mutation | `put_profile_memory_entry`, `delete_profile_memory_entry`, `put_personal_episode_entry`, `delete_personal_episode_entry` |
-| Memory candidate mutation | `create_memory_candidate_entry`, `update_memory_candidate_entry_status`, `delete_memory_candidate_entry`, `promote_memory_candidate_entry`, `supersede_memory_candidate_entry` |
+| Profile and personal mutation | `upsert_profile_memory_entry`, `write_profile_memory_entry`, `delete_profile_memory_entry`, `record_personal_episode`, `write_personal_episode_entry`, `delete_personal_episode_entry` |
+| Memory candidate mutation | `create_memory_candidate_entry`, `advance_memory_candidate_status`, `reject_memory_candidate_entry`, `delete_memory_candidate_entry`, `promote_memory_candidate_entry`, `supersede_memory_candidate_entry` |
 | Export and sync | `export_memory_artifact`, `sync_memory_artifact` |
 | Maintenance and repair | `repair_memory_ledger`, `physical_delete_memory_record` |
 

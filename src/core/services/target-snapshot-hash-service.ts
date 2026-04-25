@@ -162,7 +162,10 @@ export async function resolveTargetSnapshotHash(
 }
 
 function canonicalizeForHash(value: unknown, depth = 0): unknown {
-  if (value === null || value === undefined) return null;
+  if (value === null) return null;
+  if (value === undefined) {
+    throw new Error('Cannot hash unsupported JSON value type: undefined');
+  }
   if (value instanceof Date) {
     if (Number.isNaN(value.getTime())) {
       throw new Error('Cannot hash an invalid Date value');
@@ -226,13 +229,17 @@ async function memorySessionAttachmentTargetSnapshotHash(
   targetId: string,
 ): Promise<TargetSnapshotHashResult | null> {
   const matches: MemorySessionAttachment[] = [];
-  for (const parsed of parseMemorySessionAttachmentTargetIdCandidates(targetId)) {
+  const parsedTarget = parseMemorySessionAttachmentTargetIdCandidates(targetId);
+  for (const parsed of parsedTarget.candidates) {
     const attachments = await engine.listMemorySessionAttachments({
       session_id: parsed.session_id,
       realm_id: parsed.realm_id,
       limit: 1,
     });
     if (attachments[0]) matches.push(attachments[0]);
+  }
+  if (matches.length === 0 && parsedTarget.encodedError) {
+    throw parsedTarget.encodedError;
   }
   if (matches.length > 1) {
     throw new Error(`ambiguous memory_session_attachment target_id: ${targetId}`);
@@ -417,17 +424,25 @@ function taskWorkingSetPayload(workingSet: TaskWorkingSet): Record<string, unkno
   };
 }
 
-function parseMemorySessionAttachmentTargetIdCandidates(targetId: string): Array<{
-  session_id: string;
-  realm_id: string;
-}> {
+function parseMemorySessionAttachmentTargetIdCandidates(targetId: string): {
+  candidates: Array<{
+    session_id: string;
+    realm_id: string;
+  }>;
+  encodedError?: Error;
+} {
+  let encodedError: Error | undefined;
+  const candidates: Array<{ session_id: string; realm_id: string }> = [];
   if (targetId.startsWith(MEMORY_SESSION_ATTACHMENT_TARGET_ID_PREFIX)) {
-    return [parseEncodedMemorySessionAttachmentTargetId(targetId)];
+    try {
+      candidates.push(parseEncodedMemorySessionAttachmentTargetId(targetId));
+    } catch (error) {
+      encodedError = error instanceof Error ? error : new Error(String(error));
+    }
   }
 
   // Ledger target ids currently use `${session_id}:${realm_id}`. Both ids may
   // contain colons, so resolution tries each legal split and accepts one match.
-  const candidates: Array<{ session_id: string; realm_id: string }> = [];
   for (let delimiter = targetId.indexOf(':'); delimiter !== -1; delimiter = targetId.indexOf(':', delimiter + 1)) {
     if (delimiter <= 0 || delimiter === targetId.length - 1) continue;
     candidates.push({
@@ -438,7 +453,22 @@ function parseMemorySessionAttachmentTargetIdCandidates(targetId: string): Array
   if (candidates.length === 0) {
     throw new Error('memory_session_attachment target_id must use session_id:realm_id');
   }
-  return candidates;
+  return {
+    candidates: dedupeMemorySessionAttachmentTargetCandidates(candidates),
+    encodedError,
+  };
+}
+
+function dedupeMemorySessionAttachmentTargetCandidates(
+  candidates: Array<{ session_id: string; realm_id: string }>,
+): Array<{ session_id: string; realm_id: string }> {
+  const seen = new Set<string>();
+  return candidates.filter((candidate) => {
+    const key = `${candidate.session_id}\0${candidate.realm_id}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function parseEncodedMemorySessionAttachmentTargetId(targetId: string): {

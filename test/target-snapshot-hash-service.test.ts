@@ -227,6 +227,7 @@ describe('target snapshot hash service canonical JSON', () => {
     expect(() => hashCanonicalJson({ value: new Map([['key', 'value']]) })).toThrow(/unsupported object/i);
     expect(() => hashCanonicalJson({ value: /unsupported/ })).toThrow(/unsupported object/i);
     expect(() => hashCanonicalJson({ value: 1n })).toThrow(/unsupported JSON value type: bigint/i);
+    expect(() => hashCanonicalJson({ value: undefined })).toThrow(/unsupported JSON value type: undefined/i);
   });
 });
 
@@ -389,6 +390,78 @@ describe('target snapshot hash resolution', () => {
         }),
         hash_source: 'canonical_json',
       });
+    } finally {
+      await harness.cleanup();
+    }
+  });
+
+  test('prefix-shaped legacy memory session attachment target ids still resolve', async () => {
+    const harness = await createSqliteHarness();
+    try {
+      await harness.engine.upsertMemoryRealm({
+        id: 'v1:legacy:realm',
+        name: 'Prefix Legacy Realm',
+        scope: 'work',
+      });
+      await harness.engine.createMemorySession({ id: 'memory_session_attachment' });
+      await harness.engine.attachMemoryRealmToSession({
+        session_id: 'memory_session_attachment',
+        realm_id: 'v1:legacy:realm',
+        access: 'read_only',
+        instructions: 'Legacy target id happens to start with the encoded prefix.',
+      });
+
+      const result = await resolveTargetSnapshotHash(harness.engine, {
+        target_kind: 'memory_session_attachment',
+        target_id: 'memory_session_attachment:v1:legacy:realm',
+      });
+
+      expect(result).toEqual({
+        target_kind: 'memory_session_attachment',
+        target_id: 'memory_session_attachment:v1:legacy:realm',
+        target_snapshot_hash: hashCanonicalJson({
+          session_id: 'memory_session_attachment',
+          realm_id: 'v1:legacy:realm',
+          access: 'read_only',
+          instructions: 'Legacy target id happens to start with the encoded prefix.',
+        }),
+        hash_source: 'canonical_json',
+      });
+    } finally {
+      await harness.cleanup();
+    }
+  });
+
+  test('prefix-shaped attachment target ids throw when encoded and legacy rows both match', async () => {
+    const harness = await createSqliteHarness();
+    try {
+      await harness.engine.upsertMemoryRealm({
+        id: 'b',
+        name: 'Encoded Realm',
+        scope: 'work',
+      });
+      await harness.engine.upsertMemoryRealm({
+        id: 'v1:a:b',
+        name: 'Legacy Prefix Realm',
+        scope: 'work',
+      });
+      await harness.engine.createMemorySession({ id: 'a' });
+      await harness.engine.createMemorySession({ id: 'memory_session_attachment' });
+      await harness.engine.attachMemoryRealmToSession({
+        session_id: 'a',
+        realm_id: 'b',
+        access: 'read_write',
+      });
+      await harness.engine.attachMemoryRealmToSession({
+        session_id: 'memory_session_attachment',
+        realm_id: 'v1:a:b',
+        access: 'read_only',
+      });
+
+      await expect(resolveTargetSnapshotHash(harness.engine, {
+        target_kind: 'memory_session_attachment',
+        target_id: 'memory_session_attachment:v1:a:b',
+      })).rejects.toThrow(/ambiguous memory_session_attachment target_id/i);
     } finally {
       await harness.cleanup();
     }

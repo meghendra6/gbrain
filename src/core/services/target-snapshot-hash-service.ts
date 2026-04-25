@@ -103,7 +103,7 @@ export async function resolveTargetSnapshotHash(
         input.target_kind,
         input.target_id,
         await engine.getMemorySession(input.target_id),
-        memorySessionPayload,
+        memorySessionSnapshotPayload,
       );
     case 'memory_session_attachment':
       return memorySessionAttachmentTargetSnapshotHash(engine, input.target_id);
@@ -297,11 +297,10 @@ function memoryRealmPayload(realm: MemoryRealm): Record<string, unknown> {
   };
 }
 
-function memorySessionPayload(session: MemorySession): Record<string, unknown> {
+export function memorySessionSnapshotPayload(session: MemorySession): Record<string, unknown> {
   return {
     id: session.id,
     task_id: session.task_id,
-    status: session.status,
     actor_ref: session.actor_ref,
     closed_at: session.closed_at,
     expires_at: session.expires_at,

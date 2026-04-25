@@ -139,8 +139,8 @@ test('record_memory_mutation_event writes privileged events with normalized sour
       target_id: 'event-target',
       scope_id: 'scope-write',
       source_refs: [' array source ref '],
-      expected_target_snapshot_hash: 'expected-hash',
-      current_target_snapshot_hash: 'current-hash',
+      expected_target_snapshot_hash: 'a'.repeat(64),
+      current_target_snapshot_hash: 'b'.repeat(64),
       result: 'applied',
       conflict_info: { kind: 'none' },
       metadata: { existing: true },
@@ -162,6 +162,33 @@ test('record_memory_mutation_event writes privileged events with normalized sour
     const listed = await ctx.engine.listMemoryMutationEvents({ realm_id: 'realm-write' });
     expect(listed.map((event) => event.id)).toEqual([written.id]);
     expect(listed[0].metadata).toEqual(written.metadata);
+  });
+});
+
+test('record_memory_mutation_event rejects malformed target snapshot hashes', async () => {
+  await withSqliteEngine(async (ctx) => {
+    const record = getPrivilegedLedgerOperation('record_memory_mutation_event');
+    const base = {
+      privileged: true,
+      privileged_reason: 'backfill import ledger from trusted archive',
+      session_id: 'session-hash-shape',
+      realm_id: 'realm-hash-shape',
+      actor: 'importer',
+      operation: 'repair_memory_ledger',
+      target_kind: 'ledger_event',
+      target_id: 'event-hash-shape',
+      source_refs: ['Source: hash shape test'],
+      result: 'applied',
+    };
+
+    await expect(record.handler(ctx, {
+      ...base,
+      expected_target_snapshot_hash: 'expected-hash',
+    })).rejects.toBeInstanceOf(OperationError);
+    await expect(record.handler(ctx, {
+      ...base,
+      current_target_snapshot_hash: 'ABCDEF'.repeat(10) + 'ABCD',
+    })).rejects.toBeInstanceOf(OperationError);
   });
 });
 

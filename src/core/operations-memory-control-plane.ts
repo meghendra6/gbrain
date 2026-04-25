@@ -1,7 +1,11 @@
 import { randomUUID } from 'crypto';
 import type { Operation } from './operations.ts';
 import { recordMemoryMutationEvent } from './services/memory-mutation-ledger-service.ts';
-import { memorySessionAttachmentTargetId } from './services/target-snapshot-hash-service.ts';
+import {
+  hashCanonicalJson,
+  memorySessionAttachmentTargetId,
+  memorySessionSnapshotPayload,
+} from './services/target-snapshot-hash-service.ts';
 import type {
   MemoryAccessMode,
   MemoryRealmFilters,
@@ -283,6 +287,36 @@ function memorySessionAttachmentPreview(input: MemorySessionAttachmentInput): Me
   };
 }
 
+function memoryRealmSnapshotHash(realm: MemoryRealm | null): string | null {
+  if (!realm) return null;
+  return hashCanonicalJson({
+    id: realm.id,
+    name: realm.name,
+    description: realm.description,
+    scope: realm.scope,
+    default_access: realm.default_access,
+    retention_policy: realm.retention_policy,
+    export_policy: realm.export_policy,
+    agent_instructions: realm.agent_instructions,
+    archived_at: realm.archived_at,
+  });
+}
+
+function memorySessionSnapshotHash(session: MemorySession | null): string | null {
+  if (!session) return null;
+  return hashCanonicalJson(memorySessionSnapshotPayload(session));
+}
+
+function memorySessionAttachmentSnapshotHash(attachment: MemorySessionAttachment | null): string | null {
+  if (!attachment) return null;
+  return hashCanonicalJson({
+    session_id: attachment.session_id,
+    realm_id: attachment.realm_id,
+    access: attachment.access,
+    instructions: attachment.instructions,
+  });
+}
+
 async function ensureMemorySessionDoesNotExist(
   deps: { OperationError: OperationErrorCtor },
   engine: { getMemorySession(id: string): Promise<MemorySession | null> },
@@ -375,6 +409,7 @@ export function createMemoryControlPlaneOperations(
       const actor = optionalString(deps, 'actor', p.actor) ?? DEFAULT_REALM_UPSERT_ACTOR;
 
       return ctx.engine.transaction(async (engine) => {
+        const existing = await engine.getMemoryRealm(input.id);
         const realm = await engine.upsertMemoryRealm(input);
         await recordMemoryMutationEvent(engine, {
           session_id: sessionId,
@@ -385,6 +420,8 @@ export function createMemoryControlPlaneOperations(
           target_id: realm.id,
           scope_id: realm.scope,
           source_refs: sourceRefs,
+          expected_target_snapshot_hash: memoryRealmSnapshotHash(existing),
+          current_target_snapshot_hash: memoryRealmSnapshotHash(realm),
           result: 'applied',
           metadata: {
             action: 'upsert',
@@ -461,6 +498,8 @@ export function createMemoryControlPlaneOperations(
           target_id: session.id,
           scope_id: null,
           source_refs: sourceRefs,
+          expected_target_snapshot_hash: null,
+          current_target_snapshot_hash: memorySessionSnapshotHash(session),
           result: 'applied',
           metadata: {
             task_id: session.task_id,
@@ -541,6 +580,8 @@ export function createMemoryControlPlaneOperations(
           target_id: session.id,
           scope_id: null,
           source_refs: sourceRefs,
+          expected_target_snapshot_hash: memorySessionSnapshotHash(current),
+          current_target_snapshot_hash: memorySessionSnapshotHash(session),
           result: 'applied',
           metadata: {
             task_id: session.task_id,
@@ -577,6 +618,11 @@ export function createMemoryControlPlaneOperations(
       }
       return ctx.engine.transaction(async (engine) => {
         const { session, realm } = await requireMemorySessionAttachmentTargets(deps, engine, input);
+        const existingAttachment = (await engine.listMemorySessionAttachments({
+          session_id: input.session_id,
+          realm_id: input.realm_id,
+          limit: 1,
+        }))[0] ?? null;
         const attachment = await engine.attachMemoryRealmToSession(input);
         await recordMemoryMutationEvent(engine, {
           session_id: attachment.session_id,
@@ -587,6 +633,8 @@ export function createMemoryControlPlaneOperations(
           target_id: memorySessionAttachmentTargetId(attachment),
           scope_id: realm.scope,
           source_refs: sourceRefs,
+          expected_target_snapshot_hash: memorySessionAttachmentSnapshotHash(existingAttachment),
+          current_target_snapshot_hash: memorySessionAttachmentSnapshotHash(attachment),
           result: 'applied',
           metadata: {
             access: attachment.access,

@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { operations } from '../src/core/operations.ts';
+import { hashCanonicalJson } from '../src/core/services/target-snapshot-hash-service.ts';
 import { SQLiteEngine } from '../src/core/sqlite-engine.ts';
 
 async function createSqliteHarness(label: string): Promise<{
@@ -436,6 +437,18 @@ describe('memory realm operations', () => {
         actor: 'mbrain:memory_control_plane',
       });
       expect(events[0].source_refs).toEqual(['Source: mbrain upsert_memory_realm operation']);
+      expect(events[0].expected_target_snapshot_hash).toBeNull();
+      expect(events[0].current_target_snapshot_hash).toBe(hashCanonicalJson({
+        id: 'realm:ledger',
+        name: 'Ledger Realm',
+        description: '',
+        scope: 'work',
+        default_access: 'read_write',
+        retention_policy: 'retain',
+        export_policy: 'private',
+        agent_instructions: '',
+        archived_at: null,
+      }));
       expect(events[0].metadata).toMatchObject({
         action: 'upsert',
         realm_scope: 'work',

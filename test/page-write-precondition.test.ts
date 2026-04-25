@@ -9,6 +9,7 @@ import { SQLiteEngine } from '../src/core/sqlite-engine.ts';
 
 const STALE_HASH = 'a'.repeat(64);
 const MISSING_HASH = 'b'.repeat(64);
+const DEFAULT_PAGE_SOURCE = '[Source: Page write precondition fixture, 2026-04-25 12:00 PM KST]';
 
 function getOperation(name: string): Operation {
   const operation = operations.find((candidate) => candidate.name === name);
@@ -37,6 +38,7 @@ async function withSqliteEngine<T>(fn: (ctx: OperationContext) => Promise<T>): P
 }
 
 function pageContent(title: string, body: string, timeline: string): string {
+  const citedTimeline = timeline.includes('[Source:') ? timeline : `${timeline} ${DEFAULT_PAGE_SOURCE}`;
   return `---
 type: concept
 title: ${title}
@@ -46,7 +48,7 @@ ${body}
 
 ---
 
-${timeline}
+${citedTimeline}
 `;
 }
 
@@ -779,7 +781,7 @@ describe('put_page content hash preconditions and mutation ledger', () => {
 
       const result = await put.handler(ctx, {
         slug,
-        content: 'x'.repeat(5_000_001),
+        content: `${'x'.repeat(5_000_001)} ${DEFAULT_PAGE_SOURCE}`,
         session_id: sessionId,
         source_refs: ['Source: oversized content test'],
       }) as any;

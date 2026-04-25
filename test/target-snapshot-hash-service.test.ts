@@ -312,6 +312,49 @@ describe('target snapshot hash resolution', () => {
     }
   });
 
+  test('memory session target hashes exclude computed expiry status', async () => {
+    const harness = await createSqliteHarness();
+    try {
+      const expiresAt = new Date('2000-01-01T00:00:00.000Z');
+      await harness.engine.createMemorySession({
+        id: 'session-expired-snapshot',
+        task_id: 'task-expired-snapshot',
+        actor_ref: 'agent:target-snapshot-test',
+        expires_at: expiresAt,
+      });
+      await expect(harness.engine.getMemorySession('session-expired-snapshot'))
+        .resolves.toMatchObject({ status: 'expired' });
+
+      const result = await resolveTargetSnapshotHash(harness.engine, {
+        target_kind: 'memory_session',
+        target_id: 'session-expired-snapshot',
+      });
+
+      expect(result).toEqual({
+        target_kind: 'memory_session',
+        target_id: 'session-expired-snapshot',
+        target_snapshot_hash: hashCanonicalJson({
+          id: 'session-expired-snapshot',
+          task_id: 'task-expired-snapshot',
+          actor_ref: 'agent:target-snapshot-test',
+          closed_at: null,
+          expires_at: expiresAt,
+        }),
+        hash_source: 'canonical_json',
+      });
+      expect(result?.target_snapshot_hash).not.toBe(hashCanonicalJson({
+        id: 'session-expired-snapshot',
+        task_id: 'task-expired-snapshot',
+        status: 'expired',
+        actor_ref: 'agent:target-snapshot-test',
+        closed_at: null,
+        expires_at: expiresAt,
+      }));
+    } finally {
+      await harness.cleanup();
+    }
+  });
+
   test('memory session attachment target ids resolve when both ids contain colons', async () => {
     const harness = await createSqliteHarness();
     try {

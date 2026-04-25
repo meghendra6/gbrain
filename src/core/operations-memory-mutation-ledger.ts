@@ -95,6 +95,7 @@ const MEMORY_MUTATION_OPERATION_NAMES = [
 ] as const satisfies readonly MemoryMutationOperationName[];
 
 const ISO_DATETIME_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?(?:Z|([+-])(\d{2}):(\d{2}))$/;
+const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/;
 
 function invalidParams(
   deps: { OperationError: OperationErrorCtor },
@@ -130,6 +131,19 @@ function optionalNullableString(
 ): string | null | undefined {
   if (value === null) return null;
   return optionalString(deps, field, value);
+}
+
+function optionalSnapshotHash(
+  deps: { OperationError: OperationErrorCtor },
+  field: string,
+  value: unknown,
+): string | null | undefined {
+  const hash = optionalNullableString(deps, field, value);
+  if (hash == null) return hash;
+  if (!SHA256_HEX_PATTERN.test(hash)) {
+    throw invalidParams(deps, `${field} must be a lowercase sha256 hex string`);
+  }
+  return hash;
 }
 
 function enumValue<T extends string>(
@@ -312,8 +326,8 @@ function recordInput(
     target_id: requiredString(deps, 'target_id', p.target_id),
     scope_id: optionalNullableString(deps, 'scope_id', p.scope_id),
     source_refs: requiredSourceRefs(deps, p),
-    expected_target_snapshot_hash: optionalNullableString(deps, 'expected_target_snapshot_hash', p.expected_target_snapshot_hash),
-    current_target_snapshot_hash: optionalNullableString(deps, 'current_target_snapshot_hash', p.current_target_snapshot_hash),
+    expected_target_snapshot_hash: optionalSnapshotHash(deps, 'expected_target_snapshot_hash', p.expected_target_snapshot_hash),
+    current_target_snapshot_hash: optionalSnapshotHash(deps, 'current_target_snapshot_hash', p.current_target_snapshot_hash),
     result,
     conflict_info: optionalObject(deps, 'conflict_info', p.conflict_info),
     dry_run: result === 'dry_run',

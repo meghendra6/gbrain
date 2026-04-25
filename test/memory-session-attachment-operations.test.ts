@@ -5,6 +5,7 @@ import { join } from 'path';
 import { operations } from '../src/core/operations.ts';
 import type { Operation, OperationContext } from '../src/core/operations.ts';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
+import { hashCanonicalJson } from '../src/core/services/target-snapshot-hash-service.ts';
 import { SQLiteEngine } from '../src/core/sqlite-engine.ts';
 
 async function createSqliteHarness(label: string): Promise<{
@@ -194,6 +195,26 @@ describe('memory session attachment operations', () => {
         limit: 10,
       });
       const eventsByOperation = new Map(events.map((event) => [event.operation, event]));
+      const activeSessionHash = hashCanonicalJson({
+        id: 'session-flow',
+        task_id: 'task-flow',
+        actor_ref: 'agent:test',
+        closed_at: null,
+        expires_at: '2999-01-01T00:00:00.000Z',
+      });
+      const closedSessionHash = hashCanonicalJson({
+        id: 'session-flow',
+        task_id: 'task-flow',
+        actor_ref: 'agent:test',
+        closed_at: closed.closed_at,
+        expires_at: '2999-01-01T00:00:00.000Z',
+      });
+      const attachmentHash = hashCanonicalJson({
+        session_id: 'session-flow',
+        realm_id: 'realm:session-flow',
+        access: 'read_only',
+        instructions: 'Use this realm as read-only context for the task.',
+      });
       expect([...eventsByOperation.keys()].sort()).toEqual([
         'attach_memory_realm_to_session',
         'close_memory_session',
@@ -208,6 +229,8 @@ describe('memory session attachment operations', () => {
         target_id: 'session-flow',
         result: 'applied',
         dry_run: false,
+        expected_target_snapshot_hash: null,
+        current_target_snapshot_hash: activeSessionHash,
       });
       expect(eventsByOperation.get('create_memory_session')?.source_refs).toEqual([
         'Source: mbrain create_memory_session operation',
@@ -221,6 +244,8 @@ describe('memory session attachment operations', () => {
         target_id: 'memory_session_attachment:v1:session-flow:realm%3Asession-flow',
         result: 'applied',
         dry_run: false,
+        expected_target_snapshot_hash: null,
+        current_target_snapshot_hash: attachmentHash,
         metadata: {
           access: 'read_only',
         },
@@ -237,6 +262,8 @@ describe('memory session attachment operations', () => {
         target_id: 'session-flow',
         result: 'applied',
         dry_run: false,
+        expected_target_snapshot_hash: activeSessionHash,
+        current_target_snapshot_hash: closedSessionHash,
       });
       expect(eventsByOperation.get('close_memory_session')?.source_refs).toEqual([
         'Source: mbrain close_memory_session operation',

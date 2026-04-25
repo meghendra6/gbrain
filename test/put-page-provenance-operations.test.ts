@@ -87,6 +87,34 @@ test('put_page rejects blank [Source:    ] attribution and does not create the p
   });
 });
 
+test('put_page ignores Source attribution in frontmatter when page body has no cited facts', async () => {
+  await withPutPageEngine(async ({ engine, putPage }) => {
+    await expect(putPage.handler({
+      engine,
+      config: {} as any,
+      logger: console,
+      dryRun: false,
+    }, {
+      slug: 'concepts/put-page-frontmatter-only-source',
+      content: [
+        '---',
+        'type: concept',
+        'title: Put Page Frontmatter Only Source',
+        'provenance: "[Source: User, direct message, 2026-04-26 09:00 AM KST]"',
+        '---',
+        '# Put Page Frontmatter Only Source',
+        'A durable fact whose body has no provenance.',
+      ].join('\n'),
+    })).rejects.toMatchObject({
+      name: 'OperationError',
+      code: 'invalid_params',
+      message: provenanceErrorMessage,
+    } satisfies Partial<OperationError>);
+
+    expect(await engine.getPage('concepts/put-page-frontmatter-only-source')).toBeNull();
+  });
+});
+
 test('put_page accepts a page with a non-empty Source citation', async () => {
   await withPutPageEngine(async ({ engine, putPage }) => {
     const result = await putPage.handler({

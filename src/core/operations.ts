@@ -8,7 +8,7 @@ import { join } from 'path';
 import type { BrainEngine } from './engine.ts';
 import type { MBrainConfig } from './config.ts';
 import { importFromContent } from './import-file.ts';
-import { serializeMarkdown } from './markdown.ts';
+import { parseMarkdown, serializeMarkdown } from './markdown.ts';
 import { hybridSearch } from './search/hybrid.ts';
 import { expandQuery } from './search/expansion.ts';
 import {
@@ -1254,8 +1254,10 @@ function hasUsableSourceAttribution(content: string): boolean {
   return false;
 }
 
-function assertPutPageSourceAttribution(content: string): void {
-  if (hasUsableSourceAttribution(content)) return;
+function assertPutPageSourceAttribution(slug: string, content: string): void {
+  const parsed = parseMarkdown(content, `${slug}.md`);
+  const citedBody = [parsed.compiled_truth, parsed.timeline].join('\n');
+  if (hasUsableSourceAttribution(citedBody)) return;
   throw new OperationError(
     'invalid_params',
     'put_page content must include at least one non-empty [Source: ...] attribution.',
@@ -1275,7 +1277,7 @@ const put_page: Operation = {
   handler: async (ctx, p) => {
     const content = String(p.content);
     if (ctx.dryRun) return { dry_run: true, action: 'put_page', slug: p.slug };
-    assertPutPageSourceAttribution(content);
+    assertPutPageSourceAttribution(String(p.slug), content);
     const result = await importFromContent(ctx.engine, p.slug as string, content);
     return { slug: result.slug, status: result.status === 'imported' ? 'created_or_updated' : result.status, chunks: result.chunks };
   },

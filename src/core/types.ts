@@ -716,6 +716,132 @@ export interface PersonalEpisodeFilters {
   offset?: number;
 }
 
+export type MemoryMutationResult =
+  | 'dry_run'
+  | 'staged_for_review'
+  | 'applied'
+  | 'conflict'
+  | 'denied'
+  | 'failed'
+  | 'redacted';
+
+export type MemoryMutationRedactionVisibility =
+  | 'visible'
+  | 'partially_redacted'
+  | 'tombstoned';
+
+export type MemoryMutationTargetKind =
+  | 'page'
+  | 'source_record'
+  | 'task_thread'
+  | 'working_set'
+  | 'task_event'
+  | 'task_episode'
+  | 'attempt'
+  | 'decision'
+  | 'procedure'
+  | 'memory_candidate'
+  | 'memory_patch_candidate'
+  | 'profile_memory'
+  | 'personal_episode'
+  | 'context_map'
+  | 'context_atlas'
+  | 'file_artifact'
+  | 'export_artifact'
+  | 'ledger_event';
+
+export type MemoryMutationOperationName =
+  | 'create_memory_session'
+  | 'close_memory_session'
+  | 'expire_memory_session'
+  | 'revoke_memory_session'
+  | 'list_memory_mutation_events'
+  | 'record_memory_mutation_event'
+  | 'create_memory_patch_candidate'
+  | 'dry_run_memory_patch_candidate'
+  | 'review_memory_patch_candidate'
+  | 'apply_memory_patch_candidate'
+  | 'create_redaction_plan'
+  | 'dry_run_redaction_plan'
+  | 'execute_redaction_plan'
+  | 'put_page'
+  | 'delete_page'
+  | 'upsert_profile_memory_entry'
+  | 'write_profile_memory_entry'
+  | 'delete_profile_memory_entry'
+  | 'record_personal_episode'
+  | 'write_personal_episode_entry'
+  | 'delete_personal_episode_entry'
+  | 'create_memory_candidate_entry'
+  | 'advance_memory_candidate_status'
+  | 'reject_memory_candidate_entry'
+  | 'delete_memory_candidate_entry'
+  | 'promote_memory_candidate_entry'
+  | 'supersede_memory_candidate_entry'
+  | 'export_memory_artifact'
+  | 'sync_memory_artifact'
+  | 'repair_memory_ledger'
+  | 'physical_delete_memory_record';
+
+export interface MemoryMutationEvent {
+  id: string;
+  session_id: string;
+  realm_id: string;
+  actor: string;
+  operation: MemoryMutationOperationName;
+  target_kind: MemoryMutationTargetKind;
+  target_id: string | null;
+  scope_id: string | null;
+  source_refs: string[];
+  expected_target_snapshot_hash: string | null;
+  current_target_snapshot_hash: string | null;
+  result: MemoryMutationResult;
+  conflict_info: Record<string, unknown> | null;
+  dry_run: boolean;
+  metadata: Record<string, unknown>;
+  redaction_visibility: MemoryMutationRedactionVisibility;
+  created_at: Date;
+  decided_at: Date | null;
+  applied_at: Date | null;
+}
+
+export interface MemoryMutationEventInput {
+  id: string;
+  session_id: string;
+  realm_id: string;
+  actor: string;
+  operation: MemoryMutationOperationName;
+  target_kind: MemoryMutationTargetKind;
+  target_id?: string | null;
+  scope_id?: string | null;
+  source_refs?: string[];
+  expected_target_snapshot_hash?: string | null;
+  current_target_snapshot_hash?: string | null;
+  result: MemoryMutationResult;
+  conflict_info?: Record<string, unknown> | null;
+  dry_run?: boolean;
+  metadata?: Record<string, unknown>;
+  redaction_visibility?: MemoryMutationRedactionVisibility;
+  created_at?: Date | string | null;
+  decided_at?: Date | string | null;
+  applied_at?: Date | string | null;
+}
+
+export interface MemoryMutationEventFilters {
+  session_id?: string;
+  realm_id?: string;
+  actor?: string;
+  operation?: MemoryMutationOperationName;
+  target_kind?: MemoryMutationTargetKind;
+  target_id?: string;
+  scope_id?: string;
+  result?: MemoryMutationResult;
+  created_since?: Date;
+  created_until?: Date;
+  limit?: number;
+  offset?: number;
+}
+
 export type MemoryCandidateType =
   | 'fact'
   | 'relationship'

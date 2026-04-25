@@ -3146,6 +3146,9 @@ export class SQLiteEngine implements BrainEngine {
         case 25:
           this.ensureMemoryCandidateStatusEventSchema();
           break;
+        case 26:
+          this.ensureMemoryMutationEventSchema();
+          break;
         default:
           throw new Error(`SQLite migration ${version} is not implemented`);
       }
@@ -3153,6 +3156,79 @@ export class SQLiteEngine implements BrainEngine {
       await this.setConfig('version', String(version));
       });
     }
+  }
+
+  private ensureMemoryMutationEventSchema(): void {
+    this.database.exec(`
+      CREATE TABLE IF NOT EXISTS memory_mutation_events (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        realm_id TEXT NOT NULL,
+        actor TEXT NOT NULL,
+        operation TEXT NOT NULL,
+        target_kind TEXT NOT NULL CHECK (
+          target_kind IN (
+            'page',
+            'source_record',
+            'task_thread',
+            'working_set',
+            'task_event',
+            'task_episode',
+            'attempt',
+            'decision',
+            'procedure',
+            'memory_candidate',
+            'memory_patch_candidate',
+            'profile_memory',
+            'personal_episode',
+            'context_map',
+            'context_atlas',
+            'file_artifact',
+            'export_artifact',
+            'ledger_event'
+          )
+        ),
+        target_id TEXT,
+        scope_id TEXT,
+        source_refs TEXT NOT NULL DEFAULT '[]',
+        expected_target_snapshot_hash TEXT,
+        current_target_snapshot_hash TEXT,
+        result TEXT NOT NULL CHECK (
+          result IN (
+            'dry_run',
+            'staged_for_review',
+            'applied',
+            'conflict',
+            'denied',
+            'failed',
+            'redacted'
+          )
+        ),
+        conflict_info TEXT,
+        dry_run INTEGER NOT NULL DEFAULT 0 CHECK (dry_run IN (0, 1)),
+        metadata TEXT NOT NULL DEFAULT '{}',
+        redaction_visibility TEXT NOT NULL DEFAULT 'visible' CHECK (
+          redaction_visibility IN ('visible', 'partially_redacted', 'tombstoned')
+        ),
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        decided_at TEXT,
+        applied_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_memory_mutation_events_session_created
+        ON memory_mutation_events(session_id, created_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_memory_mutation_events_realm_created
+        ON memory_mutation_events(realm_id, created_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_memory_mutation_events_actor_created
+        ON memory_mutation_events(actor, created_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_memory_mutation_events_operation_created
+        ON memory_mutation_events(operation, created_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_memory_mutation_events_target
+        ON memory_mutation_events(target_kind, target_id);
+      CREATE INDEX IF NOT EXISTS idx_memory_mutation_events_result_created
+        ON memory_mutation_events(result, created_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_memory_mutation_events_scope_created
+        ON memory_mutation_events(scope_id, created_at DESC, id DESC);
+    `);
   }
 
   private ensureMemoryCandidateStatusEventSchema(): void {

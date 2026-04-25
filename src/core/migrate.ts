@@ -899,6 +899,81 @@ const MIGRATIONS: Migration[] = [
       END $$;
     `,
   },
+  {
+    version: 26,
+    name: 'memory_mutation_events',
+    sql: `
+      CREATE TABLE IF NOT EXISTS memory_mutation_events (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        realm_id TEXT NOT NULL,
+        actor TEXT NOT NULL,
+        operation TEXT NOT NULL,
+        target_kind TEXT NOT NULL CHECK (
+          target_kind IN (
+            'page',
+            'source_record',
+            'task_thread',
+            'working_set',
+            'task_event',
+            'task_episode',
+            'attempt',
+            'decision',
+            'procedure',
+            'memory_candidate',
+            'memory_patch_candidate',
+            'profile_memory',
+            'personal_episode',
+            'context_map',
+            'context_atlas',
+            'file_artifact',
+            'export_artifact',
+            'ledger_event'
+          )
+        ),
+        target_id TEXT,
+        scope_id TEXT,
+        source_refs JSONB NOT NULL DEFAULT '[]'::jsonb,
+        expected_target_snapshot_hash TEXT,
+        current_target_snapshot_hash TEXT,
+        result TEXT NOT NULL CHECK (
+          result IN (
+            'dry_run',
+            'staged_for_review',
+            'applied',
+            'conflict',
+            'denied',
+            'failed',
+            'redacted'
+          )
+        ),
+        conflict_info JSONB,
+        dry_run BOOLEAN NOT NULL DEFAULT false,
+        metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+        redaction_visibility TEXT NOT NULL DEFAULT 'visible' CHECK (
+          redaction_visibility IN ('visible', 'partially_redacted', 'tombstoned')
+        ),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        decided_at TIMESTAMPTZ,
+        applied_at TIMESTAMPTZ
+      );
+      CREATE INDEX IF NOT EXISTS idx_memory_mutation_events_session_created
+        ON memory_mutation_events(session_id, created_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_memory_mutation_events_realm_created
+        ON memory_mutation_events(realm_id, created_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_memory_mutation_events_actor_created
+        ON memory_mutation_events(actor, created_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_memory_mutation_events_operation_created
+        ON memory_mutation_events(operation, created_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_memory_mutation_events_target
+        ON memory_mutation_events(target_kind, target_id);
+      CREATE INDEX IF NOT EXISTS idx_memory_mutation_events_result_created
+        ON memory_mutation_events(result, created_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_memory_mutation_events_scope_created
+        ON memory_mutation_events(scope_id, created_at DESC, id DESC)
+        WHERE scope_id IS NOT NULL;
+    `,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.length > 0

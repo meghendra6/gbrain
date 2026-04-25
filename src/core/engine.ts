@@ -24,6 +24,7 @@ import type {
   MemoryRealmFilters,
   MemoryRealmInput,
   MemorySession,
+  MemorySessionFilters,
   MemorySessionAttachment,
   MemorySessionAttachmentFilters,
   MemorySessionAttachmentInput,
@@ -192,6 +193,7 @@ export interface BrainEngine {
   // Memory sessions and realm attachments
   createMemorySession(input: MemorySessionInput): Promise<MemorySession>;
   getMemorySession(id: string): Promise<MemorySession | null>;
+  listMemorySessions(filters?: MemorySessionFilters): Promise<MemorySession[]>;
   closeMemorySession(id: string): Promise<MemorySession | null>;
   attachMemoryRealmToSession(input: MemorySessionAttachmentInput): Promise<MemorySessionAttachment>;
   listMemorySessionAttachments(filters?: MemorySessionAttachmentFilters): Promise<MemorySessionAttachment[]>;

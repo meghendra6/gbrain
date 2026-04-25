@@ -42,6 +42,7 @@ import type {
   MemoryRealmFilters,
   MemoryRealmInput,
   MemorySession,
+  MemorySessionFilters,
   MemorySessionAttachment,
   MemorySessionAttachmentFilters,
   MemorySessionAttachmentInput,
@@ -410,10 +411,11 @@ CREATE INDEX IF NOT EXISTS idx_memory_realms_scope
 CREATE TABLE IF NOT EXISTS memory_sessions (
   id TEXT PRIMARY KEY,
   task_id TEXT,
-  status TEXT NOT NULL CHECK (status IN ('active', 'closed')),
+  status TEXT NOT NULL CHECK (status IN ('active', 'expired', 'closed')),
   actor_ref TEXT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  closed_at TEXT
+  closed_at TEXT,
+  expires_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_memory_sessions_status_created
   ON memory_sessions(status, created_at DESC);
@@ -2088,13 +2090,14 @@ export class SQLiteEngine implements BrainEngine {
     const timestamp = nowIso();
     this.database.run(`
       INSERT INTO memory_sessions (
-        id, task_id, status, actor_ref, created_at, closed_at
-      ) VALUES (?, ?, 'active', ?, ?, NULL)
+        id, task_id, status, actor_ref, created_at, closed_at, expires_at
+      ) VALUES (?, ?, 'active', ?, ?, NULL, ?)
     `, sqliteBindings([
       normalized.id,
       normalized.task_id ?? null,
       normalized.actor_ref ?? null,
       timestamp,
+      toNullableIso(normalized.expires_at),
     ]));
 
     const session = await this.getMemorySession(normalized.id);
@@ -2104,11 +2107,72 @@ export class SQLiteEngine implements BrainEngine {
 
   async getMemorySession(id: string): Promise<MemorySession | null> {
     const row = this.database.query(`
-      SELECT id, task_id, status, actor_ref, created_at, closed_at
+      SELECT id, task_id, status, actor_ref, created_at, closed_at, expires_at
       FROM memory_sessions
       WHERE id = ?
     `).get(id) as Record<string, unknown> | null;
     return row ? rowToMemorySession(row) : null;
+  }
+
+  async listMemorySessions(filters?: MemorySessionFilters): Promise<MemorySession[]> {
+    const { limit, offset } = normalizeMemorySessionPagination(filters);
+    if (limit === 0) return [];
+    const clauses: string[] = [];
+    const params: Array<string | number> = [];
+    const effectiveStatusSql = `
+      CASE
+        WHEN s.status = 'active'
+          AND s.expires_at IS NOT NULL
+          AND s.expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        THEN 'expired'
+        ELSE s.status
+      END
+    `;
+
+    if (filters?.status !== undefined) {
+      clauses.push(`${effectiveStatusSql} = ?`);
+      params.push(filters.status);
+    }
+    if (filters?.task_id !== undefined) {
+      clauses.push('s.task_id = ?');
+      params.push(filters.task_id);
+    }
+    if (filters?.actor_ref !== undefined) {
+      clauses.push('s.actor_ref = ?');
+      params.push(filters.actor_ref);
+    }
+    if (filters?.realm_id !== undefined) {
+      clauses.push(`
+        EXISTS (
+          SELECT 1
+          FROM memory_session_attachments msa
+          WHERE msa.session_id = s.id
+            AND msa.realm_id = ?
+        )
+      `);
+      params.push(filters.realm_id);
+    }
+    if (filters?.created_since !== undefined) {
+      clauses.push('s.created_at >= ?');
+      params.push(toNullableIso(filters.created_since)!);
+    }
+    if (filters?.created_until !== undefined) {
+      clauses.push('s.created_at < ?');
+      params.push(toNullableIso(filters.created_until)!);
+    }
+
+    params.push(limit);
+    params.push(offset);
+    const whereClause = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+    const rows = this.database.query(`
+      SELECT s.id, s.task_id, s.status, s.actor_ref, s.created_at, s.closed_at, s.expires_at
+      FROM memory_sessions s
+      ${whereClause}
+      ORDER BY s.created_at DESC, s.id DESC
+      LIMIT ?
+      OFFSET ?
+    `).all(...sqliteBindings(params)) as Record<string, unknown>[];
+    return rows.map(rowToMemorySession);
   }
 
   async closeMemorySession(id: string): Promise<MemorySession | null> {
@@ -2117,8 +2181,10 @@ export class SQLiteEngine implements BrainEngine {
       UPDATE memory_sessions
       SET status = 'closed',
           closed_at = COALESCE(closed_at, ?)
-      WHERE id = ? AND status = 'active'
-    `, sqliteBindings([timestamp, id]));
+      WHERE id = ?
+        AND status = 'active'
+        AND (expires_at IS NULL OR expires_at > ?)
+    `, sqliteBindings([timestamp, id, timestamp]));
     if (result.changes === 0) return null;
     return this.getMemorySession(id);
   }
@@ -2134,7 +2200,9 @@ export class SQLiteEngine implements BrainEngine {
       WHERE EXISTS (
         SELECT 1
         FROM memory_sessions
-        WHERE id = ? AND status = 'active'
+        WHERE id = ?
+          AND status = 'active'
+          AND (expires_at IS NULL OR expires_at > ?)
       )
       ON CONFLICT(session_id, realm_id) DO UPDATE SET
         access = excluded.access,
@@ -2147,10 +2215,14 @@ export class SQLiteEngine implements BrainEngine {
       attachment.instructions,
       timestamp,
       attachment.session_id,
+      timestamp,
     ]));
     if (result.changes === 0) {
       const session = await this.getMemorySession(attachment.session_id);
       if (!session) throw new Error(`Memory session not found: ${attachment.session_id}`);
+      if (session.status === 'expired') {
+        throw new Error(`Memory session is expired: ${attachment.session_id}`);
+      }
       if (session.status !== 'active') {
         throw new Error(`Memory session is closed: ${attachment.session_id}`);
       }
@@ -3544,6 +3616,9 @@ export class SQLiteEngine implements BrainEngine {
           this.ensureMemorySessionSchema();
           this.repairMemoryMutationEventSessionAttachmentContract();
           break;
+        case 32:
+          this.repairMemorySessionExpiryContract();
+          break;
         default:
           throw new Error(`SQLite migration ${version} is not implemented`);
       }
@@ -4451,10 +4526,11 @@ export class SQLiteEngine implements BrainEngine {
       CREATE TABLE IF NOT EXISTS memory_sessions (
         id TEXT PRIMARY KEY,
         task_id TEXT,
-        status TEXT NOT NULL CHECK (status IN ('active', 'closed')),
+        status TEXT NOT NULL CHECK (status IN ('active', 'expired', 'closed')),
         actor_ref TEXT,
         created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-        closed_at TEXT
+        closed_at TEXT,
+        expires_at TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_memory_sessions_status_created
         ON memory_sessions(status, created_at DESC);
@@ -4467,6 +4543,73 @@ export class SQLiteEngine implements BrainEngine {
         attached_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
         PRIMARY KEY (session_id, realm_id)
       );
+      CREATE INDEX IF NOT EXISTS idx_memory_session_attachments_realm
+        ON memory_session_attachments(realm_id, attached_at DESC);
+    `);
+  }
+
+  private repairMemorySessionExpiryContract(): void {
+    if (!this.sqliteTableExists('memory_sessions')) {
+      this.ensureMemorySessionSchema();
+      return;
+    }
+
+    const columns = this.database.query(`PRAGMA table_info(memory_sessions)`).all() as Array<{ name: string }>;
+    const hasExpiresAt = columns.some((column) => column.name === 'expires_at');
+    const attachmentTableExists = this.sqliteTableExists('memory_session_attachments');
+    const expiresAtSelect = hasExpiresAt ? 'expires_at' : 'NULL AS expires_at';
+
+    this.database.exec(`
+      DROP TABLE IF EXISTS memory_session_attachments_v32_old;
+      DROP TABLE IF EXISTS memory_sessions_v32_old;
+    `);
+
+    if (attachmentTableExists) {
+      this.database.exec(`ALTER TABLE memory_session_attachments RENAME TO memory_session_attachments_v32_old;`);
+    }
+    this.database.exec(`ALTER TABLE memory_sessions RENAME TO memory_sessions_v32_old;`);
+
+    this.database.exec(`
+      CREATE TABLE memory_sessions (
+        id TEXT PRIMARY KEY,
+        task_id TEXT,
+        status TEXT NOT NULL CHECK (status IN ('active', 'expired', 'closed')),
+        actor_ref TEXT,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        closed_at TEXT,
+        expires_at TEXT
+      );
+      INSERT INTO memory_sessions (
+        id, task_id, status, actor_ref, created_at, closed_at, expires_at
+      )
+      SELECT id, task_id, status, actor_ref, created_at, closed_at, ${expiresAtSelect}
+      FROM memory_sessions_v32_old;
+      CREATE INDEX IF NOT EXISTS idx_memory_sessions_status_created
+        ON memory_sessions(status, created_at DESC);
+
+      CREATE TABLE memory_session_attachments (
+        session_id TEXT NOT NULL REFERENCES memory_sessions(id) ON DELETE CASCADE,
+        realm_id TEXT NOT NULL REFERENCES memory_realms(id) ON DELETE CASCADE,
+        access TEXT NOT NULL CHECK (access IN ('read_only', 'read_write')),
+        instructions TEXT NOT NULL DEFAULT '',
+        attached_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        PRIMARY KEY (session_id, realm_id)
+      );
+    `);
+
+    if (attachmentTableExists) {
+      this.database.exec(`
+        INSERT INTO memory_session_attachments (
+          session_id, realm_id, access, instructions, attached_at
+        )
+        SELECT session_id, realm_id, access, instructions, attached_at
+        FROM memory_session_attachments_v32_old;
+        DROP TABLE memory_session_attachments_v32_old;
+      `);
+    }
+
+    this.database.exec(`
+      DROP TABLE memory_sessions_v32_old;
       CREATE INDEX IF NOT EXISTS idx_memory_session_attachments_realm
         ON memory_session_attachments(realm_id, attached_at DESC);
     `);
@@ -5532,6 +5675,20 @@ function normalizeMemoryRealmPagination(
   }
   if (!Number.isInteger(offset) || offset < 0) {
     throw new Error('Memory realm offset must be a non-negative integer');
+  }
+  return { limit, offset };
+}
+
+function normalizeMemorySessionPagination(
+  filters?: MemorySessionFilters,
+): { limit: number; offset: number } {
+  const limit = filters?.limit ?? 100;
+  const offset = filters?.offset ?? 0;
+  if (!Number.isInteger(limit) || limit < 0) {
+    throw new Error('Memory session limit must be a non-negative integer');
+  }
+  if (!Number.isInteger(offset) || offset < 0) {
+    throw new Error('Memory session offset must be a non-negative integer');
   }
   return { limit, offset };
 }

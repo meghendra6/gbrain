@@ -71,6 +71,8 @@ describe('E2E: MCP Tool Generation', () => {
     expect(names).toContain('list_memory_mutation_events');
     expect(names).toContain('record_memory_mutation_event');
     expect(names).toContain('upsert_memory_realm');
+    expect(names).toContain('get_memory_session');
+    expect(names).toContain('list_memory_sessions');
     const recordMutationEvent = tools.find((tool) => tool.name === 'record_memory_mutation_event');
     expect((recordMutationEvent?.inputSchema.properties as any).privileged.type).toBe('boolean');
     expect(recordMutationEvent?.inputSchema.required).toContain('privileged');

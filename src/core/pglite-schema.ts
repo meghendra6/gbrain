@@ -348,10 +348,11 @@ CREATE INDEX IF NOT EXISTS idx_memory_realms_scope
 CREATE TABLE IF NOT EXISTS memory_sessions (
   id TEXT PRIMARY KEY,
   task_id TEXT,
-  status TEXT NOT NULL CHECK (status IN ('active', 'closed')),
+  status TEXT NOT NULL CHECK (status IN ('active', 'expired', 'closed')),
   actor_ref TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  closed_at TIMESTAMPTZ
+  closed_at TIMESTAMPTZ,
+  expires_at TIMESTAMPTZ
 );
 
 CREATE INDEX IF NOT EXISTS idx_memory_sessions_status_created

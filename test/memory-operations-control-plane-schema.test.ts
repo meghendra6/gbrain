@@ -39,6 +39,16 @@ const MUTATION_EVENT_INDEXES = [
   'idx_memory_mutation_events_scope_created',
 ];
 
+const MEMORY_SESSION_COLUMNS = [
+  'id',
+  'task_id',
+  'status',
+  'actor_ref',
+  'created_at',
+  'closed_at',
+  'expires_at',
+];
+
 function validInsertSql(id: string): string {
   return `
     INSERT INTO memory_mutation_events (
@@ -269,6 +279,23 @@ const OLD_V26_SQLITE_MUTATION_EVENT_SQL = OLD_V26_POSTGRES_MUTATION_EVENT_SQL
   .replaceAll('TIMESTAMPTZ NOT NULL DEFAULT now()', "TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))")
   .replaceAll('TIMESTAMPTZ', 'TEXT');
 
+const OLD_V31_POSTGRES_MEMORY_SESSION_SQL = `
+  CREATE TABLE memory_sessions (
+    id TEXT PRIMARY KEY,
+    task_id TEXT,
+    status TEXT NOT NULL CHECK (status IN ('active', 'closed')),
+    actor_ref TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    closed_at TIMESTAMPTZ
+  );
+  INSERT INTO memory_sessions (id, task_id, status, actor_ref)
+  VALUES ('old-v31-session', 'task-v31', 'active', 'agent:v31');
+`;
+
+const OLD_V31_SQLITE_MEMORY_SESSION_SQL = OLD_V31_POSTGRES_MEMORY_SESSION_SQL
+  .replaceAll('TIMESTAMPTZ NOT NULL DEFAULT now()', "TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))")
+  .replaceAll('TIMESTAMPTZ', 'TEXT');
+
 describe('memory operations control-plane schema', () => {
   const tempPaths: string[] = [];
 
@@ -277,6 +304,80 @@ describe('memory operations control-plane schema', () => {
       rmSync(tempPaths.pop()!, { recursive: true, force: true });
     }
   });
+
+  test('sqlite initSchema creates memory session expiry contract', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mbrain-memory-session-sqlite-'));
+    tempPaths.push(dir);
+
+    const engine = new SQLiteEngine();
+    await engine.connect({ engine: 'sqlite', database_path: join(dir, 'brain.db') });
+    await engine.initSchema();
+
+    const db = (engine as any).database;
+    const table = db
+      .query(
+        `SELECT name, sql
+         FROM sqlite_master
+         WHERE type = 'table'
+           AND name = 'memory_sessions'`,
+      )
+      .get() as { name: string; sql: string } | null;
+
+    expect(table?.name).toBe('memory_sessions');
+    expect(table?.sql).toContain("status TEXT NOT NULL CHECK (status IN ('active', 'expired', 'closed'))");
+    expect(table?.sql).toContain('expires_at TEXT');
+
+    const columns = db.query(`PRAGMA table_info(memory_sessions)`).all() as Array<{ name: string }>;
+    expect(columns.map((column) => column.name)).toEqual(MEMORY_SESSION_COLUMNS);
+
+    expect(() => db.query(`
+      INSERT INTO memory_sessions (id, status, expires_at)
+      VALUES ('sqlite-expired-valid', 'expired', '2000-01-01T00:00:00.000Z')
+    `).run()).not.toThrow();
+    expect(() => db.query(`
+      INSERT INTO memory_sessions (id, status)
+      VALUES ('sqlite-revoked-invalid', 'revoked')
+    `).run()).toThrow();
+
+    await engine.disconnect();
+  });
+
+  test('pglite initSchema creates memory session expiry contract', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mbrain-memory-session-pglite-'));
+    tempPaths.push(dir);
+
+    const engine = new PGLiteEngine();
+    await engine.connect({ engine: 'pglite', database_path: dir });
+    await engine.initSchema();
+
+    const db = (engine as any).db;
+    const columns = await db.query(
+      `SELECT column_name
+       FROM information_schema.columns
+       WHERE table_schema = 'public'
+         AND table_name = 'memory_sessions'
+       ORDER BY ordinal_position`,
+    );
+    expect(columns.rows.map((row: { column_name: string }) => row.column_name)).toEqual(MEMORY_SESSION_COLUMNS);
+
+    const constraints = await db.query(
+      `SELECT pg_get_constraintdef(oid) AS definition
+       FROM pg_constraint
+       WHERE conrelid = 'memory_sessions'::regclass
+         AND contype = 'c'`,
+    );
+    expect(String(constraints.rows.map((row: { definition: string }) => row.definition).join('\n'))).toContain('expired');
+    await expect(db.query(`
+      INSERT INTO memory_sessions (id, status, expires_at)
+      VALUES ('pglite-expired-valid', 'expired', '2000-01-01T00:00:00.000Z')
+    `)).resolves.toBeDefined();
+    await expect(db.query(`
+      INSERT INTO memory_sessions (id, status)
+      VALUES ('pglite-revoked-invalid', 'revoked')
+    `)).rejects.toThrow();
+
+    await engine.disconnect();
+  }, 10_000);
 
   test('sqlite initSchema creates memory mutation ledger contract', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'mbrain-mutation-ledger-sqlite-'));
@@ -393,6 +494,92 @@ describe('memory operations control-plane schema', () => {
     await expect(db.query(invalidInsertSql('redaction_visibility', 'hidden'))).rejects.toThrow();
     await expect(db.query(invalidInsertSql('dry_run', '2'))).rejects.toThrow();
     await expectPgMutationEventRequiredContract(db);
+
+    await engine.disconnect();
+  }, 10_000);
+
+  test('sqlite upgrades version 31 memory sessions to expiry contract', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mbrain-memory-session-sqlite-v31-expiry-'));
+    tempPaths.push(dir);
+
+    const engine = new SQLiteEngine();
+    await engine.connect({ engine: 'sqlite', database_path: join(dir, 'brain.db') });
+    const db = (engine as any).database;
+    db.exec(`
+      CREATE TABLE config (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+      INSERT INTO config (key, value) VALUES ('version', '31');
+      ${OLD_V31_SQLITE_MEMORY_SESSION_SQL}
+    `);
+
+    await engine.initSchema();
+
+    const version = db.query(`SELECT value FROM config WHERE key = 'version'`).get() as { value: string };
+    const columns = db.query(`PRAGMA table_info(memory_sessions)`).all() as Array<{ name: string }>;
+    const existing = db
+      .query(`SELECT id, task_id, status, actor_ref, expires_at FROM memory_sessions WHERE id = 'old-v31-session'`)
+      .get() as Record<string, unknown> | null;
+
+    expect(version.value).toBe(String(LATEST_VERSION));
+    expect(columns.map((column) => column.name)).toEqual(MEMORY_SESSION_COLUMNS);
+    expect(existing).toEqual({
+      id: 'old-v31-session',
+      task_id: 'task-v31',
+      status: 'active',
+      actor_ref: 'agent:v31',
+      expires_at: null,
+    });
+    expect(() => db.query(`UPDATE memory_sessions SET status = 'expired' WHERE id = 'old-v31-session'`).run()).not.toThrow();
+    expect(() => db.query(`UPDATE memory_sessions SET status = 'revoked' WHERE id = 'old-v31-session'`).run()).toThrow();
+
+    await engine.disconnect();
+  });
+
+  test('pglite upgrades version 31 memory sessions to expiry contract', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mbrain-memory-session-pglite-v31-expiry-'));
+    tempPaths.push(dir);
+
+    const engine = new PGLiteEngine();
+    await engine.connect({ engine: 'pglite', database_path: dir });
+    const db = (engine as any).db;
+    await db.exec(`
+      CREATE TABLE config (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+      INSERT INTO config (key, value) VALUES ('version', '31');
+      ${OLD_V31_POSTGRES_MEMORY_SESSION_SQL}
+    `);
+
+    await engine.initSchema();
+
+    const version = await db.query(`SELECT value FROM config WHERE key = 'version'`);
+    const columns = await db.query(
+      `SELECT column_name
+       FROM information_schema.columns
+       WHERE table_schema = 'public'
+         AND table_name = 'memory_sessions'
+       ORDER BY ordinal_position`,
+    );
+    const existing = await db.query(
+      `SELECT id, task_id, status, actor_ref, expires_at
+       FROM memory_sessions
+       WHERE id = 'old-v31-session'`,
+    );
+
+    expect(version.rows).toEqual([{ value: String(LATEST_VERSION) }]);
+    expect(columns.rows.map((row: { column_name: string }) => row.column_name)).toEqual(MEMORY_SESSION_COLUMNS);
+    expect(existing.rows).toEqual([{
+      id: 'old-v31-session',
+      task_id: 'task-v31',
+      status: 'active',
+      actor_ref: 'agent:v31',
+      expires_at: null,
+    }]);
+    await expect(db.query(`UPDATE memory_sessions SET status = 'expired' WHERE id = 'old-v31-session'`)).resolves.toBeDefined();
+    await expect(db.query(`UPDATE memory_sessions SET status = 'revoked' WHERE id = 'old-v31-session'`)).rejects.toThrow();
 
     await engine.disconnect();
   }, 10_000);
@@ -601,6 +788,47 @@ describe('memory operations control-plane schema', () => {
 
   const databaseUrl = process.env.DATABASE_URL;
   if (databaseUrl) {
+    test('postgres initSchema creates memory session expiry contract', async () => {
+      const engine = new PostgresEngine();
+      const schemaName = `memory_session_${crypto.randomUUID().replace(/-/g, '_')}`;
+
+      await engine.connect({ engine: 'postgres', database_url: databaseUrl, poolSize: 1 });
+      await engine.sql.unsafe(`CREATE SCHEMA "${schemaName}"`);
+      await engine.sql.unsafe(`SET search_path TO "${schemaName}", public`);
+
+      try {
+        await engine.initSchema();
+
+        const columns = await engine.sql`
+          SELECT column_name
+          FROM information_schema.columns
+          WHERE table_schema = ${schemaName}
+            AND table_name = 'memory_sessions'
+          ORDER BY ordinal_position
+        `;
+        expect(columns.map((row) => row.column_name)).toEqual(MEMORY_SESSION_COLUMNS);
+
+        const constraints = await engine.sql.unsafe(`
+          SELECT pg_get_constraintdef(oid) AS definition
+          FROM pg_constraint
+          WHERE conrelid = '"${schemaName}"."memory_sessions"'::regclass
+            AND contype = 'c'
+        `);
+        expect(String(constraints.map((row) => row.definition).join('\n'))).toContain('expired');
+        await expect(engine.sql.unsafe(`
+          INSERT INTO memory_sessions (id, status, expires_at)
+          VALUES ('postgres-expired-valid', 'expired', '2000-01-01T00:00:00.000Z')
+        `)).resolves.toBeDefined();
+        await expect(engine.sql.unsafe(`
+          INSERT INTO memory_sessions (id, status)
+          VALUES ('postgres-revoked-invalid', 'revoked')
+        `)).rejects.toThrow();
+      } finally {
+        await engine.sql.unsafe(`DROP SCHEMA IF EXISTS "${schemaName}" CASCADE`);
+        await engine.disconnect();
+      }
+    }, 20_000);
+
     test('postgres initSchema creates memory mutation ledger contract', async () => {
       const engine = new PostgresEngine();
       const schemaName = `mutation_ledger_${crypto.randomUUID().replace(/-/g, '_')}`;
@@ -654,6 +882,7 @@ describe('memory operations control-plane schema', () => {
       }
     }, 20_000);
   } else {
+    test.skip('postgres memory session expiry schema skipped: DATABASE_URL is not configured', () => {});
     test.skip('postgres memory mutation ledger schema skipped: DATABASE_URL is not configured', () => {});
   }
 });

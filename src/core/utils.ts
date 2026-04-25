@@ -415,13 +415,21 @@ export function applyMemoryRealmUpsertDefaults(
 }
 
 export function rowToMemorySession(row: Record<string, unknown>): MemorySession {
+  const expiresAt = row.expires_at == null ? null : new Date(row.expires_at as string);
+  const storedStatus = row.status as MemorySession['status'];
+  const status = storedStatus === 'active'
+    && expiresAt !== null
+    && expiresAt.getTime() <= Date.now()
+    ? 'expired'
+    : storedStatus;
   return {
     id: row.id as string,
     task_id: (row.task_id as string | null) ?? null,
-    status: row.status as MemorySession['status'],
+    status,
     actor_ref: (row.actor_ref as string | null) ?? null,
     created_at: new Date(row.created_at as string),
     closed_at: row.closed_at == null ? null : new Date(row.closed_at as string),
+    expires_at: expiresAt,
   };
 }
 
@@ -435,6 +443,9 @@ export function normalizeMemorySessionInput(input: MemorySessionInput): MemorySe
   if (input.actor_ref !== undefined) {
     normalized.actor_ref = normalizeOptionalMemorySessionString('actor_ref', input.actor_ref);
   }
+  if (input.expires_at !== undefined) {
+    normalized.expires_at = normalizeOptionalMemorySessionTimestamp('expires_at', input.expires_at);
+  }
   return normalized;
 }
 
@@ -443,12 +454,16 @@ export function applyMemorySessionCreateDefaults(input: MemorySessionInput): {
   task_id: string | null;
   status: MemorySession['status'];
   actor_ref: string | null;
+  expires_at: Date | null;
 } {
   return {
     id: input.id,
     task_id: input.task_id ?? null,
     status: 'active',
     actor_ref: input.actor_ref ?? null,
+    expires_at: input.expires_at === undefined
+      ? null
+      : normalizeOptionalMemorySessionTimestamp('expires_at', input.expires_at),
   };
 }
 
@@ -503,6 +518,27 @@ function normalizeRequiredMemorySessionString(field: string, value: unknown): st
 function normalizeOptionalMemorySessionString(field: string, value: unknown): string | null {
   if (value === null) return null;
   return normalizeRequiredMemorySessionString(field, value);
+}
+
+function normalizeOptionalMemorySessionTimestamp(
+  field: string,
+  value: Date | string | null,
+): Date | null {
+  if (value === null) return null;
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) {
+      throw new Error(`memory session ${field} must be a valid timestamp`);
+    }
+    return value;
+  }
+  if (typeof value !== 'string') {
+    throw new Error(`memory session ${field} must be a valid timestamp`);
+  }
+  const parsed = parseValidIsoTimestamp(value);
+  if (!parsed) {
+    throw new Error(`memory session ${field} must be a valid timestamp`);
+  }
+  return parsed;
 }
 
 function normalizeMemorySessionAttachmentInstructions(value: unknown): string {

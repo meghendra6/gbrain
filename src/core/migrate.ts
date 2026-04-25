@@ -1363,6 +1363,35 @@ const MIGRATIONS: Migration[] = [
       END $$;
     `,
   },
+  {
+    version: 32,
+    name: 'memory_session_expiry_contract',
+    sql: `
+      DO $$
+      DECLARE
+        status_constraint_name TEXT;
+      BEGIN
+        IF to_regclass('memory_sessions') IS NOT NULL THEN
+          ALTER TABLE memory_sessions
+            ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
+
+          FOR status_constraint_name IN
+            SELECT conname
+            FROM pg_constraint
+            WHERE conrelid = 'memory_sessions'::regclass
+              AND contype = 'c'
+              AND pg_get_constraintdef(oid) LIKE '%status%'
+          LOOP
+            EXECUTE format('ALTER TABLE memory_sessions DROP CONSTRAINT IF EXISTS %I', status_constraint_name);
+          END LOOP;
+
+          ALTER TABLE memory_sessions
+            ADD CONSTRAINT chk_memory_sessions_status
+            CHECK (status IN ('active', 'expired', 'closed'));
+        END IF;
+      END $$;
+    `,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.length > 0

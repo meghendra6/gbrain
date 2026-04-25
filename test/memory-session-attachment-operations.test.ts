@@ -39,6 +39,8 @@ function getOperation(name: string): Operation {
 describe('memory session attachment operations', () => {
   test('register session and attachment operations with useful schemas', () => {
     const create = getOperation('create_memory_session');
+    const get = getOperation('get_memory_session');
+    const listSessions = getOperation('list_memory_sessions');
     const close = getOperation('close_memory_session');
     const attach = getOperation('attach_memory_realm_to_session');
     const list = getOperation('list_memory_session_attachments');
@@ -47,6 +49,20 @@ describe('memory session attachment operations', () => {
     expect(create.params.id.required).toBe(true);
     expect(create.params.task_id.nullable).toBe(true);
     expect(create.params.actor_ref.nullable).toBe(true);
+    expect(create.params.expires_at.nullable).toBe(true);
+
+    expect(get.mutating).toBe(false);
+    expect(get.params.id.required).toBe(true);
+
+    expect(listSessions.mutating).toBe(false);
+    expect(listSessions.params.status.enum).toEqual(['active', 'expired', 'closed']);
+    expect(listSessions.params.task_id.type).toBe('string');
+    expect(listSessions.params.actor_ref.type).toBe('string');
+    expect(listSessions.params.realm_id.type).toBe('string');
+    expect(listSessions.params.created_since.type).toBe('string');
+    expect(listSessions.params.created_until.type).toBe('string');
+    expect(listSessions.params.limit.default).toBe(100);
+    expect(listSessions.params.offset.default).toBe(0);
 
     expect(close.mutating).toBe(true);
     expect(close.params.id.required).toBe(true);
@@ -67,6 +83,8 @@ describe('memory session attachment operations', () => {
     try {
       const upsertRealm = getOperation('upsert_memory_realm');
       const createSession = getOperation('create_memory_session');
+      const getSession = getOperation('get_memory_session');
+      const listSessions = getOperation('list_memory_sessions');
       const attachRealm = getOperation('attach_memory_realm_to_session');
       const listAttachments = getOperation('list_memory_session_attachments');
       const closeSession = getOperation('close_memory_session');
@@ -82,6 +100,7 @@ describe('memory session attachment operations', () => {
         id: 'session-flow',
         task_id: 'task-flow',
         actor_ref: 'agent:test',
+        expires_at: '2999-01-01T00:00:00.000Z',
       }) as any;
       expect(created).toMatchObject({
         id: 'session-flow',
@@ -91,6 +110,16 @@ describe('memory session attachment operations', () => {
         closed_at: null,
       });
       expect(created.created_at).toBeInstanceOf(Date);
+      expect(created.expires_at.toISOString()).toBe('2999-01-01T00:00:00.000Z');
+
+      const fetched = await getSession.handler(harness.ctx(), {
+        id: 'session-flow',
+      }) as any;
+      expect(fetched).toMatchObject({
+        id: 'session-flow',
+        status: 'active',
+      });
+      expect(fetched.expires_at.toISOString()).toBe('2999-01-01T00:00:00.000Z');
 
       const attachment = await attachRealm.handler(harness.ctx(), {
         session_id: 'session-flow',
@@ -120,6 +149,11 @@ describe('memory session attachment operations', () => {
         realm_id: 'realm:session-flow',
       }) as any[];
       expect(byRealm.map((entry) => entry.session_id)).toEqual(['session-flow']);
+
+      const sessionsByRealm = await listSessions.handler(harness.ctx(), {
+        realm_id: 'realm:session-flow',
+      }) as any[];
+      expect(sessionsByRealm.map((entry) => entry.id)).toEqual(['session-flow']);
 
       const closed = await closeSession.handler(harness.ctx(), {
         id: 'session-flow',
@@ -205,6 +239,7 @@ describe('memory session attachment operations', () => {
       const dryCreate = await createSession.handler(harness.ctx(true), {
         id: 'session-dry-create',
         task_id: 'task-dry',
+        expires_at: '2999-01-01T00:00:00.000Z',
       }) as any;
       expect(dryCreate).toMatchObject({
         action: 'create_memory_session',
@@ -215,6 +250,7 @@ describe('memory session attachment operations', () => {
           status: 'active',
         },
       });
+      expect(dryCreate.session.expires_at.toISOString()).toBe('2999-01-01T00:00:00.000Z');
 
       await expect(attachRealm.handler(harness.ctx(), {
         session_id: 'session-dry-create',
@@ -294,6 +330,205 @@ describe('memory session attachment operations', () => {
         operation: 'close_memory_session' as any,
         target_id: 'session-dry-existing',
       })).toHaveLength(1);
+    } finally {
+      await harness.cleanup();
+    }
+  });
+
+  test('expired sessions are returned effectively expired and cannot be attached or closed again', async () => {
+    const harness = await createSqliteHarness('expired-session');
+    try {
+      const upsertRealm = getOperation('upsert_memory_realm');
+      const createSession = getOperation('create_memory_session');
+      const getSession = getOperation('get_memory_session');
+      const listSessions = getOperation('list_memory_sessions');
+      const attachRealm = getOperation('attach_memory_realm_to_session');
+      const listAttachments = getOperation('list_memory_session_attachments');
+      const closeSession = getOperation('close_memory_session');
+
+      await upsertRealm.handler(harness.ctx(), {
+        id: 'realm:expired-session',
+        name: 'Expired Session Realm',
+        scope: 'work',
+      });
+      await createSession.handler(harness.ctx(), {
+        id: 'session-expired',
+        task_id: 'task-expired',
+        actor_ref: 'agent:expired',
+        expires_at: '2000-01-01T00:00:00.000Z',
+      });
+
+      const fetched = await getSession.handler(harness.ctx(), {
+        id: 'session-expired',
+      }) as any;
+      expect(fetched).toMatchObject({
+        id: 'session-expired',
+        status: 'expired',
+        task_id: 'task-expired',
+        actor_ref: 'agent:expired',
+        closed_at: null,
+      });
+      expect(fetched.expires_at.toISOString()).toBe('2000-01-01T00:00:00.000Z');
+
+      const expired = await listSessions.handler(harness.ctx(), {
+        status: 'expired',
+        task_id: 'task-expired',
+        actor_ref: 'agent:expired',
+      }) as any[];
+      expect(expired.map((entry) => entry.id)).toEqual(['session-expired']);
+
+      const active = await listSessions.handler(harness.ctx(), {
+        status: 'active',
+        task_id: 'task-expired',
+      }) as any[];
+      expect(active).toEqual([]);
+
+      await expect(attachRealm.handler(harness.ctx(true), {
+        session_id: 'session-expired',
+        realm_id: 'realm:expired-session',
+        access: 'read_only',
+      })).rejects.toThrow('memory session is expired: session-expired');
+
+      await expect(attachRealm.handler(harness.ctx(), {
+        session_id: 'session-expired',
+        realm_id: 'realm:expired-session',
+        access: 'read_write',
+      })).rejects.toThrow('memory session is expired: session-expired');
+
+      await expect(harness.engine.attachMemoryRealmToSession({
+        session_id: 'session-expired',
+        realm_id: 'realm:expired-session',
+        access: 'read_only',
+      })).rejects.toThrow('Memory session is expired: session-expired');
+
+      const closeExpired = await closeSession.handler(harness.ctx(), {
+        id: 'session-expired',
+      }) as any;
+      expect(closeExpired).toMatchObject({
+        id: 'session-expired',
+        status: 'expired',
+        closed_at: null,
+      });
+
+      expect(await listAttachments.handler(harness.ctx(), {
+        session_id: 'session-expired',
+      })).toEqual([]);
+      expect(await harness.engine.listMemoryMutationEvents({
+        operation: 'close_memory_session' as any,
+        target_id: 'session-expired',
+      })).toEqual([]);
+      expect(await harness.engine.listMemoryMutationEvents({
+        operation: 'attach_memory_realm_to_session' as any,
+        target_id: 'session-expired:realm:expired-session',
+      })).toEqual([]);
+    } finally {
+      await harness.cleanup();
+    }
+  });
+
+  test('list sessions filters by effective status, realm, actor, task, created window, and pagination', async () => {
+    const harness = await createSqliteHarness('list-session-filters');
+    try {
+      const upsertRealm = getOperation('upsert_memory_realm');
+      const createSession = getOperation('create_memory_session');
+      const attachRealm = getOperation('attach_memory_realm_to_session');
+      const listSessions = getOperation('list_memory_sessions');
+
+      await upsertRealm.handler(harness.ctx(), {
+        id: 'realm:list-a',
+        name: 'List Realm A',
+        scope: 'work',
+      });
+      await upsertRealm.handler(harness.ctx(), {
+        id: 'realm:list-b',
+        name: 'List Realm B',
+        scope: 'personal',
+      });
+
+      await createSession.handler(harness.ctx(), {
+        id: 'session-list-active-a',
+        task_id: 'task-list',
+        actor_ref: 'agent:list',
+      });
+      await createSession.handler(harness.ctx(), {
+        id: 'session-list-active-b',
+        task_id: 'task-list',
+        actor_ref: 'agent:list',
+      });
+      await createSession.handler(harness.ctx(), {
+        id: 'session-list-expired',
+        task_id: 'task-list',
+        actor_ref: 'agent:list',
+        expires_at: '2000-01-01T00:00:00.000Z',
+      });
+      await createSession.handler(harness.ctx(), {
+        id: 'session-list-other-actor',
+        task_id: 'task-list',
+        actor_ref: 'agent:other',
+      });
+
+      await attachRealm.handler(harness.ctx(), {
+        session_id: 'session-list-active-a',
+        realm_id: 'realm:list-a',
+        access: 'read_only',
+      });
+      await attachRealm.handler(harness.ctx(), {
+        session_id: 'session-list-active-b',
+        realm_id: 'realm:list-b',
+        access: 'read_only',
+      });
+
+      const activeForRealm = await listSessions.handler(harness.ctx(), {
+        status: 'active',
+        task_id: 'task-list',
+        actor_ref: 'agent:list',
+        realm_id: 'realm:list-a',
+      }) as any[];
+      expect(activeForRealm.map((entry) => entry.id)).toEqual(['session-list-active-a']);
+
+      const expiredForTask = await listSessions.handler(harness.ctx(), {
+        status: 'expired',
+        task_id: 'task-list',
+      }) as any[];
+      expect(expiredForTask.map((entry) => entry.id)).toEqual(['session-list-expired']);
+
+      const allInWindow = await listSessions.handler(harness.ctx(), {
+        created_since: '1999-01-01T00:00:00.000Z',
+        created_until: '2999-01-01T00:00:00.000Z',
+        limit: 2,
+        offset: 1,
+      }) as any[];
+      expect(allInWindow).toHaveLength(2);
+      expect(allInWindow.map((entry) => entry.created_at instanceof Date)).toEqual([true, true]);
+
+      await expect(listSessions.handler(harness.ctx(), {
+        status: 'revoked',
+      })).rejects.toThrow('status must be one of: active, expired, closed');
+
+      await expect(listSessions.handler(harness.ctx(), {
+        created_since: 'not-a-date',
+      })).rejects.toThrow('created_since must be a valid ISO timestamp');
+    } finally {
+      await harness.cleanup();
+    }
+  });
+
+  test('create rejects invalid expires_at before storage', async () => {
+    const harness = await createSqliteHarness('invalid-expiry');
+    try {
+      const createSession = getOperation('create_memory_session');
+
+      await expect(createSession.handler(harness.ctx(true), {
+        id: 'session-invalid-expiry-dry',
+        expires_at: 'not-a-date',
+      })).rejects.toThrow('expires_at must be a valid ISO timestamp');
+
+      await expect(createSession.handler(harness.ctx(), {
+        id: 'session-invalid-expiry-real',
+        expires_at: '2026-02-30T00:00:00.000Z',
+      })).rejects.toThrow('expires_at must be a valid ISO timestamp');
+
+      expect(await harness.engine.getMemorySession('session-invalid-expiry-real')).toBeNull();
     } finally {
       await harness.cleanup();
     }

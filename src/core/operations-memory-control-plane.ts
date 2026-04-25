@@ -8,6 +8,8 @@ import type {
   MemoryRealm,
   MemoryRealmScope,
   MemorySession,
+  MemorySessionFilters,
+  MemorySessionStatus,
   MemorySessionAttachment,
   MemorySessionAttachmentFilters,
   MemorySessionAttachmentInput,
@@ -24,6 +26,7 @@ type OperationErrorCtor = new (
 
 const MEMORY_REALM_SCOPES = ['work', 'personal', 'mixed'] as const satisfies readonly MemoryRealmScope[];
 const MEMORY_ACCESS_MODES = ['read_only', 'read_write'] as const satisfies readonly MemoryAccessMode[];
+const MEMORY_SESSION_STATUSES = ['active', 'expired', 'closed'] as const satisfies readonly MemorySessionStatus[];
 const DEFAULT_REALM_UPSERT_SOURCE_REFS = ['Source: mbrain upsert_memory_realm operation'];
 const DEFAULT_SESSION_CREATE_SOURCE_REFS = ['Source: mbrain create_memory_session operation'];
 const DEFAULT_SESSION_CLOSE_SOURCE_REFS = ['Source: mbrain close_memory_session operation'];
@@ -217,6 +220,8 @@ function memorySessionInput(
   if (taskId !== undefined || p.task_id === null) input.task_id = taskId ?? null;
   const actorRef = optionalNullableString(deps, 'actor_ref', p.actor_ref);
   if (actorRef !== undefined || p.actor_ref === null) input.actor_ref = actorRef ?? null;
+  const expiresAt = optionalIsoDate(deps, 'expires_at', p.expires_at);
+  if (expiresAt !== undefined || p.expires_at === null) input.expires_at = expiresAt;
   return input;
 }
 
@@ -228,6 +233,27 @@ function memorySessionPreview(input: MemorySessionInput): Omit<MemorySession, 'c
     ...applyMemorySessionCreateDefaults(input),
     created_at: new Date(),
     closed_at: null,
+  };
+}
+
+function memorySessionFilters(
+  deps: { OperationError: OperationErrorCtor },
+  p: Record<string, unknown>,
+): MemorySessionFilters {
+  const taskId = optionalString(deps, 'task_id', p.task_id);
+  const actorRef = optionalString(deps, 'actor_ref', p.actor_ref);
+  const realmId = optionalString(deps, 'realm_id', p.realm_id);
+  const createdSince = optionalIsoDate(deps, 'created_since', p.created_since);
+  const createdUntil = optionalIsoDate(deps, 'created_until', p.created_until);
+  return {
+    status: enumValue(deps, 'status', p.status, MEMORY_SESSION_STATUSES),
+    ...(taskId !== undefined ? { task_id: taskId } : {}),
+    ...(actorRef !== undefined ? { actor_ref: actorRef } : {}),
+    ...(realmId !== undefined ? { realm_id: realmId } : {}),
+    ...(createdSince instanceof Date ? { created_since: createdSince } : {}),
+    ...(createdUntil instanceof Date ? { created_until: createdUntil } : {}),
+    limit: integerParam(deps, 'limit', p.limit, { defaultValue: 100, min: 0, max: 500 }),
+    offset: integerParam(deps, 'offset', p.offset, { defaultValue: 0, min: 0 }),
   };
 }
 
@@ -281,6 +307,9 @@ async function requireMemorySessionAttachmentTargets(
   ]);
   if (!session) {
     throw invalidParams(deps, `memory session not found: ${input.session_id}`);
+  }
+  if (session.status === 'expired') {
+    throw invalidParams(deps, `memory session is expired: ${input.session_id}`);
   }
   if (session.status !== 'active') {
     throw invalidParams(deps, `memory session is closed: ${input.session_id}`);
@@ -400,6 +429,11 @@ export function createMemoryControlPlaneOperations(
       id: { type: 'string', required: true },
       task_id: { type: 'string', nullable: true },
       actor_ref: { type: 'string', nullable: true },
+      expires_at: {
+        type: 'string',
+        nullable: true,
+        description: 'Optional ISO timestamp after which the session is effectively expired.',
+      },
       source_refs: { type: 'array', items: { type: 'string' }, description: 'Optional provenance reference string or string array for the ledger event.' },
     },
     mutating: true,
@@ -438,6 +472,35 @@ export function createMemoryControlPlaneOperations(
     cliHints: { name: 'memory-session-create' },
   };
 
+  const get_memory_session: Operation = {
+    name: 'get_memory_session',
+    description: 'Get one memory session by id, returning effective expired status when expires_at has elapsed.',
+    params: {
+      id: { type: 'string', required: true },
+    },
+    mutating: false,
+    handler: async (ctx, p) => ctx.engine.getMemorySession(requiredString(deps, 'id', p.id)),
+    cliHints: { name: 'memory-session-get', positional: ['id'] },
+  };
+
+  const list_memory_sessions: Operation = {
+    name: 'list_memory_sessions',
+    description: 'List memory sessions by effective status, task, actor, attached realm, or creation time window.',
+    params: {
+      status: { type: 'string', enum: [...MEMORY_SESSION_STATUSES] },
+      task_id: { type: 'string' },
+      actor_ref: { type: 'string' },
+      realm_id: { type: 'string' },
+      created_since: { type: 'string', description: 'Inclusive ISO timestamp lower bound.' },
+      created_until: { type: 'string', description: 'Exclusive ISO timestamp upper bound.' },
+      limit: { type: 'number', default: 100 },
+      offset: { type: 'number', default: 0 },
+    },
+    mutating: false,
+    handler: async (ctx, p) => ctx.engine.listMemorySessions(memorySessionFilters(deps, p)),
+    cliHints: { name: 'memory-session-list', aliases: { n: 'limit' } },
+  };
+
   const close_memory_session: Operation = {
     name: 'close_memory_session',
     description: 'Close an active memory session if it exists.',
@@ -455,17 +518,17 @@ export function createMemoryControlPlaneOperations(
         return {
           action: 'close_memory_session',
           dry_run: true,
-          session: {
+          session: existing.status === 'active' ? {
             ...existing,
             status: 'closed',
             closed_at: existing.closed_at ?? new Date(),
-          },
+          } : existing,
         };
       }
       return ctx.engine.transaction(async (engine) => {
         const current = await engine.getMemorySession(id);
         if (!current) return null;
-        if (current.status === 'closed') return current;
+        if (current.status !== 'active') return current;
         const session = await engine.closeMemorySession(id);
         if (!session) return engine.getMemorySession(id);
         await recordMemoryMutationEvent(engine, {
@@ -555,6 +618,8 @@ export function createMemoryControlPlaneOperations(
     get_memory_realm,
     list_memory_realms,
     create_memory_session,
+    get_memory_session,
+    list_memory_sessions,
     close_memory_session,
     attach_memory_realm_to_session,
     list_memory_session_attachments,

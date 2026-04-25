@@ -885,7 +885,7 @@ export interface MemoryRealmFilters {
   offset?: number;
 }
 
-export type MemorySessionStatus = 'active' | 'closed';
+export type MemorySessionStatus = 'active' | 'expired' | 'closed';
 
 export interface MemorySession {
   id: string;
@@ -894,17 +894,23 @@ export interface MemorySession {
   actor_ref: string | null;
   created_at: Date;
   closed_at: Date | null;
+  expires_at: Date | null;
 }
 
 export interface MemorySessionInput {
   id: string;
   task_id?: string | null;
   actor_ref?: string | null;
+  expires_at?: Date | string | null;
 }
 
 export interface MemorySessionFilters {
   status?: MemorySessionStatus;
   task_id?: string;
+  actor_ref?: string;
+  realm_id?: string;
+  created_since?: Date | string;
+  created_until?: Date | string;
   limit?: number;
   offset?: number;
 }

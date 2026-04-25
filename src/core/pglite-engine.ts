@@ -40,6 +40,7 @@ import type {
   MemoryRealmFilters,
   MemoryRealmInput,
   MemorySession,
+  MemorySessionFilters,
   MemorySessionAttachment,
   MemorySessionAttachmentFilters,
   MemorySessionAttachmentInput,
@@ -1702,13 +1703,14 @@ export class PGLiteEngine implements BrainEngine {
     const normalized = normalizeMemorySessionInput(input);
     const { rows } = await this.db.query(
       `INSERT INTO memory_sessions (
-        id, task_id, status, actor_ref
-      ) VALUES ($1, $2, 'active', $3)
-      RETURNING id, task_id, status, actor_ref, created_at, closed_at`,
+        id, task_id, status, actor_ref, expires_at
+      ) VALUES ($1, $2, 'active', $3, $4)
+      RETURNING id, task_id, status, actor_ref, created_at, closed_at, expires_at`,
       [
         normalized.id,
         normalized.task_id ?? null,
         normalized.actor_ref ?? null,
+        toNullableIso(normalized.expires_at),
       ],
     );
     return rowToMemorySession(rows[0] as Record<string, unknown>);
@@ -1716,7 +1718,7 @@ export class PGLiteEngine implements BrainEngine {
 
   async getMemorySession(id: string): Promise<MemorySession | null> {
     const { rows } = await this.db.query(
-      `SELECT id, task_id, status, actor_ref, created_at, closed_at
+      `SELECT id, task_id, status, actor_ref, created_at, closed_at, expires_at
        FROM memory_sessions
        WHERE id = $1`,
       [id],
@@ -1725,13 +1727,77 @@ export class PGLiteEngine implements BrainEngine {
     return rowToMemorySession(rows[0] as Record<string, unknown>);
   }
 
+  async listMemorySessions(filters?: MemorySessionFilters): Promise<MemorySession[]> {
+    const { limit, offset } = normalizeMemorySessionPagination(filters);
+    if (limit === 0) return [];
+    const params: unknown[] = [];
+    const clauses: string[] = [];
+    const effectiveStatusSql = `
+      CASE
+        WHEN s.status = 'active'
+          AND s.expires_at IS NOT NULL
+          AND s.expires_at <= now()
+        THEN 'expired'
+        ELSE s.status
+      END
+    `;
+
+    if (filters?.status !== undefined) {
+      params.push(filters.status);
+      clauses.push(`${effectiveStatusSql} = $${params.length}`);
+    }
+    if (filters?.task_id !== undefined) {
+      params.push(filters.task_id);
+      clauses.push(`s.task_id = $${params.length}`);
+    }
+    if (filters?.actor_ref !== undefined) {
+      params.push(filters.actor_ref);
+      clauses.push(`s.actor_ref = $${params.length}`);
+    }
+    if (filters?.realm_id !== undefined) {
+      params.push(filters.realm_id);
+      clauses.push(`
+        EXISTS (
+          SELECT 1
+          FROM memory_session_attachments msa
+          WHERE msa.session_id = s.id
+            AND msa.realm_id = $${params.length}
+        )
+      `);
+    }
+    if (filters?.created_since !== undefined) {
+      params.push(toNullableIso(filters.created_since));
+      clauses.push(`s.created_at >= $${params.length}`);
+    }
+    if (filters?.created_until !== undefined) {
+      params.push(toNullableIso(filters.created_until));
+      clauses.push(`s.created_at < $${params.length}`);
+    }
+
+    params.push(limit);
+    params.push(offset);
+    const whereClause = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+    const { rows } = await this.db.query(
+      `SELECT s.id, s.task_id, s.status, s.actor_ref, s.created_at, s.closed_at, s.expires_at
+       FROM memory_sessions s
+       ${whereClause}
+       ORDER BY s.created_at DESC, s.id DESC
+       LIMIT $${params.length - 1}
+       OFFSET $${params.length}`,
+      params,
+    );
+    return (rows as Record<string, unknown>[]).map(rowToMemorySession);
+  }
+
   async closeMemorySession(id: string): Promise<MemorySession | null> {
     const { rows } = await this.db.query(
       `UPDATE memory_sessions
        SET status = 'closed',
            closed_at = COALESCE(closed_at, now())
-       WHERE id = $1 AND status = 'active'
-       RETURNING id, task_id, status, actor_ref, created_at, closed_at`,
+       WHERE id = $1
+         AND status = 'active'
+         AND (expires_at IS NULL OR expires_at > now())
+       RETURNING id, task_id, status, actor_ref, created_at, closed_at, expires_at`,
       [id],
     );
     if (rows.length === 0) return null;
@@ -1748,7 +1814,9 @@ export class PGLiteEngine implements BrainEngine {
       WHERE EXISTS (
         SELECT 1
         FROM memory_sessions
-        WHERE id = $1 AND status = 'active'
+        WHERE id = $1
+          AND status = 'active'
+          AND (expires_at IS NULL OR expires_at > now())
       )
       ON CONFLICT (session_id, realm_id) DO UPDATE SET
         access = EXCLUDED.access,
@@ -1765,6 +1833,9 @@ export class PGLiteEngine implements BrainEngine {
     if (rows.length === 0) {
       const session = await this.getMemorySession(attachment.session_id);
       if (!session) throw new Error(`Memory session not found: ${attachment.session_id}`);
+      if (session.status === 'expired') {
+        throw new Error(`Memory session is expired: ${attachment.session_id}`);
+      }
       if (session.status !== 'active') {
         throw new Error(`Memory session is closed: ${attachment.session_id}`);
       }
@@ -2686,6 +2757,20 @@ function normalizeMemoryRealmPagination(
   }
   if (!Number.isInteger(offset) || offset < 0) {
     throw new Error('Memory realm offset must be a non-negative integer');
+  }
+  return { limit, offset };
+}
+
+function normalizeMemorySessionPagination(
+  filters?: MemorySessionFilters,
+): { limit: number; offset: number } {
+  const limit = filters?.limit ?? 100;
+  const offset = filters?.offset ?? 0;
+  if (!Number.isInteger(limit) || limit < 0) {
+    throw new Error('Memory session limit must be a non-negative integer');
+  }
+  if (!Number.isInteger(offset) || offset < 0) {
+    throw new Error('Memory session offset must be a non-negative integer');
   }
   return { limit, offset };
 }

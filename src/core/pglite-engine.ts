@@ -1730,7 +1730,7 @@ export class PGLiteEngine implements BrainEngine {
       `UPDATE memory_sessions
        SET status = 'closed',
            closed_at = COALESCE(closed_at, now())
-       WHERE id = $1
+       WHERE id = $1 AND status = 'active'
        RETURNING id, task_id, status, actor_ref, created_at, closed_at`,
       [id],
     );
@@ -1740,6 +1740,11 @@ export class PGLiteEngine implements BrainEngine {
 
   async attachMemoryRealmToSession(input: MemorySessionAttachmentInput): Promise<MemorySessionAttachment> {
     const attachment = normalizeMemorySessionAttachmentInput(input);
+    const session = await this.getMemorySession(attachment.session_id);
+    if (!session) throw new Error(`Memory session not found: ${attachment.session_id}`);
+    if (session.status !== 'active') {
+      throw new Error(`Memory session is closed: ${attachment.session_id}`);
+    }
     const { rows } = await this.db.query(
       `INSERT INTO memory_session_attachments (
         session_id, realm_id, access, instructions

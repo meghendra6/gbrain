@@ -256,6 +256,41 @@ function memorySessionAttachmentPreview(input: MemorySessionAttachmentInput): Me
   };
 }
 
+async function ensureMemorySessionDoesNotExist(
+  deps: { OperationError: OperationErrorCtor },
+  engine: { getMemorySession(id: string): Promise<MemorySession | null> },
+  id: string,
+): Promise<void> {
+  const existing = await engine.getMemorySession(id);
+  if (existing) {
+    throw invalidParams(deps, `memory session already exists: ${id}`);
+  }
+}
+
+async function requireMemorySessionAttachmentTargets(
+  deps: { OperationError: OperationErrorCtor },
+  engine: {
+    getMemorySession(id: string): Promise<MemorySession | null>;
+    getMemoryRealm(id: string): Promise<MemoryRealm | null>;
+  },
+  input: MemorySessionAttachmentInput,
+): Promise<{ session: MemorySession; realm: MemoryRealm }> {
+  const [session, realm] = await Promise.all([
+    engine.getMemorySession(input.session_id),
+    engine.getMemoryRealm(input.realm_id),
+  ]);
+  if (!session) {
+    throw invalidParams(deps, `memory session not found: ${input.session_id}`);
+  }
+  if (session.status !== 'active') {
+    throw invalidParams(deps, `memory session is closed: ${input.session_id}`);
+  }
+  if (!realm) {
+    throw invalidParams(deps, `memory realm not found: ${input.realm_id}`);
+  }
+  return { session, realm };
+}
+
 function memorySessionAttachmentFilters(
   deps: { OperationError: OperationErrorCtor },
   p: Record<string, unknown>,
@@ -371,6 +406,7 @@ export function createMemoryControlPlaneOperations(
     handler: async (ctx, p) => {
       const input = memorySessionInput(deps, p);
       if (ctx.dryRun) {
+        await ensureMemorySessionDoesNotExist(deps, ctx.engine, input.id);
         return {
           action: 'create_memory_session',
           dry_run: true,
@@ -379,6 +415,7 @@ export function createMemoryControlPlaneOperations(
       }
       const sourceRefs = optionalSourceRefs(deps, p.source_refs) ?? DEFAULT_SESSION_CREATE_SOURCE_REFS;
       return ctx.engine.transaction(async (engine) => {
+        await ensureMemorySessionDoesNotExist(deps, engine, input.id);
         const session = await engine.createMemorySession(input);
         await recordMemoryMutationEvent(engine, {
           session_id: session.id,
@@ -426,8 +463,11 @@ export function createMemoryControlPlaneOperations(
       }
       const sourceRefs = optionalSourceRefs(deps, p.source_refs) ?? DEFAULT_SESSION_CLOSE_SOURCE_REFS;
       return ctx.engine.transaction(async (engine) => {
+        const current = await engine.getMemorySession(id);
+        if (!current) return null;
+        if (current.status === 'closed') return current;
         const session = await engine.closeMemorySession(id);
-        if (!session) return null;
+        if (!session) return engine.getMemorySession(id);
         await recordMemoryMutationEvent(engine, {
           session_id: session.id,
           realm_id: `session:${session.id}`,
@@ -463,6 +503,7 @@ export function createMemoryControlPlaneOperations(
     handler: async (ctx, p) => {
       const input = memorySessionAttachmentInput(deps, p);
       if (ctx.dryRun) {
+        await requireMemorySessionAttachmentTargets(deps, ctx.engine, input);
         return {
           action: 'attach_memory_realm_to_session',
           dry_run: true,
@@ -471,16 +512,7 @@ export function createMemoryControlPlaneOperations(
       }
       const sourceRefs = optionalSourceRefs(deps, p.source_refs) ?? DEFAULT_SESSION_ATTACH_SOURCE_REFS;
       return ctx.engine.transaction(async (engine) => {
-        const [session, realm] = await Promise.all([
-          engine.getMemorySession(input.session_id),
-          engine.getMemoryRealm(input.realm_id),
-        ]);
-        if (!session) {
-          throw invalidParams(deps, `memory session not found: ${input.session_id}`);
-        }
-        if (!realm) {
-          throw invalidParams(deps, `memory realm not found: ${input.realm_id}`);
-        }
+        const { session, realm } = await requireMemorySessionAttachmentTargets(deps, engine, input);
         const attachment = await engine.attachMemoryRealmToSession(input);
         await recordMemoryMutationEvent(engine, {
           session_id: attachment.session_id,

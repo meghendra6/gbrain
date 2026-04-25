@@ -1815,7 +1815,7 @@ export class PostgresEngine implements BrainEngine {
       UPDATE memory_sessions
       SET status = 'closed',
           closed_at = COALESCE(closed_at, now())
-      WHERE id = ${id}
+      WHERE id = ${id} AND status = 'active'
       RETURNING id, task_id, status, actor_ref, created_at, closed_at
     `;
     if (rows.length === 0) return null;
@@ -1824,6 +1824,11 @@ export class PostgresEngine implements BrainEngine {
 
   async attachMemoryRealmToSession(input: MemorySessionAttachmentInput): Promise<MemorySessionAttachment> {
     const attachment = normalizeMemorySessionAttachmentInput(input);
+    const session = await this.getMemorySession(attachment.session_id);
+    if (!session) throw new Error(`Memory session not found: ${attachment.session_id}`);
+    if (session.status !== 'active') {
+      throw new Error(`Memory session is closed: ${attachment.session_id}`);
+    }
     const rows = await this.sql`
       INSERT INTO memory_session_attachments (
         session_id, realm_id, access, instructions

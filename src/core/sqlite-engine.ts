@@ -2117,7 +2117,7 @@ export class SQLiteEngine implements BrainEngine {
       UPDATE memory_sessions
       SET status = 'closed',
           closed_at = COALESCE(closed_at, ?)
-      WHERE id = ?
+      WHERE id = ? AND status = 'active'
     `, sqliteBindings([timestamp, id]));
     if (result.changes === 0) return null;
     return this.getMemorySession(id);
@@ -2125,6 +2125,11 @@ export class SQLiteEngine implements BrainEngine {
 
   async attachMemoryRealmToSession(input: MemorySessionAttachmentInput): Promise<MemorySessionAttachment> {
     const attachment = normalizeMemorySessionAttachmentInput(input);
+    const session = await this.getMemorySession(attachment.session_id);
+    if (!session) throw new Error(`Memory session not found: ${attachment.session_id}`);
+    if (session.status !== 'active') {
+      throw new Error(`Memory session is closed: ${attachment.session_id}`);
+    }
     const timestamp = nowIso();
     this.database.run(`
       INSERT INTO memory_session_attachments (

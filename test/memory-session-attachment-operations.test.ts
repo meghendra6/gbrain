@@ -291,4 +291,98 @@ describe('memory session attachment operations', () => {
       await harness.cleanup();
     }
   });
+
+  test('attach rejects missing and closed sessions in dry-run and real modes', async () => {
+    const harness = await createSqliteHarness('attach-validation');
+    try {
+      const upsertRealm = getOperation('upsert_memory_realm');
+      const createSession = getOperation('create_memory_session');
+      const attachRealm = getOperation('attach_memory_realm_to_session');
+      const listAttachments = getOperation('list_memory_session_attachments');
+      const closeSession = getOperation('close_memory_session');
+
+      await upsertRealm.handler(harness.ctx(), {
+        id: 'realm:attach-validation',
+        name: 'Attach Validation Realm',
+        scope: 'work',
+      });
+
+      await expect(attachRealm.handler(harness.ctx(true), {
+        session_id: 'missing-session',
+        realm_id: 'realm:attach-validation',
+        access: 'read_only',
+      })).rejects.toThrow('memory session not found: missing-session');
+
+      await createSession.handler(harness.ctx(), {
+        id: 'session-attach-validation',
+      });
+      await closeSession.handler(harness.ctx(), {
+        id: 'session-attach-validation',
+      });
+
+      await expect(attachRealm.handler(harness.ctx(true), {
+        session_id: 'session-attach-validation',
+        realm_id: 'realm:attach-validation',
+        access: 'read_only',
+      })).rejects.toThrow('memory session is closed: session-attach-validation');
+
+      await expect(attachRealm.handler(harness.ctx(), {
+        session_id: 'session-attach-validation',
+        realm_id: 'realm:attach-validation',
+        access: 'read_write',
+      })).rejects.toThrow('memory session is closed: session-attach-validation');
+
+      expect(await listAttachments.handler(harness.ctx(), {
+        session_id: 'session-attach-validation',
+      })).toEqual([]);
+      expect(await harness.engine.listMemoryMutationEvents({
+        operation: 'attach_memory_realm_to_session' as any,
+        target_id: 'session-attach-validation:realm:attach-validation',
+      })).toEqual([]);
+    } finally {
+      await harness.cleanup();
+    }
+  });
+
+  test('close is idempotent without duplicate ledger events and duplicate create is rejected consistently', async () => {
+    const harness = await createSqliteHarness('session-idempotency');
+    try {
+      const createSession = getOperation('create_memory_session');
+      const closeSession = getOperation('close_memory_session');
+
+      await createSession.handler(harness.ctx(), {
+        id: 'session-idempotent',
+      });
+
+      await expect(createSession.handler(harness.ctx(true), {
+        id: 'session-idempotent',
+      })).rejects.toThrow('memory session already exists: session-idempotent');
+      await expect(createSession.handler(harness.ctx(), {
+        id: 'session-idempotent',
+      })).rejects.toThrow('memory session already exists: session-idempotent');
+
+      const firstClose = await closeSession.handler(harness.ctx(), {
+        id: 'session-idempotent',
+      }) as any;
+      const secondClose = await closeSession.handler(harness.ctx(), {
+        id: 'session-idempotent',
+      }) as any;
+
+      expect(firstClose).toMatchObject({
+        id: 'session-idempotent',
+        status: 'closed',
+      });
+      expect(secondClose).toMatchObject({
+        id: 'session-idempotent',
+        status: 'closed',
+      });
+      expect(secondClose.closed_at.toISOString()).toBe(firstClose.closed_at.toISOString());
+      expect(await harness.engine.listMemoryMutationEvents({
+        operation: 'close_memory_session' as any,
+        target_id: 'session-idempotent',
+      })).toHaveLength(1);
+    } finally {
+      await harness.cleanup();
+    }
+  });
 });

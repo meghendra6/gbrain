@@ -7,6 +7,7 @@ import type {
   MemoryRealmInput,
   MemoryRealmScope,
 } from './types.ts';
+import { parseValidIsoTimestamp } from './utils.ts';
 
 type OperationErrorCtor = new (
   code: 'invalid_params',
@@ -113,12 +114,14 @@ function optionalIsoDate(
 ): Date | string | null | undefined {
   if (value === null) return null;
   if (value == null) return undefined;
-  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+  if (value instanceof Date) {
+    if (!Number.isNaN(value.getTime())) return value;
+    throw invalidParams(deps, `${field} must be a valid ISO timestamp`);
+  }
   if (typeof value !== 'string') {
     throw invalidParams(deps, `${field} must be an ISO timestamp`);
   }
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
+  if (!parseValidIsoTimestamp(value)) {
     throw invalidParams(deps, `${field} must be a valid ISO timestamp`);
   }
   return value;

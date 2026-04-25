@@ -141,6 +141,21 @@ describe('memory realms engine', () => {
       await harness.cleanup();
     }
   });
+
+  test('SQLite engine rejects calendar-invalid archived_at strings before storage', async () => {
+    const harness = await createSqliteHarness('calendar-invalid-archived-at');
+    try {
+      await expect(harness.engine.upsertMemoryRealm({
+        id: 'realm:calendar-invalid-archive-date',
+        name: 'Calendar Invalid Archive Date Realm',
+        scope: 'work',
+        archived_at: '2026-02-31T00:00:00.000Z',
+      })).rejects.toThrow(/archived_at|timestamp|date/i);
+      expect(await harness.engine.getMemoryRealm('realm:calendar-invalid-archive-date')).toBeNull();
+    } finally {
+      await harness.cleanup();
+    }
+  });
 });
 
 describe('memory realm operations', () => {
@@ -210,6 +225,27 @@ describe('memory realm operations', () => {
           scope: 'mixed',
         },
       ]);
+    } finally {
+      await harness.cleanup();
+    }
+  });
+
+  test('upsert_memory_realm rejects calendar-invalid archived_at strings before storage', async () => {
+    const harness = await createSqliteHarness('operation-calendar-invalid-archived-at');
+    try {
+      const upsert = getOperation('upsert_memory_realm');
+
+      await expect(upsert.handler({
+        engine: harness.engine,
+        config: { engine: 'sqlite' },
+        dryRun: true,
+      } as any, {
+        id: 'realm:operation-calendar-invalid-archive-date',
+        name: 'Operation Calendar Invalid Archive Date Realm',
+        scope: 'work',
+        archived_at: '2026-02-31T00:00:00.000Z',
+      })).rejects.toThrow(/archived_at|timestamp|date/i);
+      expect(await harness.engine.getMemoryRealm('realm:operation-calendar-invalid-archive-date')).toBeNull();
     } finally {
       await harness.cleanup();
     }

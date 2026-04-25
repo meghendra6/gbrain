@@ -7,6 +7,9 @@ import { OperationError, operations } from '../src/core/operations.ts';
 import type { Operation, OperationContext } from '../src/core/operations.ts';
 import { SQLiteEngine } from '../src/core/sqlite-engine.ts';
 
+const STALE_HASH = 'a'.repeat(64);
+const MISSING_HASH = 'b'.repeat(64);
+
 function getOperation(name: string): Operation {
   const operation = operations.find((candidate) => candidate.name === name);
   if (!operation) {
@@ -48,6 +51,52 @@ ${timeline}
 }
 
 describe('put_page content hash preconditions and mutation ledger', () => {
+  test('invalid expected_content_hash rejects before mutation or ledger recording', async () => {
+    await withSqliteEngine(async (ctx) => {
+      const put = getOperation('put_page');
+      const slug = 'concepts/invalid-precondition-hash';
+
+      await put.handler(ctx, {
+        slug,
+        content: pageContent(
+          'Invalid Precondition Hash',
+          'Original compiled truth.',
+          '- 2026-04-25 | Initial evidence.',
+        ),
+      });
+      const before = await ctx.engine.getPage(slug);
+      expect(before?.content_hash).toBeTruthy();
+
+      let error: unknown;
+      try {
+        await put.handler(ctx, {
+          slug,
+          content: pageContent(
+            'Invalid Precondition Hash',
+            'This content should not be written.',
+            '- 2026-04-25 | Invalid hash attempted update.',
+          ),
+          expected_content_hash: 'not-a-sha',
+          session_id: 'put-page-invalid-hash-session',
+          source_refs: ['Source: invalid hash test'],
+        });
+      } catch (caught) {
+        error = caught;
+      }
+
+      expect(error).toBeInstanceOf(OperationError);
+      expect((error as OperationError).code).toBe('invalid_params');
+      expect((error as Error).message).toContain('expected_content_hash');
+      expect(await ctx.engine.getPage(slug)).toMatchObject({
+        content_hash: before?.content_hash,
+        compiled_truth: before?.compiled_truth,
+      });
+      expect(await ctx.engine.listMemoryMutationEvents({
+        session_id: 'put-page-invalid-hash-session',
+      })).toEqual([]);
+    });
+  });
+
   test('stale expected_content_hash rejects without mutating existing page and records one conflict event', async () => {
     await withSqliteEngine(async (ctx) => {
       const put = getOperation('put_page');
@@ -73,7 +122,7 @@ describe('put_page content hash preconditions and mutation ledger', () => {
         await put.handler(ctx, {
           slug,
           content: updated,
-          expected_content_hash: 'stale-hash',
+          expected_content_hash: STALE_HASH,
           session_id: sessionId,
           source_refs: ['Source: stale precondition test'],
         });
@@ -101,14 +150,14 @@ describe('put_page content hash preconditions and mutation ledger', () => {
         target_id: slug,
         scope_id: 'workspace:default',
         source_refs: ['Source: stale precondition test'],
-        expected_target_snapshot_hash: 'stale-hash',
+        expected_target_snapshot_hash: STALE_HASH,
         current_target_snapshot_hash: before?.content_hash,
         result: 'conflict',
         dry_run: false,
       });
       expect(events[0].conflict_info).toEqual({
         reason: 'content_hash_mismatch',
-        expected_content_hash: 'stale-hash',
+        expected_content_hash: STALE_HASH,
         current_content_hash: before?.content_hash,
       });
     });
@@ -129,7 +178,7 @@ describe('put_page content hash preconditions and mutation ledger', () => {
             'This page should not be created.',
             '- 2026-04-25 | Missing page attempted update.',
           ),
-          expected_content_hash: 'expected-hash',
+          expected_content_hash: MISSING_HASH,
           session_id: sessionId,
           source_refs: ['Source: missing precondition test'],
         });
@@ -151,14 +200,68 @@ describe('put_page content hash preconditions and mutation ledger', () => {
         target_kind: 'page',
         target_id: slug,
         result: 'conflict',
-        expected_target_snapshot_hash: 'expected-hash',
+        expected_target_snapshot_hash: MISSING_HASH,
         current_target_snapshot_hash: null,
         source_refs: ['Source: missing precondition test'],
       });
       expect(events[0].conflict_info).toEqual({
         reason: 'missing_page',
-        expected_content_hash: 'expected-hash',
+        expected_content_hash: MISSING_HASH,
       });
+    });
+  });
+
+  test('conflict ledger failure preserves write_conflict and does not mutate the page', async () => {
+    await withSqliteEngine(async (ctx) => {
+      const put = getOperation('put_page');
+      const slug = 'concepts/conflict-ledger-failure';
+
+      await put.handler(ctx, {
+        slug,
+        content: pageContent(
+          'Conflict Ledger Failure',
+          'Original compiled truth.',
+          '- 2026-04-25 | Initial evidence.',
+        ),
+      });
+      const before = await ctx.engine.getPage(slug);
+      expect(before?.content_hash).toBeTruthy();
+
+      const originalCreateMemoryMutationEvent = ctx.engine.createMemoryMutationEvent.bind(ctx.engine);
+      ctx.engine.createMemoryMutationEvent = async (input) => {
+        if (input.session_id === 'put-page-conflict-ledger-failure-session') {
+          throw new Error('ledger write failed');
+        }
+        return originalCreateMemoryMutationEvent(input);
+      };
+
+      let error: unknown;
+      try {
+        await put.handler(ctx, {
+          slug,
+          content: pageContent(
+            'Conflict Ledger Failure',
+            'This content should not be written.',
+            '- 2026-04-25 | Failed conflict audit attempted update.',
+          ),
+          expected_content_hash: STALE_HASH,
+          session_id: 'put-page-conflict-ledger-failure-session',
+          source_refs: ['Source: conflict ledger failure test'],
+        });
+      } catch (caught) {
+        error = caught;
+      }
+
+      expect(error).toBeInstanceOf(OperationError);
+      expect((error as OperationError).code).toBe('write_conflict');
+      expect((error as Error).message).toContain('content hash mismatch');
+      expect(await ctx.engine.getPage(slug)).toMatchObject({
+        content_hash: before?.content_hash,
+        compiled_truth: before?.compiled_truth,
+      });
+      expect(await ctx.engine.listMemoryMutationEvents({
+        session_id: 'put-page-conflict-ledger-failure-session',
+      })).toEqual([]);
     });
   });
 
@@ -221,6 +324,32 @@ describe('put_page content hash preconditions and mutation ledger', () => {
     });
   });
 
+  test('string-list source_refs are accepted and normalized for put_page audit', async () => {
+    await withSqliteEngine(async (ctx) => {
+      const put = getOperation('put_page');
+      const slug = 'concepts/string-list-source-refs';
+      const sessionId = 'put-page-string-list-source-refs-session';
+
+      await put.handler(ctx, {
+        slug,
+        content: pageContent(
+          'String List Source Refs',
+          'String-list source refs should be accepted.',
+          '- 2026-04-25 | String list source refs test.',
+        ),
+        session_id: sessionId,
+        source_refs: 'Source: string list one\nSource: string list two',
+      });
+
+      const events = await ctx.engine.listMemoryMutationEvents({ session_id: sessionId });
+      expect(events).toHaveLength(1);
+      expect(events[0].source_refs).toEqual([
+        'Source: string list one',
+        'Source: string list two',
+      ]);
+    });
+  });
+
   test('normal put_page without audit params records an applied ledger event using defaults', async () => {
     await withSqliteEngine(async (ctx) => {
       const put = getOperation('put_page');
@@ -237,10 +366,9 @@ describe('put_page content hash preconditions and mutation ledger', () => {
       expect(result).toMatchObject({ slug, status: 'created_or_updated' });
 
       const page = await ctx.engine.getPage(slug);
-      const events = await ctx.engine.listMemoryMutationEvents({ session_id: 'put_page:direct' });
+      const events = await ctx.engine.listMemoryMutationEvents({ target_id: slug });
       expect(events).toHaveLength(1);
       expect(events[0]).toMatchObject({
-        session_id: 'put_page:direct',
         realm_id: 'work',
         actor: 'mbrain:put_page',
         operation: 'put_page',
@@ -252,6 +380,142 @@ describe('put_page content hash preconditions and mutation ledger', () => {
         current_target_snapshot_hash: page?.content_hash,
         result: 'applied',
         dry_run: false,
+      });
+      expect(events[0].session_id).toMatch(/^put_page:direct:/);
+    });
+  });
+
+  test('default audit session ids are unique for unrelated direct writes', async () => {
+    await withSqliteEngine(async (ctx) => {
+      const put = getOperation('put_page');
+
+      await put.handler(ctx, {
+        slug: 'concepts/default-session-one',
+        content: pageContent(
+          'Default Session One',
+          'First direct write.',
+          '- 2026-04-25 | First default session id test.',
+        ),
+      });
+      await put.handler(ctx, {
+        slug: 'concepts/default-session-two',
+        content: pageContent(
+          'Default Session Two',
+          'Second direct write.',
+          '- 2026-04-25 | Second default session id test.',
+        ),
+      });
+
+      const one = await ctx.engine.listMemoryMutationEvents({ target_id: 'concepts/default-session-one' });
+      const two = await ctx.engine.listMemoryMutationEvents({ target_id: 'concepts/default-session-two' });
+      expect(one).toHaveLength(1);
+      expect(two).toHaveLength(1);
+      expect(one[0].session_id).toMatch(/^put_page:direct:/);
+      expect(two[0].session_id).toMatch(/^put_page:direct:/);
+      expect(one[0].session_id).not.toBe(two[0].session_id);
+    });
+  });
+
+  test('explicit audit session_id is preserved', async () => {
+    await withSqliteEngine(async (ctx) => {
+      const put = getOperation('put_page');
+      const slug = 'concepts/explicit-session-preserved';
+
+      await put.handler(ctx, {
+        slug,
+        content: pageContent(
+          'Explicit Session Preserved',
+          'Explicit audit session ids should be preserved.',
+          '- 2026-04-25 | Explicit session id test.',
+        ),
+        session_id: 'put-page-explicit-session',
+      });
+
+      const events = await ctx.engine.listMemoryMutationEvents({ target_id: slug });
+      expect(events).toHaveLength(1);
+      expect(events[0].session_id).toBe('put-page-explicit-session');
+    });
+  });
+
+  test('applied ledger failure rolls back the page mutation', async () => {
+    await withSqliteEngine(async (ctx) => {
+      const put = getOperation('put_page');
+      const slug = 'concepts/applied-ledger-rollback';
+
+      await put.handler(ctx, {
+        slug,
+        content: pageContent(
+          'Applied Ledger Rollback',
+          'Original compiled truth.',
+          '- 2026-04-25 | Initial evidence.',
+        ),
+      });
+      const before = await ctx.engine.getPage(slug);
+      expect(before?.content_hash).toBeTruthy();
+
+      const originalCreateMemoryMutationEvent = ctx.engine.createMemoryMutationEvent.bind(ctx.engine);
+      ctx.engine.createMemoryMutationEvent = async (input) => {
+        if (input.session_id === 'put-page-applied-ledger-failure-session') {
+          throw new Error('ledger write failed');
+        }
+        return originalCreateMemoryMutationEvent(input);
+      };
+
+      await expect(put.handler(ctx, {
+        slug,
+        content: pageContent(
+          'Applied Ledger Rollback',
+          'This update should roll back when ledger recording fails.',
+          '- 2026-04-25 | Ledger failure attempted update.',
+        ),
+        expected_content_hash: before?.content_hash,
+        session_id: 'put-page-applied-ledger-failure-session',
+        source_refs: ['Source: applied ledger failure test'],
+      })).rejects.toThrow(/ledger write failed/);
+
+      const after = await ctx.engine.getPage(slug);
+      expect(after?.content_hash).toBe(before?.content_hash);
+      expect(after?.compiled_truth).toBe(before?.compiled_truth);
+      expect(await ctx.engine.listMemoryMutationEvents({
+        session_id: 'put-page-applied-ledger-failure-session',
+      })).toEqual([]);
+    });
+  });
+
+  test('oversized content returns import error and records a failed ledger event', async () => {
+    await withSqliteEngine(async (ctx) => {
+      const put = getOperation('put_page');
+      const slug = 'concepts/oversized-content';
+      const sessionId = 'put-page-oversized-session';
+
+      const result = await put.handler(ctx, {
+        slug,
+        content: 'x'.repeat(5_000_001),
+        session_id: sessionId,
+        source_refs: ['Source: oversized content test'],
+      }) as any;
+
+      expect(result).toMatchObject({
+        slug,
+        status: 'skipped',
+        chunks: 0,
+      });
+      expect(result.error).toContain('Content too large');
+      expect(await ctx.engine.getPage(slug)).toBeNull();
+
+      const events = await ctx.engine.listMemoryMutationEvents({ session_id: sessionId });
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        session_id: sessionId,
+        operation: 'put_page',
+        target_kind: 'page',
+        target_id: slug,
+        result: 'failed',
+        current_target_snapshot_hash: null,
+        source_refs: ['Source: oversized content test'],
+      });
+      expect(events[0].metadata).toMatchObject({
+        error: result.error,
       });
     });
   });
@@ -269,7 +533,7 @@ describe('put_page content hash preconditions and mutation ledger', () => {
           'This dry run should not be written.',
           '- 2026-04-25 | Dry run attempted update.',
         ),
-        expected_content_hash: 'expected-hash',
+        expected_content_hash: MISSING_HASH,
         session_id: 'put-page-dry-run-session',
       }) as any;
 

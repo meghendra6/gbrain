@@ -3,6 +3,7 @@
  * Each operation defines its schema, handler, and optional CLI hints.
  */
 
+import { randomUUID } from 'crypto';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import type { BrainEngine } from './engine.ts';
@@ -70,6 +71,7 @@ import type {
   RetrievalTraceWriteOutcome,
   ScopeGatePolicy,
 } from './types.ts';
+import { validateSlug } from './utils.ts';
 
 // --- MCP server instructions ---
 //
@@ -1255,19 +1257,44 @@ function optionalPutPageString(field: string, value: unknown): string | undefine
   return value.trim();
 }
 
+function putPageSlug(value: unknown): string {
+  const raw = optionalPutPageString('slug', value);
+  if (raw === undefined) {
+    throw new OperationError('invalid_params', 'slug must be a non-empty string');
+  }
+  try {
+    return validateSlug(raw);
+  } catch (error) {
+    throw new OperationError('invalid_params', error instanceof Error ? error.message : 'slug is invalid');
+  }
+}
+
+function putPageContent(value: unknown): string {
+  if (typeof value !== 'string') {
+    throw new OperationError('invalid_params', 'content must be a string');
+  }
+  return value;
+}
+
+function putPageExpectedContentHash(value: unknown): string | undefined {
+  const expected = optionalPutPageString('expected_content_hash', value);
+  if (expected === undefined) return undefined;
+  if (!/^[a-fA-F0-9]{64}$/.test(expected)) {
+    throw new OperationError('invalid_params', 'expected_content_hash must be a SHA-256 hex content hash');
+  }
+  return expected.toLowerCase();
+}
+
 function putPageSourceRefs(value: unknown): string[] {
-  if (value == null) {
+  const parsed = parseStringListParam(value, 'source_refs');
+  if (parsed === undefined) {
     return ['Source: mbrain put_page operation'];
   }
-  if (!Array.isArray(value) || value.length === 0) {
+  const refs = parsed.map((ref) => ref.trim()).filter((ref) => ref.length > 0);
+  if (refs.length === 0) {
     throw new OperationError('invalid_params', 'source_refs must be a non-empty array of strings');
   }
-  return value.map((ref, index) => {
-    if (typeof ref !== 'string' || ref.trim().length === 0) {
-      throw new OperationError('invalid_params', `source_refs[${index}] must be a non-empty string`);
-    }
-    return ref.trim();
-  });
+  return refs;
 }
 
 function putPageMetadata(value: unknown): Record<string, unknown> | undefined {
@@ -1275,18 +1302,94 @@ function putPageMetadata(value: unknown): Record<string, unknown> | undefined {
   if (typeof value !== 'object' || Array.isArray(value)) {
     throw new OperationError('invalid_params', 'metadata must be an object');
   }
+  assertJsonSerializable(value, 'metadata', new WeakSet<object>());
   return value as Record<string, unknown>;
+}
+
+function assertJsonSerializable(value: unknown, path: string, seen: WeakSet<object>): void {
+  if (value === null) return;
+  switch (typeof value) {
+    case 'string':
+    case 'boolean':
+      return;
+    case 'number':
+      if (!Number.isFinite(value)) {
+        throw new OperationError('invalid_params', `${path} must be JSON-serializable`);
+      }
+      return;
+    case 'object': {
+      const objectValue = value as Record<string, unknown>;
+      if (seen.has(objectValue)) {
+        throw new OperationError('invalid_params', `${path} must be JSON-serializable`);
+      }
+      seen.add(objectValue);
+      if (Array.isArray(value)) {
+        value.forEach((item, index) => assertJsonSerializable(item, `${path}[${index}]`, seen));
+        seen.delete(objectValue);
+        return;
+      }
+      const proto = Object.getPrototypeOf(value);
+      if (proto !== Object.prototype && proto !== null) {
+        throw new OperationError('invalid_params', `${path} must be JSON-serializable object data`);
+      }
+      for (const [key, entry] of Object.entries(objectValue)) {
+        assertJsonSerializable(entry, `${path}.${key}`, seen);
+      }
+      seen.delete(objectValue);
+      return;
+    }
+    default:
+      throw new OperationError('invalid_params', `${path} must be JSON-serializable`);
+  }
 }
 
 function putPageAuditContext(p: Record<string, unknown>) {
   return {
-    session_id: optionalPutPageString('session_id', p.session_id) ?? 'put_page:direct',
+    session_id: optionalPutPageString('session_id', p.session_id) ?? `put_page:direct:${randomUUID()}`,
     realm_id: optionalPutPageString('realm_id', p.realm_id) ?? 'work',
     actor: optionalPutPageString('actor', p.actor) ?? 'mbrain:put_page',
     scope_id: optionalPutPageString('scope_id', p.scope_id) ?? 'workspace:default',
     source_refs: putPageSourceRefs(p.source_refs),
     metadata: putPageMetadata(p.metadata),
     redaction_visibility: 'visible' as const,
+  };
+}
+
+type PutPageAuditContext = ReturnType<typeof putPageAuditContext>;
+
+async function recordPutPageConflict(
+  engine: BrainEngine,
+  audit: PutPageAuditContext,
+  input: {
+    slug: string;
+    expectedContentHash: string;
+    currentContentHash: string | null;
+    conflictInfo: Record<string, unknown>;
+  },
+): Promise<void> {
+  try {
+    await recordMemoryMutationEvent(engine, {
+      ...audit,
+      operation: 'put_page',
+      target_kind: 'page',
+      target_id: input.slug,
+      expected_target_snapshot_hash: input.expectedContentHash,
+      current_target_snapshot_hash: input.currentContentHash,
+      result: 'conflict',
+      conflict_info: input.conflictInfo,
+      dry_run: false,
+    });
+  } catch {
+    // Conflict auditing is best effort so write_conflict remains the surfaced failure.
+  }
+}
+
+function putPageOperationResult(result: { slug: string; status: string; chunks: number; error?: string }) {
+  return {
+    slug: result.slug,
+    status: result.status === 'imported' ? 'created_or_updated' : result.status,
+    chunks: result.chunks,
+    ...(result.error ? { error: result.error } : {}),
   };
 }
 
@@ -1307,65 +1410,90 @@ const put_page: Operation = {
   mutating: true,
   handler: async (ctx, p) => {
     if (ctx.dryRun) return { dry_run: true, action: 'put_page', slug: p.slug };
-    const slug = p.slug as string;
+    const slug = putPageSlug(p.slug);
+    const content = putPageContent(p.content);
     const audit = putPageAuditContext(p);
-    const expectedContentHash = optionalPutPageString('expected_content_hash', p.expected_content_hash);
-    const existing = await ctx.engine.getPage(slug);
-    const previousHash = existing?.content_hash ?? null;
+    const expectedContentHash = putPageExpectedContentHash(p.expected_content_hash);
+    const outcome = await ctx.engine.transaction(async (tx) => {
+      const existing = await tx.getPage(slug);
+      const previousHash = existing?.content_hash ?? null;
 
-    if (expectedContentHash !== undefined && !existing) {
-      await recordMemoryMutationEvent(ctx.engine, {
-        ...audit,
-        operation: 'put_page',
-        target_kind: 'page',
-        target_id: slug,
-        expected_target_snapshot_hash: expectedContentHash,
-        current_target_snapshot_hash: null,
-        result: 'conflict',
-        conflict_info: {
-          reason: 'missing_page',
-          expected_content_hash: expectedContentHash,
-        },
-        dry_run: false,
-      });
-      throw new OperationError('write_conflict', `Page not found for expected content hash: ${slug}`);
-    }
+      if (expectedContentHash !== undefined && !existing) {
+        await recordPutPageConflict(tx, audit, {
+          slug,
+          expectedContentHash,
+          currentContentHash: null,
+          conflictInfo: {
+            reason: 'missing_page',
+            expected_content_hash: expectedContentHash,
+          },
+        });
+        return {
+          kind: 'conflict' as const,
+          error: new OperationError('write_conflict', `Page not found for expected content hash: ${slug}`),
+        };
+      }
 
-    if (expectedContentHash !== undefined && previousHash !== expectedContentHash) {
-      await recordMemoryMutationEvent(ctx.engine, {
-        ...audit,
-        operation: 'put_page',
-        target_kind: 'page',
-        target_id: slug,
-        expected_target_snapshot_hash: expectedContentHash,
-        current_target_snapshot_hash: previousHash,
-        result: 'conflict',
-        conflict_info: {
-          reason: 'content_hash_mismatch',
-          expected_content_hash: expectedContentHash,
-          current_content_hash: previousHash,
-        },
-        dry_run: false,
-      });
-      throw new OperationError('write_conflict', `content hash mismatch for ${slug}`);
-    }
+      if (expectedContentHash !== undefined && previousHash !== expectedContentHash) {
+        await recordPutPageConflict(tx, audit, {
+          slug,
+          expectedContentHash,
+          currentContentHash: previousHash,
+          conflictInfo: {
+            reason: 'content_hash_mismatch',
+            expected_content_hash: expectedContentHash,
+            current_content_hash: previousHash,
+          },
+        });
+        return {
+          kind: 'conflict' as const,
+          error: new OperationError('write_conflict', `content hash mismatch for ${slug}`),
+        };
+      }
 
-    const result = await importFromContent(ctx.engine, slug, p.content as string);
-    if (result.status === 'imported') {
-      const finalPage = await ctx.engine.getPage(slug);
-      await recordMemoryMutationEvent(ctx.engine, {
-        ...audit,
-        operation: 'put_page',
-        target_kind: 'page',
-        target_id: slug,
-        expected_target_snapshot_hash: expectedContentHash ?? previousHash,
-        current_target_snapshot_hash: finalPage?.content_hash ?? null,
-        result: 'applied',
-        conflict_info: null,
-        dry_run: false,
-      });
+      const result = await importFromContent(tx, slug, content);
+      if (result.status === 'imported') {
+        const finalPage = await tx.getPage(slug);
+        if (!finalPage?.content_hash) {
+          throw new OperationError('storage_error', `put_page import did not produce a final content hash for ${slug}`);
+        }
+        await recordMemoryMutationEvent(tx, {
+          ...audit,
+          operation: 'put_page',
+          target_kind: 'page',
+          target_id: slug,
+          expected_target_snapshot_hash: expectedContentHash ?? previousHash,
+          current_target_snapshot_hash: finalPage.content_hash,
+          result: 'applied',
+          conflict_info: null,
+          dry_run: false,
+        });
+      } else if (result.error) {
+        await recordMemoryMutationEvent(tx, {
+          ...audit,
+          operation: 'put_page',
+          target_kind: 'page',
+          target_id: slug,
+          expected_target_snapshot_hash: expectedContentHash ?? previousHash,
+          current_target_snapshot_hash: previousHash,
+          result: 'failed',
+          conflict_info: null,
+          dry_run: false,
+          metadata: {
+            ...(audit.metadata ?? {}),
+            import_status: result.status,
+            error: result.error,
+          },
+        });
+      }
+
+      return { kind: 'result' as const, result };
+    });
+
+    if (outcome.kind === 'conflict') {
+      throw outcome.error;
     }
-    return { slug: result.slug, status: result.status === 'imported' ? 'created_or_updated' : result.status, chunks: result.chunks };
+    return putPageOperationResult(outcome.result);
   },
   cliHints: { name: 'put', positional: ['slug'], stdin: 'content' },
 };

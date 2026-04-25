@@ -20,10 +20,17 @@ describe('SQLite-first product messaging', () => {
   test('README starts users on local SQLite and keeps managed Postgres optional', () => {
     const readme = readRepoFile('README.md');
 
-    expect(readme).toContain('**Act 2: Import (local SQLite).**');
+    expect(readme).toContain('MBrain is a local SQLite memory layer for one person');
     expect(readme).toContain('mbrain init --local');
+    expect(readme).toContain('No Supabase, OpenAI,');
+    expect(readme).toContain('SQLite is the recommended engine');
+    expect(readme).toContain('single-user');
+    expect(readme).toContain('personal brain');
+    expect(readme).toContain('Postgres remains optional');
+    expect(readme).toContain('managed scale and remote/cloud');
     expect(readme).toContain('Managed Postgres');
-    expect(readme).toContain('For local/default verification, run `bun test`');
+    expect(readme).toContain('For local/default verification, run:');
+    expect(readme).toContain('bun test');
     expect(readme).toContain('bun run test:e2e:sqlite');
     expect(readme).not.toContain('Imported 342 files into Supabase');
     expect(readme).not.toContain('walk through Supabase setup');
@@ -33,8 +40,12 @@ describe('SQLite-first product messaging', () => {
   test('README does not advertise shipped SQLite support as future work', () => {
     const readme = readRepoFile('README.md');
 
+    expect(readme).toContain('began as a fork of [garrytan/gbrain]');
     expect(readme).toContain('SQLiteEngine');
-    expect(readme).toContain('**SQLite/local:** JSON payloads are stored as text');
+    expect(readme).toContain('SQLite uses FTS5');
+    expect(readme).toContain('stored-vector local cosine scan');
+    expect(readme).toContain('Memory Inbox');
+    expect(readme).toContain('candidate status events');
     expect(readme).toContain('Managed Postgres storage estimates');
     expect(readme).toContain('Historical v0 spec');
     expect(readme).not.toContain('designed, community PRs welcome');

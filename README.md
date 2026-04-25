@@ -1,303 +1,427 @@
 # MBrain
 
-The memex Vannevar Bush imagined, built for people who think for a living.
-
-## How this happened
-
-I was setting up my [OpenClaw](https://openclaw.ai) agent and started a markdown brain repo. One page per person, one page per company, compiled truth on top, append-only timeline on the bottom. The agent got smarter the more it knew, so I kept feeding it. Meetings, emails, tweets, Apple Notes, calendar data, original ideas. One thing led to another. Within a week I had:
-
-- **10,000+ markdown files** indexed and searchable
-- **3,000+ people** with compiled dossiers and relationship history
-- **13 years of calendar data** (21,000+ events)
-- **5,800+ Apple Notes** going back to 2009
-- **280+ meeting transcripts** with AI analysis
-- **300+ captured original ideas** organized by thesis
-- **500+ media pages** (video transcripts, books, articles)
-- Company profiles, food guides, travel logs
-
-This is what I actually use day to day. The agent runs while I sleep... literally. The dream cycle scans every conversation from the day, enriches missing entities, fixes broken citations, and consolidates memory. I wake up and the brain is smarter than when I went to sleep. OpenClaw ships this as DREAMS.md. Hermes Agent can do the same with a nightly cron job (see the [SKILLPACK](docs/MBRAIN_SKILLPACK.md#the-dream-cycle) for setup).
-
-**You don't need Postgres to start.** The knowledge model is just markdown files in a git repo. The [skills](docs/MBRAIN_SKILLPACK.md) and [schema](docs/MBRAIN_RECOMMENDED_SCHEMA.md) work with any AI agent that can read and write files. Start there.
-
-**You also don't need cloud services anymore.** `mbrain init --local` now boots a full local/offline brain on SQLite, `mbrain serve` exposes the same MCP tools over stdio, and Codex or Claude Code can attach to it without Supabase, OpenAI, or Anthropic in the loop. Local embeddings are optional and backfill-driven: import/sync stay usable immediately, and semantic retrieval comes online once you configure a local runtime and run `mbrain embed --stale`. The default local model is `nomic-embed-text`, and MBrain applies `search_document:` / `search_query:` prefixes internally for retrieval. Detailed guides: [English](docs/local-offline.md) / [한국어](docs/local-offline.ko.md).
-
-I added Postgres + pgvector later because at 1,000 to 10,000 long markdown docs, `grep` stops working. You need real chunking, real retrieval, real search. MBrain now supports both that managed path and a local/offline SQLite path, optimized for OpenClaw and smart agents.
-
-### Ask it anything
-
-> "Who should I invite to dinner who knows both Pedro and Diana?"
-> — cross-references the social graph across 3,000+ people pages
-
-> "What have I said about the relationship between shame and founder performance?"
-> — searches YOUR thinking, not the internet
-
-> "What changed with the Series A since Tuesday?"
-> — diffs timeline entries across deal and company pages
-
-> "How does operator fusion work across PyTorch and LLVM?"
-> — reads concept + system maps first, then jumps to the 2-3 source files that matter
-
-> "Prep me for my meeting with Jordan in 30 minutes"
-> — pulls dossier, shared history, recent activity, open threads
-
-Your markdown repo is the source of truth. MBrain makes it searchable. Your AI agent makes it live.
-
-## Why an Index Still Matters
-
-At 500 files, `grep` is fine. At 3,000 people pages, 5,800 Apple Notes, and 13 years of calendar data, `grep` falls apart. You need keyword search for exact names, vector search for semantic meaning, and something that fuses both. You need an index that updates incrementally when one file changes, not a full directory walk. You need your agent to find "everyone who was at the board dinner last March" in milliseconds, not 30 seconds of grepping.
-
-MBrain gives you hybrid search that combines keyword and vector approaches, plus a knowledge model that treats every page like an intelligence assessment: compiled truth on top (your current best understanding, rewritten when evidence changes), append-only timeline on the bottom (the evidence trail that never gets edited).
-
-AI agents maintain the brain. You ingest a document and the agent updates every entity mentioned, creates cross-reference links, and appends timeline entries. MCP clients query it. The intelligence lives in fat markdown skills, not application code.
-
-## The Compounding Thesis
-
-Most tools help you find things. MBrain makes you smarter over time.
-
-The core loop:
-
-```
-Signal arrives (meeting, email, tweet, link)
-  → Agent detects entities (people, companies, ideas, systems, technical concepts)
-  → READ: check the brain first (mbrain search, mbrain get)
-  → Respond with full context
-  → WRITE: update brain pages with new information
-  → Sync: mbrain indexes changes for next query
-```
-
-Every cycle through this loop adds knowledge. The agent enriches a person page after a meeting. Next time that person comes up, the agent already has context — their role, your history, what they care about, what you discussed last time. You never start from zero.
-
-An agent without this loop answers from stale context. An agent with it gets smarter every conversation. The difference compounds daily.
-
-Never do anything twice. If you look someone up once, that lookup lives in the brain forever. If a pattern emerges across three meetings, the agent captures it. If you generate an original idea in conversation, it goes to `originals/` — your searchable intellectual archive.
-
-## Architecture
-
-```
-┌──────────────────┐    ┌───────────────┐    ┌──────────────────┐
-│   Brain Repo     │    │    MBrain     │    │    AI Agent      │
-│   (git)          │    │  (retrieval)  │    │  (read/write)    │
-│                  │    │               │    │                  │
-│  markdown files  │───>│  SQLite or    │<──>│  skills define   │
-│  = source of     │    │  Postgres     │    │  HOW to use the  │
-│    truth         │    │               │    │  brain           │
-│                  │<───│  hybrid       │    │                  │
-│  human can       │    │  search       │    │  entity detect   │
-│  always read     │    │  (vector +    │    │  enrich          │
-│  & edit          │    │   keyword +   │    │  ingest          │
-│                  │    │   RRF)        │    │  brief           │
-└──────────────────┘    └───────────────┘    └──────────────────┘
-```
-
-The repo is the system of record. MBrain is the retrieval layer. The agent reads and writes through both. Human always wins — you can edit any markdown file directly and `mbrain sync` picks up the changes. In managed mode that retrieval layer is Postgres + pgvector; in local/offline mode it is SQLite plus the same CLI/MCP contract.
-
-## What a Production Agent Looks Like
-
-The numbers above aren't theoretical. They come from a real deployment documented in [MBRAIN_SKILLPACK.md](docs/MBRAIN_SKILLPACK.md) — a reference architecture for how a production AI agent uses mbrain as its knowledge backbone.
-
-**Read the skillpack.** It's the most important doc in this repo. It tells your agent HOW to use mbrain, not just what commands exist:
-
-- **The brain-agent loop** — the read-write cycle that makes knowledge compound
-- **Entity detection** — spawn on every message, capture people/companies/original ideas
-- **Technical knowledge maps** — map concepts across codebases before reading source
-- **Enrichment pipeline** — 7-step protocol with tiered API spend
-- **Meeting ingestion** — transcript to brain pages with entity propagation
-- **Source attribution** — every fact traceable to where it came from
-- **Reference cron schedule** — 20+ recurring jobs that keep the brain alive
-
-Without the skillpack, your agent has tools but no playbook. With it, the agent knows when to read, when to write, how to enrich, and how to keep the brain alive autonomously. It's a pattern book, not a tutorial. "Here's what works, here's why."
-
-## How mbrain fits with OpenClaw/Hermes
-
-MBrain is world knowledge — people, companies, deals, meetings, concepts, your original thinking. It's the long-term memory of what you know about the world.
-
-[OpenClaw](https://openclaw.ai) agent memory (`memory_search`) is operational state — preferences, decisions, session context, how the agent should behave.
-
-They're complementary:
-
-| Layer | What it stores | How to query |
-|-------|---------------|-------------|
-| **mbrain** | People, companies, meetings, ideas, media | `mbrain search`, `mbrain query`, `mbrain get` |
-| **Agent memory** | Preferences, decisions, operational config | `memory_search` |
-| **Session context** | Current conversation | (automatic) |
-
-All three should be checked. MBrain for facts about the world. Memory for agent config. Session for immediate context. Install via `openclaw skills install mbrain`.
-
-## Try it: your files, searchable in 90 seconds
-
-MBrain doesn't ship with demo data. It finds YOUR markdown and makes it searchable.
-
-**Act 1: Discovery.** MBrain scans your machine for markdown repos.
-
-```
-=== MBrain Environment Discovery ===
-
-  ~/git/brain (2.3GB, 342 .md files, 87 binary files)
-    Type: Plain markdown (ready for import)
-
-  ~/Documents/obsidian-vault (180MB, 1,203 .md files, 0 binary files)
-    Type: Obsidian vault (wikilink conversion available)
-
-=== Discovery Complete ===
-```
-
-**Act 2: Import (local SQLite).** Your files move from the repo into `~/.mbrain/brain.db`.
-
-```bash
-mbrain init --local
-mbrain import ~/git/brain/
-# Imported 342 files into local SQLite (1,847 chunks). Embeddings deferred.
-
-mbrain stats
-# Pages: 342, Chunks: 1,847, Embedded: 0, Links: 0
-```
-
-**Act 3: Search.** The agent picks a query from your actual content.
-
-```bash
-# The agent reads your corpus and picks a relevant query
-mbrain query "what do we know about competitive dynamics?"
-# 3 results, scored by hybrid search (vector + keyword + RRF fusion)
-
-mbrain embed --stale
-
-# After local embeddings are backfilled:
-mbrain stats
-# Pages: 342, Chunks: 1,847, Embedded: 1,847, Links: 0
-
-# Now semantic search is live too
-mbrain query "what are our biggest risks right now?"
-# Finds pages about moats, board prep, and strategy -- by meaning, not keywords
-```
-
-Your file count will be different. Your queries will be different. The agent picks them based on what it imported. That's the point: this is YOUR brain, not a demo.
-
-**The compounding effect.** Search for Pedro. The agent pulls his page, his relationship history, his company. Next time Brex comes up in conversation, the agent already knows Pedro co-founded it, what you discussed last, and what's on your open threads. You didn't do anything — the brain already had it.
-
-## Install
-
-### Prerequisites
-
-**Local/offline (SQLite, no cloud)** is now a first-class path: run `mbrain init --local` to create `~/.mbrain/brain.db`, keep your repo on disk, and expose the same tools over `mbrain serve`. Keyword search works immediately. Semantic embeddings are optional, backfill-driven, and only require a local Ollama-compatible runtime when you want them. Step-by-step guides: [English](docs/local-offline.md) / [한국어](docs/local-offline.ko.md).
-
-**Managed Postgres** still matters when you want pgvector at scale, remote MCP deployment, or cloud file/storage workflows. For that path, MBrain needs three things:
-
-| Dependency | What it's for | How to get it |
-|------------|--------------|---------------|
-| **Supabase account** | Postgres + pgvector database | [supabase.com](https://supabase.com) (Pro tier, $25/mo for 8GB) |
-| **Local embedding runtime** | Embeddings (`nomic-embed-text`) | `ollama pull nomic-embed-text` |
-| **Anthropic API key** | Multi-query expansion + LLM chunking (Haiku) | [console.anthropic.com](https://console.anthropic.com) |
-
-Set the Anthropic API key as an environment variable:
-
-```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-```
-
-The Supabase connection URL is configured during `mbrain init`. Anthropic reads
-its key from the environment automatically. Embeddings come from the local
-provider (`OLLAMA_HOST` or `MBRAIN_LOCAL_EMBEDDING_URL`) and default to
-`nomic-embed-text`.
-
-Without a local embedding runtime, search still works (keyword only, no vector search). Without an Anthropic key, search still works (no multi-query expansion, no LLM chunking).
-
-### With OpenClaw or Hermes Agent (recommended)
-
-To install, paste this into [OpenClaw](https://openclaw.ai) or [Hermes Agent](https://github.com/NousResearch/hermes-agent) and we'll work with you to do the rest:
-
-```
-Set up mbrain (https://github.com/meghendra6/mbrain) as my
-knowledge brain.
-
-1. Make sure bun is installed:
-   curl -fsSL https://bun.com/install | bash
-   Then run: bun add github:meghendra6/mbrain
-
-2. Run: mbrain init --local
-   (create my local SQLite brain at ~/.mbrain/brain.db)
-
-3. Scan ~/git/ and ~/Documents/ for markdown repos,
-   pick the best one, and run: mbrain import <path>
-
-4. Run a query against the imported data to prove search works
-
-5. Read docs/MBRAIN_RECOMMENDED_SCHEMA.md and offer to
-   restructure my knowledge base
-
-6. Read docs/MBRAIN_SKILLPACK.md and update all your skills
-   with the production agent patterns: brain-agent loop,
-   entity detection, source attribution, iron law back-linking,
-   and the enrichment pipeline
-
-7. Set up a daily cron for `mbrain check-update`.
-   Notify me on new features only, not patches.
-   Never auto-install, just tell me what's new.
-
-8. Set up automatic sync so the vector DB stays current
-   with the brain repo. Read MBRAIN_SKILLPACK.md Section 18
-   for approaches (cron, --watch, webhook). Pick what fits
-   your environment. Always chain:
-   mbrain sync --repo <path> && mbrain embed --stale
-   Verify: push a change, confirm it appears in search.
-
-9. Run the verification runbook (docs/MBRAIN_VERIFY.md)
-   to confirm everything works: schema, sync, embeddings,
-   brain-first lookup.
-```
-
-OpenClaw will install mbrain, create the local SQLite brain, discover your markdown files, import them, and prove search works with a query from your data.
-
-After setup, you talk to your brain through OpenClaw:
-
-```
-Search the brain for everything we know about [topic]
-Ingest my meeting notes from today
-Give me a briefing for my meetings tomorrow
-How many pages are in the brain now?
-```
-
-MBrain keeps your brain current. After setup, `mbrain sync --watch` polls your git repo and imports only what changed. Binary files (images, PDFs, audio) can be moved to cloud storage with `mbrain files mirror` to slim down your git repo.
-
-> **Managed Postgres settings:** If you choose `mbrain init --supabase` instead of local SQLite,
-> MBrain connects directly to Postgres (not the REST API).
-> You need the **Shared Pooler connection string**, not the project URL or anon key.
-> Find it: go to your project, click **Get Connected** next to the project URL,
-> then **Direct Connection String** > **Session Pooler**, and copy the
-> **Shared Pooler** connection string.
-
-### MBrain without OpenClaw
-
-MBrain works with any AI agent, any MCP client, or no agent at all. Three paths:
-
-#### Standalone CLI
-
-Install globally and use mbrain from the terminal:
+MBrain is a local SQLite memory layer for one person and their local AI agents.
+Your Markdown stays readable. The database makes it searchable, resumable, and
+usable through CLI or MCP.
+
+The default path is simple:
 
 ```bash
 bun add -g github:meghendra6/mbrain
-mbrain init --local             # boot a local/offline SQLite brain
-mbrain import ~/git/brain/      # index your markdown into SQLite
-mbrain query "what do we know about competitive dynamics?"
-mbrain embed --stale            # optional: backfill semantic embeddings (defaults to Ollama on 127.0.0.1:11434)
+mbrain init --local
+# Import any directory of Markdown files.
+mbrain import ~/git/brain
+mbrain query "what do we know about product strategy?"
+mbrain serve
 ```
 
-The CLI gives you page CRUD, search, tags, links, timeline, graph traversal, health checks, and MCP serve in both profiles. Cloud file/storage commands remain Postgres-only today and return honest unsupported-capability errors in sqlite/local mode. Run `mbrain --help` for the full list.
+That creates a local SQLite brain at `~/.mbrain/brain.db`. No Supabase, OpenAI,
+Anthropic, or hosted database is required to start. `mbrain serve` is the
+long-running stdio MCP process your agent connects to.
 
-If you want a copy-paste, first-day local setup guide, use:
+## Why This Exists
 
-- [docs/local-offline.md](docs/local-offline.md)
-- [docs/local-offline.ko.md](docs/local-offline.ko.md)
+LLM context is temporary. Agent memory is often operational and narrow. A real
+personal brain needs something more durable:
 
-#### Local MCP server (Codex, Claude Code, Cursor, Windsurf, etc.)
+- notes you can read and edit directly
+- provenance for facts and claims
+- search that works across thousands of pages
+- task state that survives across sessions
+- scoped personal memory that does not leak into work by default
+- a review path for uncertain or inferred claims
+- an MCP surface that agents can use without learning a separate app
 
-MBrain exposes 30 MCP tools via stdio. Initialize `mbrain init --local` first so `mbrain serve` reads your SQLite/offline config, then attach your MCP client:
+MBrain keeps Markdown as the source of truth and uses the database as an index,
+memory substrate, and operational record. Humans can still open the repo, edit a
+page, review a diff, and repair mistakes.
 
-**Codex**
+## The Core Loop
+
+MBrain is built around the brain-agent loop:
+
+```text
+Signal arrives: meeting, note, task, code question, conversation
+  -> Agent detects entities, concepts, tasks, and memory candidates
+  -> Agent reads the brain first
+  -> Agent answers with context and provenance
+  -> Agent writes durable updates to the right memory domain
+  -> MBrain syncs, indexes, embeds, audits, and prepares the next read
+```
+
+The point is compounding context. If an agent learns something once, it should not
+have to rediscover it in the next session.
+
+## Quick Start: Local SQLite
+
+Any directory of Markdown files can be a brain repo. If you do not have one yet,
+make a tiny one first:
+
+```bash
+mkdir -p ~/tmp/mbrain-demo/concepts
+printf '%s\n' '# First note' '' 'MBrain should remember this local demo note.' > ~/tmp/mbrain-demo/concepts/first-note.md
+```
+
+### 1. Install Bun
+
+```bash
+curl -fsSL https://bun.com/install | bash
+exec "$SHELL"
+bun --version
+```
+
+### 2. Install MBrain
+
+```bash
+bun add -g github:meghendra6/mbrain
+mbrain --version
+```
+
+### 3. Create a local brain
+
+```bash
+mbrain init --local
+```
+
+This writes `~/.mbrain/config.json` and creates a SQLite database. The default
+database is `~/.mbrain/brain.db`, stored in config as an expanded absolute path.
+
+Use a custom path if you want the database somewhere else:
+
+```bash
+mbrain init --local --path ~/brains/personal-brain.db
+```
+
+### 4. Import your Markdown
+
+```bash
+mbrain import ~/tmp/mbrain-demo
+```
+
+Import is idempotent. Re-running it skips unchanged files by content hash. In
+local mode, import writes pages and chunks first; embeddings are deferred so the
+brain is usable immediately.
+
+When you are ready, replace `~/tmp/mbrain-demo` with your real notes directory,
+for example `~/git/brain` or an Obsidian vault.
+
+### 5. Search
+
+```bash
+mbrain search "local demo"
+mbrain query "what should MBrain remember?"
+mbrain stats
+mbrain health
+```
+
+Keyword search works immediately through SQLite FTS5. Semantic search comes
+online after embeddings are backfilled.
+
+### 6. Add optional local embeddings
+
+MBrain defaults to a local Ollama-compatible embedding runtime and
+`nomic-embed-text`.
+
+```bash
+ollama pull nomic-embed-text
+mbrain embed --stale
+```
+
+Runtime resolution order:
+
+1. `MBRAIN_LOCAL_EMBEDDING_URL`
+2. `OLLAMA_HOST`
+3. `http://127.0.0.1:11434/api/embed`
+
+MBrain applies `search_document:` and `search_query:` prefixes internally for
+`nomic-embed-text`.
+
+### 7. Connect an agent
+
+For Codex, Claude Code, or another stdio MCP client:
+
+```bash
+mbrain serve
+```
+
+Or let MBrain register the local MCP server and install the agent rules:
+
+```bash
+mbrain setup-agent
+mbrain setup-agent --codex
+mbrain setup-agent --claude
+```
+
+The agent rules matter. The MCP tools give an agent access to the brain; the
+rules teach it when to read, when to write, how to cite, and how to avoid
+writing the wrong thing into memory.
+
+## What You Can Ask
+
+Once your notes are imported, the useful questions are the ones only your brain
+can answer:
+
+```text
+Search the brain for what we know about the Series A.
+What did I decide last time I investigated SQLite vs Postgres?
+Resume the task about candidate status events.
+What personal preferences should the agent remember about scheduling?
+Show me stale memory candidates that need review.
+Find the exact page or section that mentions operator fusion.
+Map this codebase before changing retrieval routing.
+Give me a bounded briefing for tomorrow's meetings.
+```
+
+MBrain is not a chat UI. It is the memory layer beneath the agent or CLI you
+already use.
+
+## How It Works
+
+MBrain has three moving parts:
+
+| Piece | What it does |
+|---|---|
+| Markdown repo | The human-readable source of truth. You can edit it, diff it, and repair it directly. |
+| SQLite index | The local database that stores pages, chunks, links, embeddings, tasks, and governed memory state. |
+| Agent loop | The behavior that reads first, answers with context, writes back with provenance, and syncs changes. |
+
+From there, MBrain adds stricter memory domains only where they help: task state
+for resuming work, profile memory for scoped personal facts, and the Memory
+Inbox for uncertain claims that need review before they become durable memory.
+
+## Markdown Pages
+
+Curated knowledge pages use the compiled truth + timeline pattern:
+
+```markdown
+---
+type: concept
+title: Do Things That Don't Scale
+tags: [startups, growth]
+---
+
+Paul Graham's argument that startups should do unscalable things early on.
+The key point is that the unscalable work teaches you what users actually want.
+
+---
+
+- 2013-07-01 | Published on paulgraham.com
+- 2026-04-25 | Referenced during onboarding strategy discussion
+```
+
+Above the separator is compiled truth: the current best understanding. Below the
+separator is the evidence timeline: append-only history.
+
+The compiled truth is what you read first. The timeline is how you audit it.
+
+## Long-Term Memory Governance
+
+Agents infer things. Some inferences are useful. Some are wrong. MBrain does not
+treat every inferred claim as durable memory.
+
+Example: an agent hears that you now prefer decaf after lunch. It should not
+overwrite an older espresso preference without evidence. It can store the new
+claim as a candidate, keep the source reference, ask for review, and then promote
+or reject it.
+
+That review flow is the Memory Inbox:
+
+```text
+captured -> candidate -> staged_for_review
+                    -> promoted
+                    -> rejected
+                    -> superseded
+```
+
+The system keeps the audit trail behind that flow:
+
+- source references for every promotable claim
+- candidate status events
+- promotion preflight checks
+- rejection reasons
+- supersession links when newer memory replaces older memory
+- handoff records when a promoted candidate is ready for durable memory
+- validity checks for stale or superseded claims
+
+This is the difference between "the agent wrote something down" and "the system
+knows why this claim is allowed to matter."
+
+## Work Continuity
+
+MBrain has first-class operational memory for long-running agent work:
+
+- task threads
+- working sets
+- attempts
+- decisions
+- retrieval traces
+- resume cards
+- code claim re-verification
+
+That lets an agent resume a task without re-reading the whole repo, repeating
+failed attempts, or treating old code paths as current without checking them.
+
+The main commands are:
+
+```bash
+mbrain task-start --title "Rewrite README" --goal "Reflect current product"
+mbrain task-attempt --task-id <id> --summary "Reviewed old README" --outcome "succeeded"
+mbrain task-decision --task-id <id> --summary "Lead with SQLite" --rationale "Single-user path is default"
+mbrain task-working-set <id> --active-paths README.md --next-steps "run review"
+mbrain task-show <id>
+```
+
+## Personal Memory and Scope
+
+Personal memory is useful only if it stays scoped. MBrain keeps personal records
+separate from work retrieval by default.
+
+Two canonical personal stores are available:
+
+- profile memory: stable facts and preferences
+- personal episodes: append-only events and interaction summaries
+
+Scope-gated operations prevent accidental leakage. In normal use, these are
+agent-facing operations: the agent decides whether a request is personal, work,
+or mixed before it writes profile memory or personal episodes.
+
+Mixed-scope routes exist, but they are explicit. Export also respects visibility:
+private-only profile memory stays private; exportable profile memory can be
+written as curated Markdown.
+
+## Derived Orientation: Maps and Atlases
+
+Search finds pages. Orientation tells the agent where to look next.
+
+MBrain can build note manifests, section indexes, context maps, and context
+atlases from canonical state. Those derived artifacts help with broad synthesis
+and codebase navigation: they can show useful entry points, paths, and related
+systems before the agent reads source files.
+
+They remain derived. If a map suggests a claim, that claim still needs canonical
+evidence or Memory Inbox governance before it becomes durable memory.
+
+## Search and Retrieval
+
+MBrain has two basic search modes:
+
+```bash
+mbrain search "exact term or entity"
+mbrain query "conceptual question across the brain"
+```
+
+Internally:
+
+```text
+query
+  -> optional expansion
+  -> keyword search
+  -> vector search when embeddings exist
+  -> reciprocal-rank fusion
+  -> dedup and diversity controls
+  -> stale and provenance-aware output
+```
+
+SQLite uses FTS5 for keyword search and a stored-vector local cosine scan for
+semantic recall. Postgres uses tsvector and pgvector when you choose the managed
+path.
+
+For richer routing, agents can use intent-specific operations for precision
+lookup, broad synthesis, task resume, mixed-scope recall, brain-loop audit, and
+code-claim verification. The default rule is simple: canonical sources first,
+derived orientation second, live verification when claims depend on the current
+workspace.
+
+## Engines
+
+MBrain uses a pluggable `BrainEngine` interface. The public CLI and MCP contract
+stays stable while storage engines differ internally.
+
+| Engine | Best for | Status |
+|---|---|---|
+| SQLiteEngine | Single-user local/offline personal brain | Recommended default |
+| PGLiteEngine | Embedded Postgres-like local path and migration testing | Supported local path |
+| PostgresEngine | Managed scale, pgvector, remote MCP, file/storage workflows | Optional managed path |
+
+Use SQLite if you are one person using one machine. It is simpler, cheaper, and
+easier to back up. Use Postgres when you need hosted scale, remote access, or
+cloud file storage.
+
+See `docs/ENGINES.md` for the engine contract and capability matrix.
+
+## CLI Overview
+
+Setup and diagnostics:
+
+```bash
+mbrain init --local
+mbrain setup-agent
+mbrain doctor --json
+mbrain check-update --json  # online/managed profiles; local/offline returns offline_mode
+mbrain migrate --to pglite
+```
+
+Pages and search:
+
+```bash
+mbrain get people/example
+mbrain put concepts/example < page.md
+mbrain list --type concept -n 20
+mbrain search "exact phrase"
+mbrain query "broad question"
+```
+
+Sync and embeddings:
+
+```bash
+mbrain import ~/git/brain
+mbrain sync --repo ~/git/brain
+mbrain sync --repo ~/git/brain --watch --interval 60
+mbrain embed --stale
+```
+
+Links, tags, timelines, versions:
+
+```bash
+mbrain link concepts/a concepts/b --link-type depends_on
+mbrain backlinks concepts/b
+mbrain graph concepts/a --depth 2
+mbrain tag concepts/a retrieval
+mbrain timeline-add concepts/a 2026-04-25 "Updated after review"
+mbrain history concepts/a
+mbrain revert concepts/a <version-id>
+```
+
+Deterministic tools that do not need a database:
+
+```bash
+mbrain publish page.md --password
+mbrain check-backlinks check --dir ~/git/brain
+mbrain lint ~/git/brain --fix
+echo "Reviewed open memory candidates." | mbrain report --type weekly --title "Weekly review"
+```
+
+Raw operation calls are available when an agent or script needs the full surface:
+
+```bash
+mbrain --tools-json
+mbrain call get_stats '{}'
+```
+
+## MCP
+
+`mbrain serve` exposes the same operation definitions over stdio MCP. That means
+Codex, Claude Code, Cursor, Windsurf, and other MCP clients can use the same
+tools the CLI uses.
+
+Common local configuration:
+
 ```bash
 codex mcp add mbrain -- mbrain serve
 ```
 
-**Claude Code** (`~/.claude/server.json` shape)
+Claude Code style:
+
 ```json
 {
   "mcpServers": {
@@ -309,468 +433,134 @@ codex mcp add mbrain -- mbrain serve
 }
 ```
 
-**Cursor** (Settings > MCP Servers):
-```json
-{
-  "mbrain": {
-    "command": "mbrain",
-    "args": ["serve"]
-  }
-}
-```
+The MCP server includes compact instructions that tell agents when to prefer
+MBrain over web search or codebase grep. For durable behavior, also install the
+agent rules with `mbrain setup-agent`.
 
-This gives your agent `get_page`, `put_page`, `search`, `query`, `add_link`, `traverse_graph`, `sync_brain`, `get_stats`, and more from the same operation definitions as the CLI. File/storage operations are still part of the contract, but in sqlite/local mode they intentionally fail with guidance because cloud storage workflows are not implemented there yet.
+Remote MCP remains a managed/Postgres-oriented path. See `docs/mcp/DEPLOY.md`
+and the other guides in `docs/mcp/`.
 
-#### Remote MCP Server (Claude Desktop, Cowork, Perplexity, ChatGPT)
+## File Storage
 
-Access your brain from any device, any AI client. Deploy as a serverless endpoint on your existing Supabase instance:
+Local SQLite mode keeps files in your filesystem or git repo. Cloud file/storage
+commands are intentionally reported as unsupported in local mode.
+
+Managed Postgres mode can use file metadata and object storage workflows:
 
 ```bash
-cp .env.production.example .env.production   # fill in 3 values
-bash scripts/deploy-remote.sh                 # links, builds, deploys
-bun run src/commands/auth.ts create "claude-desktop"  # get a token
+mbrain files list
+mbrain files upload ./deck.pdf --page sources/demo-day
+mbrain files sync ./attachments
+mbrain files verify
 ```
 
-Then add to your AI client:
-- **Claude Code:** `claude mcp add mbrain -t http https://YOUR_REF.supabase.co/functions/v1/mbrain-mcp/mcp -H "Authorization: Bearer TOKEN"`
-- **Claude Desktop:** Settings > Integrations > Add (NOT JSON config)
-- **Perplexity Computer:** Settings > Connectors > Add remote MCP
+Use this path only if you need cloud storage or remote deployment. It is not
+required for a local personal brain.
 
-Per-client setup guides: [`docs/mcp/`](docs/mcp/DEPLOY.md)
+## Recommended Agent Behavior
 
-ChatGPT support requires OAuth 2.1 and is coming in v0.7. Self-hosted alternatives (Tailscale Funnel, ngrok) documented in [`docs/mcp/ALTERNATIVES.md`](docs/mcp/ALTERNATIVES.md).
+The best way to use MBrain is not to memorize commands. It is to teach the agent
+the operating loop:
 
-**The tools are not enough.** Your agent also needs behavioral rules -- the brain-agent loop that makes knowledge compound. The fastest way:
+- detect entities, systems, concepts, tasks, and memory candidates
+- search or query MBrain before falling back to web search or repo grep
+- read compiled truth first, then inspect timeline evidence when needed
+- write new facts with source attribution
+- put uncertain claims into the Memory Inbox
+- promote only claims with provenance
+- sync after writes and backfill embeddings when needed
+- audit the loop periodically
+
+The core references are:
+
+- `docs/MBRAIN_AGENT_RULES.md`
+- `docs/MBRAIN_SKILLPACK.md`
+- `docs/guides/brain-agent-loop.md`
+- `docs/guides/source-attribution.md`
+- `docs/guides/brain-vs-memory.md`
+
+## Verification
+
+For local/default verification, run:
 
 ```bash
-mbrain setup-agent
+bun test
+bun run test:e2e:sqlite
+bunx tsc --noEmit --pretty false
 ```
 
-This auto-detects Claude Code and/or Codex, registers the MCP server, and injects the core agent rules into each client's global config. See [docs/local-offline.md](docs/local-offline.md) Section 9 for details and options.
-
-For manual setup or deeper customization, read [MBRAIN_SKILLPACK.md](docs/MBRAIN_SKILLPACK.md) -- the full reference architecture covering enrichment pipelines, meeting ingestion, cron schedules, and more.
-
-The skill markdown files in `skills/` are standalone instruction sets. Copy them into your agent's context:
-
-| Skill file | What the agent learns |
-|------------|----------------------|
-| `skills/ingest/SKILL.md` | How to import meetings, docs, articles |
-| `skills/query/SKILL.md` | 3-layer search with synthesis and citations |
-| `skills/maintain/SKILL.md` | Periodic health: stale pages, orphans, dead links |
-| `skills/enrich/SKILL.md` | Enrich pages from external APIs |
-| `skills/briefing/SKILL.md` | Daily briefing with meeting prep |
-| `skills/migrate/SKILL.md` | Migrate from Obsidian, Notion, Logseq, etc. |
-
-#### As a TypeScript library
-
-```bash
-bun add github:meghendra6/mbrain
-```
-
-```typescript
-import { createConnectedEngine } from 'mbrain';
-
-const engine = await createConnectedEngine({
-  engine: 'sqlite',
-  database_path: `${process.env.HOME}/.mbrain/brain.db`,
-  offline: true,
-  embedding_provider: 'local',
-  query_rewrite_provider: 'heuristic',
-});
-await engine.initSchema();
-
-// Search
-const results = await engine.searchKeyword('startup growth');
-
-// Read
-const page = await engine.getPage('people/pedro-franceschi');
-
-// Write
-await engine.putPage('concepts/superlinear-returns', {
-  type: 'concept',
-  title: 'Superlinear Returns',
-  compiled_truth: 'Paul Graham argues that returns in many fields are superlinear...',
-  timeline: '- 2023-10-01: Published on paulgraham.com',
-});
-```
-
-The `BrainEngine` interface is pluggable. See `docs/ENGINES.md` for how to add backends.
-
-MBrain now has two honest runtime profiles:
-- **Local/offline** — SQLite + stdio MCP on your machine, no cloud required
-- **Managed** — Postgres + pgvector + optional remote MCP/file workflows
-
-Use SQLite when you want a sovereign local brain for Codex or Claude Code. Use Postgres when you want managed scale, remote deployment, or storage/file migration features.
-
-## Upgrade
-
-Upgrade depends on how you installed:
-
-```bash
-# Installed via bun (standalone or library)
-bun update mbrain
-
-# Installed via ClawHub
-clawhub update mbrain
-
-# Compiled binary
-# Download the latest from https://github.com/meghendra6/mbrain/releases
-```
-
-After upgrading, re-run the initializer that matches your profile to apply any schema migrations (idempotent, safe to re-run): `mbrain init --local` for SQLite or `mbrain init --supabase` / `mbrain init --url ...` for Postgres.
-
-## Setup
-
-After installing via CLI or library path, choose the setup profile you want:
-
-```bash
-# Zero-cloud local/offline setup (SQLite in ~/.mbrain/brain.db)
-mbrain init --local
-
-# Optional custom SQLite path
-mbrain init --local --path ~/brains/personal-brain.db
-
-# Guided managed setup: accepts a Supabase/Postgres connection URL
-mbrain init --supabase
-
-# Or connect to any Postgres with pgvector
-mbrain init --url postgresql://user:pass@host:5432/dbname
-```
-
-`mbrain init --local` boots the SQLite schema, writes the offline profile to `~/.mbrain/config.json`, and leaves you ready to attach Codex or Claude Code over `mbrain serve`.
-
-The managed Postgres wizard:
-1. Checks for Supabase CLI, offers auto-provisioning
-2. Falls back to manual connection URL if CLI isn't available
-3. Runs the full schema migration (tables, indexes, triggers, extensions)
-4. Verifies the connection and confirms the database is ready for import
-
-Config is saved to `~/.mbrain/config.json` with 0600 permissions.
-
-OpenClaw users skip this step. The orchestrator runs the wizard for you during install.
-
-## First import
-
-```bash
-# Import your markdown wiki (auto-chunks and auto-embeds)
-mbrain import /path/to/brain/
-
-# Backfill embeddings for pages that don't have them
-mbrain embed --stale
-```
-
-Import is idempotent. Re-running it skips unchanged files (compared by SHA-256 content hash). Progress bar shows status. ~30s for text import of 7,000 files, ~10-15 min for embedding. In local/offline mode, import and sync already defer embeddings by default: keyword search works immediately, and `mbrain embed --stale` backfills semantic retrieval later by trying Ollama on `127.0.0.1:11434` first, with `OLLAMA_HOST` or `MBRAIN_LOCAL_EMBEDDING_URL` available as overrides.
-
-## File storage and migration
-
-Brain repos accumulate binary files: images, PDFs, audio recordings, raw API responses. A repo with 3,000 markdown pages might have 2GB of binaries making `git clone` painful.
-
-MBrain has a three-stage migration lifecycle that moves binaries to cloud storage while preserving every reference:
-
-```
-Local files in git repo
-  │
-  ▼  mbrain files mirror <dir>
-Cloud copy exists, local files untouched
-  │
-  ▼  mbrain files redirect <dir>
-Local files replaced with .redirect breadcrumbs (tiny YAML pointers)
-  │
-  ▼  mbrain files clean <dir>
-Breadcrumbs removed, cloud is the only copy
-```
-
-Every stage is reversible until `clean`:
-
-```bash
-# Stage 1: Copy to cloud (git repo unchanged)
-mbrain files mirror ~/git/brain/attachments/ --dry-run   # preview first
-mbrain files mirror ~/git/brain/attachments/
-
-# Stage 2: Replace local files with breadcrumbs
-mbrain files redirect ~/git/brain/attachments/ --dry-run
-mbrain files redirect ~/git/brain/attachments/
-# Your git repo just dropped from 2GB to 50MB
-
-# Undo: download everything back from cloud
-mbrain files restore ~/git/brain/attachments/
-
-# Stage 3: Remove breadcrumbs (irreversible, cloud is the only copy)
-mbrain files clean ~/git/brain/attachments/ --yes
-```
-
-**Storage backends:** S3-compatible (AWS S3, Cloudflare R2, MinIO), Supabase Storage, or local filesystem. Configured during managed/Postgres `mbrain init`. These file/storage workflows are not yet supported in sqlite/local mode.
-
-Additional file commands:
-
-```bash
-mbrain files list [slug]           # list files for a page (or all)
-mbrain files upload <file> --page <slug>  # upload file linked to page
-mbrain files sync <dir>            # bulk upload directory
-mbrain files verify                # verify all uploads match local
-mbrain files status                # show migration status of directories
-mbrain files unmirror <dir>        # remove mirror marker (files stay in cloud)
-```
-
-The file resolver (`src/core/file-resolver.ts`) handles fallback automatically: if a local file is missing, it checks for a `.redirect` breadcrumb, then a `.supabase` marker, and resolves to the cloud URL. Code that references files by path keeps working after migration.
-
-## The knowledge model
-
-Every page in the brain follows the compiled truth + timeline pattern:
-
-```markdown
----
-type: concept
-title: Do Things That Don't Scale
-tags: [startups, growth, pg-essay]
----
-
-Paul Graham's argument that startups should do unscalable things early on.
-The most common: recruiting users manually, one at a time. Airbnb went
-door to door in New York photographing apartments. Stripe manually
-installed their payment integration for early users.
-
-The key insight: the unscalable effort teaches you what users actually
-want, which you can't learn any other way.
-
----
-
-- 2013-07-01: Published on paulgraham.com
-- 2024-11-15: Referenced in batch W25 kickoff talk
-- 2025-02-20: Cited in discussion about AI agent onboarding strategies
-```
-
-Above the `---` separator: **compiled truth**. Your current best understanding. Gets rewritten when new evidence changes the picture. Below: **timeline**. Append-only evidence trail. Never edited, only added to.
-
-The compiled truth is the answer. The timeline is the proof.
-
-## How search works
-
-```
-Query: "when should you ignore conventional wisdom?"
-         |
-    Multi-query expansion (heuristic, local LLM, or hosted LLM)
-    "contrarian thinking startups", "going against the crowd"
-         |
-    +----+----+
-    |         |
-  Vector    Keyword
-  (engine    (engine
-  native)     native)
-    |         |
-    +----+----+
-         |
-    RRF Fusion: score = sum(1/(60 + rank))
-         |
-    4-Layer Dedup
-    1. Best chunk per page
-    2. Cosine similarity > 0.85
-    3. Type diversity (60% cap)
-    4. Per-page chunk cap
-         |
-    Stale alerts (compiled truth older than latest timeline)
-         |
-    Results
-```
-
-Keyword search alone misses conceptual matches. "Ignore conventional wisdom" won't find an essay titled "The Bus Ticket Theory of Genius" even though it's exactly about that. Vector search alone misses exact phrases when the embedding is diluted by surrounding text. RRF fusion gets both right. Multi-query expansion catches phrasings you didn't think of.
-
-## Database Schema
-
-The core schema is shared across SQLite/local and managed Postgres engines:
-
-```
-pages                    The core content table
-  slug (UNIQUE)          e.g. "concepts/do-things-that-dont-scale"
-  type                   person, company, deal, yc, civic, project, concept, source, media
-  title, compiled_truth, timeline
-  frontmatter            Arbitrary metadata (JSON text in SQLite, JSONB in Postgres)
-  search index           FTS5 in SQLite, tsvector in Postgres
-  content_hash           SHA-256 for import idempotency
-
-content_chunks           Chunked content with embeddings
-  page_id (FK)           Links to pages
-  chunk_text             The chunk content
-  chunk_source           'compiled_truth' or 'timeline'
-  embedding (vector)     768-dim from nomic-embed-text
-
-links                    Cross-references between pages
-  from_page_id, to_page_id
-  link_type              knows, invested_in, works_at, founded, references, etc.
-
-tags                     page_id + tag (many-to-many)
-
-timeline_entries         Structured timeline events
-  page_id, date, source, summary, detail (markdown)
-
-page_versions            Snapshot history for compiled_truth
-  compiled_truth, frontmatter, snapshot_at
-
-raw_data                 Sidecar JSON from external APIs
-  page_id, source, data
-
-ingest_log               Audit trail of import/ingest operations
-
-config                   Brain-level settings (embedding model, chunk strategy, sync state)
-```
-
-Engine-specific storage notes:
-
-- **SQLite/local:** JSON payloads are stored as text, keyword search uses FTS5, embeddings are stored in the DB and recalled with a local cosine scan, and binary files stay in your filesystem or git repo.
-- **Managed Postgres:** JSON payloads use JSONB, keyword search uses tsvector/GIN, semantic search uses pgvector/HNSW, fuzzy slug matching uses pg_trgm, and optional file metadata can point at managed object storage.
-
-## Chunking
-
-Three strategies, dispatched by content type:
-
-**Recursive** (timeline, bulk import): 5-level delimiter hierarchy (paragraphs, lines, sentences, clauses, words). 300-word chunks with 50-word sentence-aware overlap. Fast, predictable, lossless.
-
-**Semantic** (compiled truth): Embeds each sentence, computes adjacent cosine similarities, applies Savitzky-Golay smoothing to find topic boundaries. Falls back to recursive on failure. Best quality for intelligence assessments.
-
-**LLM-guided** (high-value content, on request): Pre-splits into 128-word candidates, asks Claude Haiku to identify topic shifts in sliding windows. 3 retries per window. Most expensive, best results.
-
-## Commands
-
-```
-SETUP
-  mbrain init --local                       Create a local/offline SQLite brain
-  mbrain init [--supabase|--url <conn>]     Create a managed Postgres brain (guided wizard)
-  mbrain upgrade                            Self-update
-
-PAGES
-  mbrain get <slug>                         Read a page (supports fuzzy slug matching)
-  mbrain put <slug> [< file.md]             Write/update a page (auto-versions)
-  mbrain delete <slug>                      Delete a page
-  mbrain list [--type T] [--tag T] [-n N]   List pages with filters
-
-SEARCH
-  mbrain search <query>                     Keyword search (engine-native)
-  mbrain query <question>                   Hybrid search (vector + keyword + RRF + expansion)
-
-IMPORT/EXPORT
-  mbrain import <dir>                       Import markdown directory (idempotent, embeddings deferred)
-  mbrain sync [--repo <path>] [flags]       Git-to-brain incremental sync
-  mbrain export [--dir ./out/]              Export to markdown (round-trip)
-
-FILES
-  mbrain files list [slug]                  List stored files
-  mbrain files upload <file> --page <slug>  Upload file to storage
-  mbrain files sync <dir>                   Bulk upload directory
-  mbrain files verify                       Verify all uploads
-
-EMBEDDINGS
-  mbrain embed [<slug>|--all|--stale]       Generate/refresh embeddings
-
-LINKS + GRAPH
-  mbrain link <from> <to> [--type T]        Create typed link
-  mbrain unlink <from> <to>                 Remove link
-  mbrain backlinks <slug>                   Incoming links
-  mbrain graph <slug> [--depth N]           Traverse link graph (recursive CTE, default depth 5)
-
-TAGS
-  mbrain tags <slug>                        List tags
-  mbrain tag <slug> <tag>                   Add tag
-  mbrain untag <slug> <tag>                 Remove tag
-
-TIMELINE
-  mbrain timeline [<slug>]                  View timeline entries
-  mbrain timeline-add <slug> <date> <text>  Add timeline entry
-
-ADMIN
-  mbrain doctor [--json]                    Health checks (engine, schema, embeddings, local/managed capabilities)
-  mbrain stats                              Brain statistics
-  mbrain health                             Health dashboard (embed coverage, stale, orphans)
-  mbrain history <slug>                     Page version history
-  mbrain revert <slug> <version-id>         Revert to previous version
-  mbrain config [get|set] <key> [value]     Brain config
-  mbrain serve                              MCP server (stdio, local)
-  scripts/deploy-remote.sh                  Deploy remote MCP server (Supabase Edge Functions)
-  bun run src/commands/auth.ts              Token management (create/list/revoke/test)
-  mbrain call <tool> '<json>'               Raw tool invocation
-  mbrain --tools-json                       Tool discovery (JSON)
-```
-
-## Library and MCP details
-
-See [MBrain without OpenClaw](#mbrain-without-openclaw) above for library usage examples, MCP server config, and skill file loading.
-
-The `BrainEngine` interface is pluggable. See `docs/ENGINES.md` for how to add backends. 30 MCP tools are generated from the contract-first `operations.ts`. Parity tests verify structural identity between CLI, MCP, and tools-json.
-
-## Skills
-
-Fat markdown files that tell AI agents HOW to use mbrain. No skill logic in the binary.
-
-| Skill | What it does |
-|-------|-------------|
-| **ingest** | Ingest meetings, docs, articles. Updates compiled truth (rewrite, not append), appends timeline, creates cross-reference links across all mentioned entities. |
-| **query** | 3-layer search (keyword + vector + structured) with synthesis and citations. Says "the brain doesn't have info on X" rather than hallucinating. |
-| **maintain** | Periodic health: find contradictions, stale compiled truth, orphan pages, dead links, tag inconsistency, missing embeddings, overdue threads. |
-| **enrich** | Enrich pages from external APIs. Raw data stored separately, distilled highlights go to compiled truth. |
-| **briefing** | Daily briefing: today's meetings with participant context, active deals with deadlines, time-sensitive threads, recent changes. |
-| **migrate** | Universal migration from Obsidian (wikilinks to mbrain links), Notion (stripped UUIDs), Logseq (block refs), plain markdown, CSV, JSON, Roam. |
-| **setup** | Set up MBrain from scratch: local SQLite init, optional managed Postgres, AGENTS.md injection, import, sync. Target TTHW < 2 min. |
-
-## Engine Architecture
-
-```
-CLI / MCP Server
-     (thin wrappers, identical operations)
-              |
-      BrainEngine interface
-       (pluggable backend)
-              |
-     +--------+--------+
-     |                  |
-PostgresEngine     SQLiteEngine
-  managed scale     local/offline
-  pgvector          FTS5 + stored vectors
-  pg_trgm           single-file brain.db
-```
-
-Embedding, chunking, and search fusion are engine-agnostic. Only raw keyword search (`searchKeyword`) and raw vector search (`searchVector`) are engine-specific. RRF fusion, multi-query expansion, and 4-layer dedup run above the engine on `SearchResult[]` arrays.
-
-## Managed Postgres storage estimates
-
-For a brain with ~7,500 pages on managed Postgres + pgvector:
-
-| Component | Size |
-|-----------|------|
-| Page text (compiled_truth + timeline) | ~150MB |
-| JSONB frontmatter + indexes | ~70MB |
-| Content chunks (~22K, text) | ~80MB |
-| Embeddings (22K x 768 floats) | ~67MB |
-| HNSW index overhead | ~270MB |
-| Links, tags, timeline, versions | ~50MB |
-| **Total** | **~750MB** |
-
-Supabase free tier (500MB) won't fit a large brain. Supabase Pro ($25/mo, 8GB) is the starting point.
-
-Initial embedding footprint: ~67MB for 7,500 pages at 768 dimensions. Runtime cost depends on your local embedding host.
-
-## Docs
-
-- **[MBRAIN_SKILLPACK.md](docs/MBRAIN_SKILLPACK.md)** -- **Start here for agents.** Reference architecture for production agents: brain-agent loop, entity detection, enrichment pipeline, meeting ingestion, cron schedule
-- [MBRAIN_RECOMMENDED_SCHEMA.md](docs/MBRAIN_RECOMMENDED_SCHEMA.md) -- The recommended brain schema: MECE directories, compiled truth + timeline, enrichment pipelines, resolver decision tree
-- [ENGINES.md](docs/ENGINES.md) -- Pluggable engine interface, shipped SQLite behavior, capability matrix, how to add backends
-- [local-offline.md](docs/local-offline.md) -- SQLite/local setup, MCP, embeddings, verification, and expected managed-only gaps
-- [MBRAIN_VERIFY.md](docs/MBRAIN_VERIFY.md) -- Installation verification runbook: schema, live sync, embeddings, brain-first lookup
-- [MBRAIN_V0.md](docs/MBRAIN_V0.md) -- Historical v0 spec; useful context, not the current SQLite-first operating guide
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md). For local/default verification, run `bun test`
-and `bun run test:e2e:sqlite`.
-
-For optional managed Postgres E2E coverage: `docker compose -f docker-compose.test.yml up -d` then
-`DATABASE_URL=postgresql://postgres:postgres@localhost:5434/mbrain_test bun run test:e2e`.
-
-Welcome PRs for:
-
-- Source Record and Procedure Registry completeness work
-- New enrichment API integrations
-- Performance optimizations
-- Docker Compose for self-hosted Postgres
-
-## License
-
-MIT
+The SQLite E2E suite covers:
+
+- local `mbrain init --local`
+- import, sync, query, write, export
+- stdio MCP lifecycle tools
+- profile memory
+- personal episodes
+- task memory
+- memory candidates
+- promotion, rejection, supersession, handoff, historical validity
+- candidate status events and brain-loop audit
+- forgetting/deletion behavior
+
+Network and managed Postgres tests are gated by environment such as
+`DATABASE_URL`; they are skipped when that environment is not configured.
+
+Scenario-level invariants live in `test/scenarios/`. The current scenario suite
+has no placeholder tests and covers fresh install, task resume, routing, scope
+denial, promotion provenance, supersession, rejection, canonical-first retrieval,
+precision degradation, code-claim verification, export boundaries, retrieval
+traces, brain-loop audit, interaction-linked writes, nullable interaction IDs,
+and candidate status event auditing.
+
+## Documentation Map
+
+Start here:
+
+- `docs/local-offline.md` - first-day SQLite setup
+- `docs/local-offline.ko.md` - Korean SQLite setup guide
+- `docs/ENGINES.md` - SQLite, PGLite, and Postgres engine contract
+- `docs/MBRAIN_VERIFY.md` - verification runbook
+- `test/scenarios/README.md` - end-to-end design scenario contract
+
+Architecture:
+
+- `docs/architecture/redesign/00-principles-and-invariants.md`
+- `docs/architecture/redesign/01-target-architecture.md`
+- `docs/architecture/redesign/02-memory-loop-and-protocols.md`
+- `docs/architecture/redesign/03-migration-roadmap-and-execution-envelope.md`
+- `docs/architecture/redesign/04-workstream-operational-memory.md`
+- `docs/architecture/redesign/05-workstream-context-map.md`
+- `docs/architecture/redesign/06-workstream-governance-and-inbox.md`
+- `docs/architecture/redesign/07-workstream-profile-memory-and-scope.md`
+- `docs/architecture/redesign/08-evaluation-and-acceptance.md`
+
+Historical/reference:
+
+- `docs/UPSTREAM_SYNC.md` - provenance for selected imports from gbrain
+- `docs/MBRAIN_V0.md` - Historical v0 spec
+
+Managed Postgres storage estimates and schema details are documented in the
+engine and verification docs rather than being part of the default local setup.
+
+## For gbrain Users
+
+MBrain began as a fork of [garrytan/gbrain](https://github.com/garrytan/gbrain).
+Some early patterns, skills, and deterministic tools were imported or adapted
+from upstream, and `docs/UPSTREAM_SYNC.md` records that provenance.
+
+The current project is SQLite-first, local-first, and not intended as a drop-in
+replacement for gbrain. SQLite is the recommended engine for a single-user
+personal brain. Postgres remains optional for managed scale and remote/cloud
+workflows.
+
+## Status
+
+MBrain is usable today as a local SQLite memory layer for one person and one or
+more local agents. The default path is intentionally boring: a Markdown repo,
+one SQLite database, stdio MCP, deterministic tests, and optional local
+embeddings.
+
+The managed Postgres path remains available for scale and remote deployment, but
+it is no longer the center of the product.
+
+The project is MIT licensed.

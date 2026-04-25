@@ -1009,6 +1009,66 @@ const MIGRATIONS: Migration[] = [
         WHERE scope_id IS NOT NULL;
     `,
   },
+  {
+    version: 27,
+    name: 'memory_mutation_events_operation_contract_repair',
+    sql: `
+      DO $$
+      BEGIN
+        IF to_regclass('memory_mutation_events') IS NOT NULL THEN
+          IF NOT EXISTS (
+            SELECT 1
+            FROM pg_constraint
+            WHERE conrelid = 'memory_mutation_events'::regclass
+              AND conname = 'chk_memory_mutation_events_operation'
+          ) THEN
+            ALTER TABLE memory_mutation_events
+              ADD CONSTRAINT chk_memory_mutation_events_operation
+              CHECK (
+                operation IN (
+                  'create_memory_session',
+                  'close_memory_session',
+                  'expire_memory_session',
+                  'revoke_memory_session',
+                  'dry_run_memory_mutation',
+                  'list_memory_mutation_events',
+                  'record_memory_mutation_event',
+                  'create_memory_patch_candidate',
+                  'dry_run_memory_patch_candidate',
+                  'review_memory_patch_candidate',
+                  'apply_memory_patch_candidate',
+                  'create_redaction_plan',
+                  'dry_run_redaction_plan',
+                  'execute_redaction_plan',
+                  'put_page',
+                  'delete_page',
+                  'upsert_profile_memory_entry',
+                  'write_profile_memory_entry',
+                  'delete_profile_memory_entry',
+                  'record_personal_episode',
+                  'write_personal_episode_entry',
+                  'delete_personal_episode_entry',
+                  'create_memory_candidate_entry',
+                  'advance_memory_candidate_status',
+                  'reject_memory_candidate_entry',
+                  'delete_memory_candidate_entry',
+                  'promote_memory_candidate_entry',
+                  'supersede_memory_candidate_entry',
+                  'export_memory_artifact',
+                  'sync_memory_artifact',
+                  'repair_memory_ledger',
+                  'physical_delete_memory_record'
+                )
+              );
+          END IF;
+        END IF;
+      END $$;
+      DROP INDEX IF EXISTS idx_memory_mutation_events_scope_created;
+      CREATE INDEX IF NOT EXISTS idx_memory_mutation_events_scope_created
+        ON memory_mutation_events(scope_id, created_at DESC, id DESC)
+        WHERE scope_id IS NOT NULL;
+    `,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.length > 0

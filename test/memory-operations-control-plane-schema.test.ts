@@ -95,6 +95,90 @@ function invalidInsertSql(column: string, value: string): string {
   `;
 }
 
+const OLD_V26_POSTGRES_MUTATION_EVENT_SQL = `
+  CREATE TABLE memory_mutation_events (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    realm_id TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    operation TEXT NOT NULL,
+    target_kind TEXT NOT NULL CHECK (
+      target_kind IN (
+        'page',
+        'source_record',
+        'task_thread',
+        'working_set',
+        'task_event',
+        'task_episode',
+        'attempt',
+        'decision',
+        'procedure',
+        'memory_candidate',
+        'memory_patch_candidate',
+        'profile_memory',
+        'personal_episode',
+        'context_map',
+        'context_atlas',
+        'file_artifact',
+        'export_artifact',
+        'ledger_event'
+      )
+    ),
+    target_id TEXT,
+    scope_id TEXT,
+    source_refs JSONB NOT NULL DEFAULT '[]'::jsonb,
+    expected_target_snapshot_hash TEXT,
+    current_target_snapshot_hash TEXT,
+    result TEXT NOT NULL CHECK (
+      result IN (
+        'dry_run',
+        'staged_for_review',
+        'applied',
+        'conflict',
+        'denied',
+        'failed',
+        'redacted'
+      )
+    ),
+    conflict_info JSONB,
+    dry_run BOOLEAN NOT NULL DEFAULT false,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    redaction_visibility TEXT NOT NULL DEFAULT 'visible' CHECK (
+      redaction_visibility IN ('visible', 'partially_redacted', 'tombstoned')
+    ),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    decided_at TIMESTAMPTZ,
+    applied_at TIMESTAMPTZ
+  );
+  CREATE INDEX idx_memory_mutation_events_session_created
+    ON memory_mutation_events(session_id, created_at DESC, id DESC);
+  CREATE INDEX idx_memory_mutation_events_realm_created
+    ON memory_mutation_events(realm_id, created_at DESC, id DESC);
+  CREATE INDEX idx_memory_mutation_events_actor_created
+    ON memory_mutation_events(actor, created_at DESC, id DESC);
+  CREATE INDEX idx_memory_mutation_events_operation_created
+    ON memory_mutation_events(operation, created_at DESC, id DESC);
+  CREATE INDEX idx_memory_mutation_events_target
+    ON memory_mutation_events(target_kind, target_id);
+  CREATE INDEX idx_memory_mutation_events_result_created
+    ON memory_mutation_events(result, created_at DESC, id DESC);
+  CREATE INDEX idx_memory_mutation_events_scope_created
+    ON memory_mutation_events(scope_id, created_at DESC, id DESC);
+  INSERT INTO memory_mutation_events (
+    id, session_id, realm_id, actor, operation, target_kind, target_id, scope_id, result
+  ) VALUES (
+    'old-v26-valid', 'session-1', 'work', 'agent:test', 'put_page', 'page', 'concepts/phase-9.md', 'workspace:default', 'applied'
+  );
+`;
+
+const OLD_V26_SQLITE_MUTATION_EVENT_SQL = OLD_V26_POSTGRES_MUTATION_EVENT_SQL
+  .replaceAll('JSONB', 'TEXT')
+  .replaceAll(" DEFAULT '[]'::jsonb", " DEFAULT '[]'")
+  .replaceAll(" DEFAULT '{}'::jsonb", " DEFAULT '{}'")
+  .replaceAll('BOOLEAN NOT NULL DEFAULT false', 'INTEGER NOT NULL DEFAULT 0 CHECK (dry_run IN (0, 1))')
+  .replaceAll('TIMESTAMPTZ NOT NULL DEFAULT now()', "TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))")
+  .replaceAll('TIMESTAMPTZ', 'TEXT');
+
 describe('memory operations control-plane schema', () => {
   const tempPaths: string[] = [];
 
@@ -268,6 +352,86 @@ describe('memory operations control-plane schema', () => {
       'memory_mutation_events',
     ]);
     expect(version.rows).toEqual([{ value: String(LATEST_VERSION) }]);
+
+    await engine.disconnect();
+  }, 10_000);
+
+  test('sqlite repairs old version 26 memory mutation ledger operation contract', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mbrain-mutation-ledger-sqlite-v26-repair-'));
+    tempPaths.push(dir);
+
+    const engine = new SQLiteEngine();
+    await engine.connect({ engine: 'sqlite', database_path: join(dir, 'brain.db') });
+    const db = (engine as any).database;
+    db.exec(`
+      CREATE TABLE config (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+      INSERT INTO config (key, value) VALUES ('version', '26');
+      ${OLD_V26_SQLITE_MUTATION_EVENT_SQL}
+    `);
+
+    await engine.initSchema();
+
+    const version = db.query(`SELECT value FROM config WHERE key = 'version'`).get() as { value: string };
+    const existing = db
+      .query(`SELECT id, operation FROM memory_mutation_events WHERE id = 'old-v26-valid'`)
+      .get() as { id: string; operation: string } | null;
+    const scopeIndex = db
+      .query(
+        `SELECT sql
+         FROM sqlite_master
+         WHERE type = 'index'
+           AND tbl_name = 'memory_mutation_events'
+           AND name = 'idx_memory_mutation_events_scope_created'`,
+      )
+      .get() as { sql: string } | null;
+
+    expect(version.value).toBe(String(LATEST_VERSION));
+    expect(existing).toEqual({ id: 'old-v26-valid', operation: 'put_page' });
+    expect(scopeIndex?.sql).toContain('WHERE scope_id IS NOT NULL');
+    expect(() => db.query(invalidInsertSql('operation', 'invented_operation').replace('false', '0')).run()).toThrow();
+
+    await engine.disconnect();
+  });
+
+  test('pglite repairs old version 26 memory mutation ledger operation contract', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mbrain-mutation-ledger-pglite-v26-repair-'));
+    tempPaths.push(dir);
+
+    const engine = new PGLiteEngine();
+    await engine.connect({ engine: 'pglite', database_path: dir });
+    const db = (engine as any).db;
+    await db.exec(`
+      CREATE TABLE config (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+      INSERT INTO config (key, value) VALUES ('version', '26');
+      ${OLD_V26_POSTGRES_MUTATION_EVENT_SQL}
+    `);
+
+    await engine.initSchema();
+
+    const version = await db.query(`SELECT value FROM config WHERE key = 'version'`);
+    const existing = await db.query(
+      `SELECT id, operation
+       FROM memory_mutation_events
+       WHERE id = 'old-v26-valid'`,
+    );
+    const indexDefinitions = await db.query(
+      `SELECT indexdef
+       FROM pg_indexes
+       WHERE schemaname = 'public'
+         AND tablename = 'memory_mutation_events'
+         AND indexname = 'idx_memory_mutation_events_scope_created'`,
+    );
+
+    expect(version.rows).toEqual([{ value: String(LATEST_VERSION) }]);
+    expect(existing.rows).toEqual([{ id: 'old-v26-valid', operation: 'put_page' }]);
+    expect(String(indexDefinitions.rows[0]?.indexdef)).toContain('WHERE (scope_id IS NOT NULL)');
+    await expect(db.query(invalidInsertSql('operation', 'invented_operation'))).rejects.toThrow();
 
     await engine.disconnect();
   }, 10_000);

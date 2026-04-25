@@ -65,6 +65,12 @@ describe('E2E: MCP Tool Generation', () => {
     expect(names).toContain('get_health');
     expect(names).toContain('sync_brain');
     expect(names).toContain('file_upload');
+    expect(names).toContain('list_memory_mutation_events');
+    expect(names).toContain('record_memory_mutation_event');
+    const recordMutationEvent = tools.find((tool) => tool.name === 'record_memory_mutation_event');
+    expect((recordMutationEvent?.inputSchema.properties as any).privileged.type).toBe('boolean');
+    expect(recordMutationEvent?.inputSchema.required).toContain('privileged');
+    expect(recordMutationEvent?.inputSchema.required).toContain('privileged_reason');
   });
 
   test('MCP server module can be imported', async () => {

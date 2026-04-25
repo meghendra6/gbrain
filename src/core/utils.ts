@@ -13,6 +13,10 @@ import type {
   MemoryMutationEventInput,
   MemoryRealm,
   MemoryRealmInput,
+  MemorySession,
+  MemorySessionAttachment,
+  MemorySessionAttachmentInput,
+  MemorySessionInput,
   MemoryCandidateStatusEvent,
   MemoryCandidateSupersessionEntry,
   CanonicalHandoffEntry,
@@ -410,6 +414,71 @@ export function applyMemoryRealmUpsertDefaults(
   };
 }
 
+export function rowToMemorySession(row: Record<string, unknown>): MemorySession {
+  return {
+    id: row.id as string,
+    task_id: (row.task_id as string | null) ?? null,
+    status: row.status as MemorySession['status'],
+    actor_ref: (row.actor_ref as string | null) ?? null,
+    created_at: new Date(row.created_at as string),
+    closed_at: row.closed_at == null ? null : new Date(row.closed_at as string),
+  };
+}
+
+export function normalizeMemorySessionInput(input: MemorySessionInput): MemorySessionInput {
+  const normalized: MemorySessionInput = {
+    id: normalizeRequiredMemorySessionString('id', input.id),
+  };
+  if (input.task_id !== undefined) {
+    normalized.task_id = normalizeOptionalMemorySessionString('task_id', input.task_id);
+  }
+  if (input.actor_ref !== undefined) {
+    normalized.actor_ref = normalizeOptionalMemorySessionString('actor_ref', input.actor_ref);
+  }
+  return normalized;
+}
+
+export function applyMemorySessionCreateDefaults(input: MemorySessionInput): {
+  id: string;
+  task_id: string | null;
+  status: MemorySession['status'];
+  actor_ref: string | null;
+} {
+  return {
+    id: input.id,
+    task_id: input.task_id ?? null,
+    status: 'active',
+    actor_ref: input.actor_ref ?? null,
+  };
+}
+
+export function rowToMemorySessionAttachment(row: Record<string, unknown>): MemorySessionAttachment {
+  return {
+    session_id: row.session_id as string,
+    realm_id: row.realm_id as string,
+    access: row.access as MemorySessionAttachment['access'],
+    instructions: (row.instructions as string | null) ?? '',
+    attached_at: new Date(row.attached_at as string),
+  };
+}
+
+export function normalizeMemorySessionAttachmentInput(
+  input: MemorySessionAttachmentInput,
+): Required<MemorySessionAttachmentInput> {
+  const access = input.access;
+  if (!['read_only', 'read_write'].includes(access)) {
+    throw new Error('memory session attachment access must be one of: read_only, read_write');
+  }
+  return {
+    session_id: normalizeRequiredMemorySessionString('session_id', input.session_id),
+    realm_id: normalizeRequiredMemorySessionString('realm_id', input.realm_id),
+    access,
+    instructions: input.instructions === undefined
+      ? ''
+      : normalizeMemorySessionAttachmentInstructions(input.instructions),
+  };
+}
+
 function normalizeRequiredMemoryRealmString(field: string, value: unknown): string {
   if (typeof value !== 'string' || value.trim().length === 0) {
     throw new Error(`memory realm ${field} must be a non-empty string`);
@@ -420,6 +489,25 @@ function normalizeRequiredMemoryRealmString(field: string, value: unknown): stri
 function normalizeOptionalMemoryRealmString(field: string, value: unknown): string {
   if (typeof value !== 'string') {
     throw new Error(`memory realm ${field} must be a string`);
+  }
+  return value;
+}
+
+function normalizeRequiredMemorySessionString(field: string, value: unknown): string {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new Error(`memory session ${field} must be a non-empty string`);
+  }
+  return value.trim();
+}
+
+function normalizeOptionalMemorySessionString(field: string, value: unknown): string | null {
+  if (value === null) return null;
+  return normalizeRequiredMemorySessionString(field, value);
+}
+
+function normalizeMemorySessionAttachmentInstructions(value: unknown): string {
+  if (typeof value !== 'string') {
+    throw new Error('memory session attachment instructions must be a string');
   }
   return value;
 }

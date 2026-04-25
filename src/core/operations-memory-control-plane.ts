@@ -7,8 +7,13 @@ import type {
   MemoryRealmInput,
   MemoryRealm,
   MemoryRealmScope,
+  MemorySession,
+  MemorySessionAttachment,
+  MemorySessionAttachmentFilters,
+  MemorySessionAttachmentInput,
+  MemorySessionInput,
 } from './types.ts';
-import { applyMemoryRealmUpsertDefaults, parseValidIsoTimestamp } from './utils.ts';
+import { applyMemoryRealmUpsertDefaults, applyMemorySessionCreateDefaults, parseValidIsoTimestamp } from './utils.ts';
 
 type OperationErrorCtor = new (
   code: 'invalid_params',
@@ -20,6 +25,9 @@ type OperationErrorCtor = new (
 const MEMORY_REALM_SCOPES = ['work', 'personal', 'mixed'] as const satisfies readonly MemoryRealmScope[];
 const MEMORY_ACCESS_MODES = ['read_only', 'read_write'] as const satisfies readonly MemoryAccessMode[];
 const DEFAULT_REALM_UPSERT_SOURCE_REFS = ['Source: mbrain upsert_memory_realm operation'];
+const DEFAULT_SESSION_CREATE_SOURCE_REFS = ['Source: mbrain create_memory_session operation'];
+const DEFAULT_SESSION_CLOSE_SOURCE_REFS = ['Source: mbrain close_memory_session operation'];
+const DEFAULT_SESSION_ATTACH_SOURCE_REFS = ['Source: mbrain attach_memory_realm_to_session operation'];
 const DEFAULT_REALM_UPSERT_ACTOR = 'mbrain:memory_control_plane';
 
 function invalidParams(
@@ -47,6 +55,15 @@ function optionalString(
 ): string | undefined {
   if (value == null) return undefined;
   return requiredString(deps, field, value);
+}
+
+function optionalNullableString(
+  deps: { OperationError: OperationErrorCtor },
+  field: string,
+  value: unknown,
+): string | null | undefined {
+  if (value === null) return null;
+  return optionalString(deps, field, value);
 }
 
 function optionalText(
@@ -189,6 +206,70 @@ function realmFilters(
   };
 }
 
+function memorySessionInput(
+  deps: { OperationError: OperationErrorCtor },
+  p: Record<string, unknown>,
+): MemorySessionInput {
+  const input: MemorySessionInput = {
+    id: requiredString(deps, 'id', p.id),
+  };
+  const taskId = optionalNullableString(deps, 'task_id', p.task_id);
+  if (taskId !== undefined || p.task_id === null) input.task_id = taskId ?? null;
+  const actorRef = optionalNullableString(deps, 'actor_ref', p.actor_ref);
+  if (actorRef !== undefined || p.actor_ref === null) input.actor_ref = actorRef ?? null;
+  return input;
+}
+
+function memorySessionPreview(input: MemorySessionInput): Omit<MemorySession, 'created_at' | 'closed_at'> & {
+  created_at: Date;
+  closed_at: null;
+} {
+  return {
+    ...applyMemorySessionCreateDefaults(input),
+    created_at: new Date(),
+    closed_at: null,
+  };
+}
+
+function memorySessionAttachmentInput(
+  deps: { OperationError: OperationErrorCtor },
+  p: Record<string, unknown>,
+): MemorySessionAttachmentInput {
+  const access = enumValue(deps, 'access', p.access, MEMORY_ACCESS_MODES, true)!;
+  const instructions = optionalText(deps, 'instructions', p.instructions);
+  const input: MemorySessionAttachmentInput = {
+    session_id: requiredString(deps, 'session_id', p.session_id),
+    realm_id: requiredString(deps, 'realm_id', p.realm_id),
+    access,
+  };
+  if (instructions !== undefined) input.instructions = instructions;
+  return input;
+}
+
+function memorySessionAttachmentPreview(input: MemorySessionAttachmentInput): MemorySessionAttachment {
+  return {
+    session_id: input.session_id,
+    realm_id: input.realm_id,
+    access: input.access,
+    instructions: input.instructions ?? '',
+    attached_at: new Date(),
+  };
+}
+
+function memorySessionAttachmentFilters(
+  deps: { OperationError: OperationErrorCtor },
+  p: Record<string, unknown>,
+): MemorySessionAttachmentFilters {
+  const sessionId = optionalString(deps, 'session_id', p.session_id);
+  const realmId = optionalString(deps, 'realm_id', p.realm_id);
+  return {
+    ...(sessionId !== undefined ? { session_id: sessionId } : {}),
+    ...(realmId !== undefined ? { realm_id: realmId } : {}),
+    limit: integerParam(deps, 'limit', p.limit, { defaultValue: 100, min: 0, max: 500 }),
+    offset: integerParam(deps, 'offset', p.offset, { defaultValue: 0, min: 0 }),
+  };
+}
+
 export function createMemoryControlPlaneOperations(
   deps: { OperationError: OperationErrorCtor },
 ): Operation[] {
@@ -277,5 +358,173 @@ export function createMemoryControlPlaneOperations(
     cliHints: { name: 'memory-realm-list', aliases: { n: 'limit' } },
   };
 
-  return [upsert_memory_realm, get_memory_realm, list_memory_realms];
+  const create_memory_session: Operation = {
+    name: 'create_memory_session',
+    description: 'Create an active memory session for attaching scoped memory realms.',
+    params: {
+      id: { type: 'string', required: true },
+      task_id: { type: 'string', nullable: true },
+      actor_ref: { type: 'string', nullable: true },
+      source_refs: { type: 'array', items: { type: 'string' }, description: 'Optional provenance reference string or string array for the ledger event.' },
+    },
+    mutating: true,
+    handler: async (ctx, p) => {
+      const input = memorySessionInput(deps, p);
+      if (ctx.dryRun) {
+        return {
+          action: 'create_memory_session',
+          dry_run: true,
+          session: memorySessionPreview(input),
+        };
+      }
+      const sourceRefs = optionalSourceRefs(deps, p.source_refs) ?? DEFAULT_SESSION_CREATE_SOURCE_REFS;
+      return ctx.engine.transaction(async (engine) => {
+        const session = await engine.createMemorySession(input);
+        await recordMemoryMutationEvent(engine, {
+          session_id: session.id,
+          realm_id: `session:${session.id}`,
+          actor: session.actor_ref ?? DEFAULT_REALM_UPSERT_ACTOR,
+          operation: 'create_memory_session',
+          target_kind: 'memory_session',
+          target_id: session.id,
+          scope_id: null,
+          source_refs: sourceRefs,
+          result: 'applied',
+          metadata: {
+            task_id: session.task_id,
+            status: session.status,
+          },
+        });
+        return session;
+      });
+    },
+    cliHints: { name: 'memory-session-create' },
+  };
+
+  const close_memory_session: Operation = {
+    name: 'close_memory_session',
+    description: 'Close an active memory session if it exists.',
+    params: {
+      id: { type: 'string', required: true },
+      source_refs: { type: 'array', items: { type: 'string' }, description: 'Optional provenance reference string or string array for the ledger event.' },
+    },
+    mutating: true,
+    handler: async (ctx, p) => {
+      const id = requiredString(deps, 'id', p.id);
+      const existing = await ctx.engine.getMemorySession(id);
+      if (!existing) return null;
+      if (ctx.dryRun) {
+        return {
+          action: 'close_memory_session',
+          dry_run: true,
+          session: {
+            ...existing,
+            status: 'closed',
+            closed_at: existing.closed_at ?? new Date(),
+          },
+        };
+      }
+      const sourceRefs = optionalSourceRefs(deps, p.source_refs) ?? DEFAULT_SESSION_CLOSE_SOURCE_REFS;
+      return ctx.engine.transaction(async (engine) => {
+        const session = await engine.closeMemorySession(id);
+        if (!session) return null;
+        await recordMemoryMutationEvent(engine, {
+          session_id: session.id,
+          realm_id: `session:${session.id}`,
+          actor: session.actor_ref ?? DEFAULT_REALM_UPSERT_ACTOR,
+          operation: 'close_memory_session',
+          target_kind: 'memory_session',
+          target_id: session.id,
+          scope_id: null,
+          source_refs: sourceRefs,
+          result: 'applied',
+          metadata: {
+            task_id: session.task_id,
+            status: session.status,
+          },
+        });
+        return session;
+      });
+    },
+    cliHints: { name: 'memory-session-close', positional: ['id'] },
+  };
+
+  const attach_memory_realm_to_session: Operation = {
+    name: 'attach_memory_realm_to_session',
+    description: 'Attach a memory realm to a memory session with read-only or read-write access.',
+    params: {
+      session_id: { type: 'string', required: true },
+      realm_id: { type: 'string', required: true },
+      access: { type: 'string', required: true, enum: [...MEMORY_ACCESS_MODES] },
+      instructions: { type: 'string', default: '' },
+      source_refs: { type: 'array', items: { type: 'string' }, description: 'Optional provenance reference string or string array for the ledger event.' },
+    },
+    mutating: true,
+    handler: async (ctx, p) => {
+      const input = memorySessionAttachmentInput(deps, p);
+      if (ctx.dryRun) {
+        return {
+          action: 'attach_memory_realm_to_session',
+          dry_run: true,
+          attachment: memorySessionAttachmentPreview(input),
+        };
+      }
+      const sourceRefs = optionalSourceRefs(deps, p.source_refs) ?? DEFAULT_SESSION_ATTACH_SOURCE_REFS;
+      return ctx.engine.transaction(async (engine) => {
+        const [session, realm] = await Promise.all([
+          engine.getMemorySession(input.session_id),
+          engine.getMemoryRealm(input.realm_id),
+        ]);
+        if (!session) {
+          throw invalidParams(deps, `memory session not found: ${input.session_id}`);
+        }
+        if (!realm) {
+          throw invalidParams(deps, `memory realm not found: ${input.realm_id}`);
+        }
+        const attachment = await engine.attachMemoryRealmToSession(input);
+        await recordMemoryMutationEvent(engine, {
+          session_id: attachment.session_id,
+          realm_id: attachment.realm_id,
+          actor: session.actor_ref ?? DEFAULT_REALM_UPSERT_ACTOR,
+          operation: 'attach_memory_realm_to_session',
+          target_kind: 'memory_session_attachment',
+          target_id: `${attachment.session_id}:${attachment.realm_id}`,
+          scope_id: realm.scope,
+          source_refs: sourceRefs,
+          result: 'applied',
+          metadata: {
+            access: attachment.access,
+          },
+        });
+        return attachment;
+      });
+    },
+    cliHints: { name: 'memory-session-attach-realm' },
+  };
+
+  const list_memory_session_attachments: Operation = {
+    name: 'list_memory_session_attachments',
+    description: 'List memory realm attachments for sessions or realms.',
+    params: {
+      session_id: { type: 'string' },
+      realm_id: { type: 'string' },
+      limit: { type: 'number', default: 100 },
+      offset: { type: 'number', default: 0 },
+    },
+    mutating: false,
+    handler: async (ctx, p) => ctx.engine.listMemorySessionAttachments(
+      memorySessionAttachmentFilters(deps, p),
+    ),
+    cliHints: { name: 'memory-session-attachment-list', aliases: { n: 'limit' } },
+  };
+
+  return [
+    upsert_memory_realm,
+    get_memory_realm,
+    list_memory_realms,
+    create_memory_session,
+    close_memory_session,
+    attach_memory_realm_to_session,
+    list_memory_session_attachments,
+  ];
 }

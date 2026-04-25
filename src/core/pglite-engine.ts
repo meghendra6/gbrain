@@ -39,6 +39,11 @@ import type {
   MemoryRealm,
   MemoryRealmFilters,
   MemoryRealmInput,
+  MemorySession,
+  MemorySessionAttachment,
+  MemorySessionAttachmentFilters,
+  MemorySessionAttachmentInput,
+  MemorySessionInput,
   MemoryCandidatePromotionPatch,
   MemoryCandidateStatusEvent,
   MemoryCandidateStatusEventFilters,
@@ -86,6 +91,8 @@ import {
   importContentHash,
   normalizeMemoryMutationEventInput,
   normalizeMemoryRealmInput,
+  normalizeMemorySessionAttachmentInput,
+  normalizeMemorySessionInput,
   rowToPage,
   rowToChunk,
   rowToContextAtlasEntry,
@@ -94,6 +101,8 @@ import {
   rowToMemoryCandidateContradictionEntry,
   rowToMemoryMutationEvent,
   rowToMemoryRealm,
+  rowToMemorySession,
+  rowToMemorySessionAttachment,
   rowToMemoryCandidateStatusEvent,
   rowToMemoryCandidateSupersessionEntry,
   rowToCanonicalHandoffEntry,
@@ -1689,6 +1698,99 @@ export class PGLiteEngine implements BrainEngine {
     return (rows as Record<string, unknown>[]).map(rowToMemoryRealm);
   }
 
+  async createMemorySession(input: MemorySessionInput): Promise<MemorySession> {
+    const normalized = normalizeMemorySessionInput(input);
+    const { rows } = await this.db.query(
+      `INSERT INTO memory_sessions (
+        id, task_id, status, actor_ref
+      ) VALUES ($1, $2, 'active', $3)
+      RETURNING id, task_id, status, actor_ref, created_at, closed_at`,
+      [
+        normalized.id,
+        normalized.task_id ?? null,
+        normalized.actor_ref ?? null,
+      ],
+    );
+    return rowToMemorySession(rows[0] as Record<string, unknown>);
+  }
+
+  async getMemorySession(id: string): Promise<MemorySession | null> {
+    const { rows } = await this.db.query(
+      `SELECT id, task_id, status, actor_ref, created_at, closed_at
+       FROM memory_sessions
+       WHERE id = $1`,
+      [id],
+    );
+    if (rows.length === 0) return null;
+    return rowToMemorySession(rows[0] as Record<string, unknown>);
+  }
+
+  async closeMemorySession(id: string): Promise<MemorySession | null> {
+    const { rows } = await this.db.query(
+      `UPDATE memory_sessions
+       SET status = 'closed',
+           closed_at = COALESCE(closed_at, now())
+       WHERE id = $1
+       RETURNING id, task_id, status, actor_ref, created_at, closed_at`,
+      [id],
+    );
+    if (rows.length === 0) return null;
+    return rowToMemorySession(rows[0] as Record<string, unknown>);
+  }
+
+  async attachMemoryRealmToSession(input: MemorySessionAttachmentInput): Promise<MemorySessionAttachment> {
+    const attachment = normalizeMemorySessionAttachmentInput(input);
+    const { rows } = await this.db.query(
+      `INSERT INTO memory_session_attachments (
+        session_id, realm_id, access, instructions
+      ) VALUES ($1, $2, $3, $4)
+      ON CONFLICT (session_id, realm_id) DO UPDATE SET
+        access = EXCLUDED.access,
+        instructions = EXCLUDED.instructions,
+        attached_at = now()
+      RETURNING session_id, realm_id, access, instructions, attached_at`,
+      [
+        attachment.session_id,
+        attachment.realm_id,
+        attachment.access,
+        attachment.instructions,
+      ],
+    );
+    return rowToMemorySessionAttachment(rows[0] as Record<string, unknown>);
+  }
+
+  async listMemorySessionAttachments(
+    filters?: MemorySessionAttachmentFilters,
+  ): Promise<MemorySessionAttachment[]> {
+    const { limit, offset } = normalizeMemorySessionAttachmentPagination(filters);
+    if (limit === 0) return [];
+    const params: unknown[] = [];
+    const clauses: string[] = [];
+
+    if (filters?.session_id !== undefined) {
+      params.push(filters.session_id);
+      clauses.push(`session_id = $${params.length}`);
+    }
+    if (filters?.realm_id !== undefined) {
+      params.push(filters.realm_id);
+      clauses.push(`realm_id = $${params.length}`);
+    }
+
+    params.push(limit);
+    params.push(offset);
+    const whereClause = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+    const { rows } = await this.db.query(
+      `SELECT session_id, realm_id, access, instructions, attached_at
+       FROM memory_session_attachments
+       ${whereClause}
+       ORDER BY attached_at DESC, session_id DESC, realm_id DESC
+       LIMIT $${params.length - 1}
+       OFFSET $${params.length}`,
+      params,
+    );
+    return (rows as Record<string, unknown>[]).map(rowToMemorySessionAttachment);
+  }
+
   async updateMemoryCandidateEntryStatus(id: string, patch: MemoryCandidateStatusPatch): Promise<MemoryCandidateEntry | null> {
     const current = await this.getMemoryCandidateEntry(id);
     if (!current) {
@@ -2570,6 +2672,20 @@ function normalizeMemoryRealmPagination(
   }
   if (!Number.isInteger(offset) || offset < 0) {
     throw new Error('Memory realm offset must be a non-negative integer');
+  }
+  return { limit, offset };
+}
+
+function normalizeMemorySessionAttachmentPagination(
+  filters?: MemorySessionAttachmentFilters,
+): { limit: number; offset: number } {
+  const limit = filters?.limit ?? 100;
+  const offset = filters?.offset ?? 0;
+  if (!Number.isInteger(limit) || limit < 0) {
+    throw new Error('Memory session attachment limit must be a non-negative integer');
+  }
+  if (!Number.isInteger(offset) || offset < 0) {
+    throw new Error('Memory session attachment offset must be a non-negative integer');
   }
   return { limit, offset };
 }

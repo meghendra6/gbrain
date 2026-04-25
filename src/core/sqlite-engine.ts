@@ -41,6 +41,11 @@ import type {
   MemoryRealm,
   MemoryRealmFilters,
   MemoryRealmInput,
+  MemorySession,
+  MemorySessionAttachment,
+  MemorySessionAttachmentFilters,
+  MemorySessionAttachmentInput,
+  MemorySessionInput,
   MemoryCandidatePromotionPatch,
   MemoryCandidateStatusEvent,
   MemoryCandidateStatusEventFilters,
@@ -89,10 +94,14 @@ import {
   importContentHash,
   normalizeMemoryMutationEventInput,
   normalizeMemoryRealmInput,
+  normalizeMemorySessionAttachmentInput,
+  normalizeMemorySessionInput,
   rowToCanonicalHandoffEntry,
   rowToMemoryCandidateContradictionEntry,
   rowToMemoryMutationEvent,
   rowToMemoryRealm,
+  rowToMemorySession,
+  rowToMemorySessionAttachment,
   rowToMemoryCandidateStatusEvent,
   rowToMemoryCandidateSupersessionEntry,
 } from './utils.ts';
@@ -397,6 +406,28 @@ CREATE TABLE IF NOT EXISTS memory_realms (
 );
 CREATE INDEX IF NOT EXISTS idx_memory_realms_scope
   ON memory_realms(scope, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS memory_sessions (
+  id TEXT PRIMARY KEY,
+  task_id TEXT,
+  status TEXT NOT NULL CHECK (status IN ('active', 'closed')),
+  actor_ref TEXT,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  closed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_memory_sessions_status_created
+  ON memory_sessions(status, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS memory_session_attachments (
+  session_id TEXT NOT NULL REFERENCES memory_sessions(id) ON DELETE CASCADE,
+  realm_id TEXT NOT NULL REFERENCES memory_realms(id) ON DELETE CASCADE,
+  access TEXT NOT NULL CHECK (access IN ('read_only', 'read_write')),
+  instructions TEXT NOT NULL DEFAULT '',
+  attached_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  PRIMARY KEY (session_id, realm_id)
+);
+CREATE INDEX IF NOT EXISTS idx_memory_session_attachments_realm
+  ON memory_session_attachments(realm_id, attached_at DESC);
 
 CREATE TABLE IF NOT EXISTS access_tokens (
   id TEXT PRIMARY KEY,
@@ -2052,6 +2083,108 @@ export class SQLiteEngine implements BrainEngine {
     return rows.map(rowToMemoryRealm);
   }
 
+  async createMemorySession(input: MemorySessionInput): Promise<MemorySession> {
+    const normalized = normalizeMemorySessionInput(input);
+    const timestamp = nowIso();
+    this.database.run(`
+      INSERT INTO memory_sessions (
+        id, task_id, status, actor_ref, created_at, closed_at
+      ) VALUES (?, ?, 'active', ?, ?, NULL)
+    `, sqliteBindings([
+      normalized.id,
+      normalized.task_id ?? null,
+      normalized.actor_ref ?? null,
+      timestamp,
+    ]));
+
+    const session = await this.getMemorySession(normalized.id);
+    if (!session) throw new Error(`Memory session not found after create: ${normalized.id}`);
+    return session;
+  }
+
+  async getMemorySession(id: string): Promise<MemorySession | null> {
+    const row = this.database.query(`
+      SELECT id, task_id, status, actor_ref, created_at, closed_at
+      FROM memory_sessions
+      WHERE id = ?
+    `).get(id) as Record<string, unknown> | null;
+    return row ? rowToMemorySession(row) : null;
+  }
+
+  async closeMemorySession(id: string): Promise<MemorySession | null> {
+    const timestamp = nowIso();
+    const result = this.database.run(`
+      UPDATE memory_sessions
+      SET status = 'closed',
+          closed_at = COALESCE(closed_at, ?)
+      WHERE id = ?
+    `, sqliteBindings([timestamp, id]));
+    if (result.changes === 0) return null;
+    return this.getMemorySession(id);
+  }
+
+  async attachMemoryRealmToSession(input: MemorySessionAttachmentInput): Promise<MemorySessionAttachment> {
+    const attachment = normalizeMemorySessionAttachmentInput(input);
+    const timestamp = nowIso();
+    this.database.run(`
+      INSERT INTO memory_session_attachments (
+        session_id, realm_id, access, instructions, attached_at
+      ) VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(session_id, realm_id) DO UPDATE SET
+        access = excluded.access,
+        instructions = excluded.instructions,
+        attached_at = excluded.attached_at
+    `, sqliteBindings([
+      attachment.session_id,
+      attachment.realm_id,
+      attachment.access,
+      attachment.instructions,
+      timestamp,
+    ]));
+
+    const rows = await this.listMemorySessionAttachments({
+      session_id: attachment.session_id,
+      realm_id: attachment.realm_id,
+      limit: 1,
+    });
+    const row = rows[0];
+    if (!row) {
+      throw new Error(`Memory session attachment not found after attach: ${attachment.session_id}:${attachment.realm_id}`);
+    }
+    return row;
+  }
+
+  async listMemorySessionAttachments(
+    filters?: MemorySessionAttachmentFilters,
+  ): Promise<MemorySessionAttachment[]> {
+    const { limit, offset } = normalizeMemorySessionAttachmentPagination(filters);
+    if (limit === 0) return [];
+    const clauses: string[] = [];
+    const params: Array<string | number> = [];
+
+    if (filters?.session_id !== undefined) {
+      clauses.push('session_id = ?');
+      params.push(filters.session_id);
+    }
+    if (filters?.realm_id !== undefined) {
+      clauses.push('realm_id = ?');
+      params.push(filters.realm_id);
+    }
+
+    params.push(limit);
+    params.push(offset);
+    const whereClause = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+    const rows = this.database.query(`
+      SELECT session_id, realm_id, access, instructions, attached_at
+      FROM memory_session_attachments
+      ${whereClause}
+      ORDER BY attached_at DESC, session_id DESC, realm_id DESC
+      LIMIT ?
+      OFFSET ?
+    `).all(...sqliteBindings(params)) as Record<string, unknown>[];
+    return rows.map(rowToMemorySessionAttachment);
+  }
+
   async updateMemoryCandidateEntryStatus(id: string, patch: MemoryCandidateStatusPatch): Promise<MemoryCandidateEntry | null> {
     const current = await this.getMemoryCandidateEntry(id);
     if (!current) {
@@ -3392,6 +3525,10 @@ export class SQLiteEngine implements BrainEngine {
         case 30:
           this.repairMemoryMutationEventRealmUpsertContract();
           break;
+        case 31:
+          this.ensureMemorySessionSchema();
+          this.repairMemoryMutationEventSessionAttachmentContract();
+          break;
         default:
           throw new Error(`SQLite migration ${version} is not implemented`);
       }
@@ -3941,6 +4078,183 @@ export class SQLiteEngine implements BrainEngine {
     this.ensureMemoryMutationEventSourceRefEntryTriggers();
   }
 
+  private repairMemoryMutationEventSessionAttachmentContract(): void {
+    if (!this.sqliteTableExists('memory_mutation_events')) {
+      this.ensureMemoryMutationEventSchema();
+      return;
+    }
+
+    this.database.exec(`
+      DROP TABLE IF EXISTS memory_mutation_events_v31;
+      CREATE TABLE memory_mutation_events_v31 (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        realm_id TEXT NOT NULL,
+        actor TEXT NOT NULL,
+        operation TEXT NOT NULL CHECK (
+          operation IN (
+            'create_memory_session',
+            'close_memory_session',
+            'expire_memory_session',
+            'revoke_memory_session',
+            'dry_run_memory_mutation',
+            'list_memory_mutation_events',
+            'record_memory_mutation_event',
+            'create_memory_patch_candidate',
+            'dry_run_memory_patch_candidate',
+            'review_memory_patch_candidate',
+            'apply_memory_patch_candidate',
+            'create_redaction_plan',
+            'dry_run_redaction_plan',
+            'execute_redaction_plan',
+            'put_page',
+            'delete_page',
+            'upsert_profile_memory_entry',
+            'write_profile_memory_entry',
+            'delete_profile_memory_entry',
+            'record_personal_episode',
+            'write_personal_episode_entry',
+            'delete_personal_episode_entry',
+            'upsert_memory_realm',
+            'attach_memory_realm_to_session',
+            'create_memory_candidate_entry',
+            'advance_memory_candidate_status',
+            'reject_memory_candidate_entry',
+            'delete_memory_candidate_entry',
+            'promote_memory_candidate_entry',
+            'supersede_memory_candidate_entry',
+            'export_memory_artifact',
+            'sync_memory_artifact',
+            'repair_memory_ledger',
+            'physical_delete_memory_record'
+          )
+        ),
+        target_kind TEXT NOT NULL CHECK (
+          target_kind IN (
+            'page',
+            'source_record',
+            'task_thread',
+            'working_set',
+            'task_event',
+            'task_episode',
+            'attempt',
+            'decision',
+            'procedure',
+            'memory_candidate',
+            'memory_patch_candidate',
+            'profile_memory',
+            'personal_episode',
+            'memory_realm',
+            'memory_session',
+            'memory_session_attachment',
+            'context_map',
+            'context_atlas',
+            'file_artifact',
+            'export_artifact',
+            'ledger_event'
+          )
+        ),
+        target_id TEXT NOT NULL CHECK (
+          length(trim(target_id, char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279))) > 0
+        ),
+        scope_id TEXT,
+        source_refs TEXT NOT NULL CHECK (
+          json_valid(source_refs)
+          AND json_type(source_refs) = 'array'
+          AND json_array_length(source_refs) > 0
+        ),
+        expected_target_snapshot_hash TEXT,
+        current_target_snapshot_hash TEXT,
+        result TEXT NOT NULL CHECK (
+          result IN (
+            'dry_run',
+            'staged_for_review',
+            'applied',
+            'conflict',
+            'denied',
+            'failed',
+            'redacted'
+          )
+        ),
+        conflict_info TEXT,
+        dry_run INTEGER NOT NULL DEFAULT 0 CHECK (
+          dry_run IN (0, 1)
+          AND (
+            (result = 'dry_run' AND dry_run = 1)
+            OR (result <> 'dry_run' AND dry_run = 0)
+          )
+        ),
+        metadata TEXT NOT NULL DEFAULT '{}',
+        redaction_visibility TEXT NOT NULL DEFAULT 'visible' CHECK (
+          redaction_visibility IN ('visible', 'partially_redacted', 'tombstoned')
+        ),
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        decided_at TEXT,
+        applied_at TEXT
+      );
+      INSERT INTO memory_mutation_events_v31 (
+        id,
+        session_id,
+        realm_id,
+        actor,
+        operation,
+        target_kind,
+        target_id,
+        scope_id,
+        source_refs,
+        expected_target_snapshot_hash,
+        current_target_snapshot_hash,
+        result,
+        conflict_info,
+        dry_run,
+        metadata,
+        redaction_visibility,
+        created_at,
+        decided_at,
+        applied_at
+      )
+      SELECT
+        id,
+        session_id,
+        realm_id,
+        actor,
+        operation,
+        target_kind,
+        target_id,
+        scope_id,
+        source_refs,
+        expected_target_snapshot_hash,
+        current_target_snapshot_hash,
+        result,
+        conflict_info,
+        dry_run,
+        metadata,
+        redaction_visibility,
+        created_at,
+        decided_at,
+        applied_at
+      FROM memory_mutation_events;
+      DROP TABLE memory_mutation_events;
+      ALTER TABLE memory_mutation_events_v31 RENAME TO memory_mutation_events;
+      CREATE INDEX IF NOT EXISTS idx_memory_mutation_events_session_created
+        ON memory_mutation_events(session_id, created_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_memory_mutation_events_realm_created
+        ON memory_mutation_events(realm_id, created_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_memory_mutation_events_actor_created
+        ON memory_mutation_events(actor, created_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_memory_mutation_events_operation_created
+        ON memory_mutation_events(operation, created_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_memory_mutation_events_target
+        ON memory_mutation_events(target_kind, target_id);
+      CREATE INDEX IF NOT EXISTS idx_memory_mutation_events_result_created
+        ON memory_mutation_events(result, created_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_memory_mutation_events_scope_created
+        ON memory_mutation_events(scope_id, created_at DESC, id DESC)
+        WHERE scope_id IS NOT NULL;
+    `);
+    this.ensureMemoryMutationEventSourceRefEntryTriggers();
+  }
+
   private ensureMemoryMutationEventSourceRefEntryTriggers(): void {
     this.database.exec(`
       DROP TRIGGER IF EXISTS trg_memory_mutation_events_source_refs_insert;
@@ -4002,6 +4316,7 @@ export class SQLiteEngine implements BrainEngine {
             'write_personal_episode_entry',
             'delete_personal_episode_entry',
             'upsert_memory_realm',
+            'attach_memory_realm_to_session',
             'create_memory_candidate_entry',
             'advance_memory_candidate_status',
             'reject_memory_candidate_entry',
@@ -4030,6 +4345,8 @@ export class SQLiteEngine implements BrainEngine {
             'profile_memory',
             'personal_episode',
             'memory_realm',
+            'memory_session',
+            'memory_session_attachment',
             'context_map',
             'context_atlas',
             'file_artifact',
@@ -4111,6 +4428,32 @@ export class SQLiteEngine implements BrainEngine {
       );
       CREATE INDEX IF NOT EXISTS idx_memory_realms_scope
         ON memory_realms(scope, updated_at DESC);
+    `);
+  }
+
+  private ensureMemorySessionSchema(): void {
+    this.database.exec(`
+      CREATE TABLE IF NOT EXISTS memory_sessions (
+        id TEXT PRIMARY KEY,
+        task_id TEXT,
+        status TEXT NOT NULL CHECK (status IN ('active', 'closed')),
+        actor_ref TEXT,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        closed_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_memory_sessions_status_created
+        ON memory_sessions(status, created_at DESC);
+
+      CREATE TABLE IF NOT EXISTS memory_session_attachments (
+        session_id TEXT NOT NULL REFERENCES memory_sessions(id) ON DELETE CASCADE,
+        realm_id TEXT NOT NULL REFERENCES memory_realms(id) ON DELETE CASCADE,
+        access TEXT NOT NULL CHECK (access IN ('read_only', 'read_write')),
+        instructions TEXT NOT NULL DEFAULT '',
+        attached_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        PRIMARY KEY (session_id, realm_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_memory_session_attachments_realm
+        ON memory_session_attachments(realm_id, attached_at DESC);
     `);
   }
 
@@ -5174,6 +5517,20 @@ function normalizeMemoryRealmPagination(
   }
   if (!Number.isInteger(offset) || offset < 0) {
     throw new Error('Memory realm offset must be a non-negative integer');
+  }
+  return { limit, offset };
+}
+
+function normalizeMemorySessionAttachmentPagination(
+  filters?: MemorySessionAttachmentFilters,
+): { limit: number; offset: number } {
+  const limit = filters?.limit ?? 100;
+  const offset = filters?.offset ?? 0;
+  if (!Number.isInteger(limit) || limit < 0) {
+    throw new Error('Memory session attachment limit must be a non-negative integer');
+  }
+  if (!Number.isInteger(offset) || offset < 0) {
+    throw new Error('Memory session attachment offset must be a non-negative integer');
   }
   return { limit, offset };
 }

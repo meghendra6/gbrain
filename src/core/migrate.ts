@@ -1256,6 +1256,113 @@ const MIGRATIONS: Migration[] = [
       END $$;
     `,
   },
+  {
+    version: 31,
+    name: 'memory_sessions_and_realm_attachments',
+    sql: `
+      CREATE TABLE IF NOT EXISTS memory_sessions (
+        id TEXT PRIMARY KEY,
+        task_id TEXT,
+        status TEXT NOT NULL CHECK (status IN ('active', 'closed')),
+        actor_ref TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        closed_at TIMESTAMPTZ
+      );
+      CREATE INDEX IF NOT EXISTS idx_memory_sessions_status_created
+        ON memory_sessions(status, created_at DESC);
+
+      CREATE TABLE IF NOT EXISTS memory_session_attachments (
+        session_id TEXT NOT NULL REFERENCES memory_sessions(id) ON DELETE CASCADE,
+        realm_id TEXT NOT NULL REFERENCES memory_realms(id) ON DELETE CASCADE,
+        access TEXT NOT NULL CHECK (access IN ('read_only', 'read_write')),
+        instructions TEXT NOT NULL DEFAULT '',
+        attached_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (session_id, realm_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_memory_session_attachments_realm
+        ON memory_session_attachments(realm_id, attached_at DESC);
+
+      DO $$
+      BEGIN
+        IF to_regclass('memory_mutation_events') IS NOT NULL THEN
+          ALTER TABLE memory_mutation_events
+            DROP CONSTRAINT IF EXISTS chk_memory_mutation_events_operation;
+          ALTER TABLE memory_mutation_events
+            ADD CONSTRAINT chk_memory_mutation_events_operation
+            CHECK (
+              operation IN (
+                'create_memory_session',
+                'close_memory_session',
+                'expire_memory_session',
+                'revoke_memory_session',
+                'dry_run_memory_mutation',
+                'list_memory_mutation_events',
+                'record_memory_mutation_event',
+                'create_memory_patch_candidate',
+                'dry_run_memory_patch_candidate',
+                'review_memory_patch_candidate',
+                'apply_memory_patch_candidate',
+                'create_redaction_plan',
+                'dry_run_redaction_plan',
+                'execute_redaction_plan',
+                'put_page',
+                'delete_page',
+                'upsert_profile_memory_entry',
+                'write_profile_memory_entry',
+                'delete_profile_memory_entry',
+                'record_personal_episode',
+                'write_personal_episode_entry',
+                'delete_personal_episode_entry',
+                'upsert_memory_realm',
+                'attach_memory_realm_to_session',
+                'create_memory_candidate_entry',
+                'advance_memory_candidate_status',
+                'reject_memory_candidate_entry',
+                'delete_memory_candidate_entry',
+                'promote_memory_candidate_entry',
+                'supersede_memory_candidate_entry',
+                'export_memory_artifact',
+                'sync_memory_artifact',
+                'repair_memory_ledger',
+                'physical_delete_memory_record'
+              )
+            );
+
+          ALTER TABLE memory_mutation_events
+            DROP CONSTRAINT IF EXISTS chk_memory_mutation_events_target_kind;
+          ALTER TABLE memory_mutation_events
+            DROP CONSTRAINT IF EXISTS memory_mutation_events_target_kind_check;
+          ALTER TABLE memory_mutation_events
+            ADD CONSTRAINT chk_memory_mutation_events_target_kind
+            CHECK (
+              target_kind IN (
+                'page',
+                'source_record',
+                'task_thread',
+                'working_set',
+                'task_event',
+                'task_episode',
+                'attempt',
+                'decision',
+                'procedure',
+                'memory_candidate',
+                'memory_patch_candidate',
+                'profile_memory',
+                'personal_episode',
+                'memory_realm',
+                'memory_session',
+                'memory_session_attachment',
+                'context_map',
+                'context_atlas',
+                'file_artifact',
+                'export_artifact',
+                'ledger_event'
+              )
+            );
+        END IF;
+      END $$;
+    `,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.length > 0

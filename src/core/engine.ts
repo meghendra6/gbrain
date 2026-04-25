@@ -23,6 +23,11 @@ import type {
   MemoryRealm,
   MemoryRealmFilters,
   MemoryRealmInput,
+  MemorySession,
+  MemorySessionAttachment,
+  MemorySessionAttachmentFilters,
+  MemorySessionAttachmentInput,
+  MemorySessionInput,
   MemoryCandidatePromotionPatch,
   MemoryCandidateStatusEvent,
   MemoryCandidateStatusEventFilters,
@@ -183,6 +188,13 @@ export interface BrainEngine {
   upsertMemoryRealm(input: MemoryRealmInput): Promise<MemoryRealm>;
   getMemoryRealm(id: string): Promise<MemoryRealm | null>;
   listMemoryRealms(filters?: MemoryRealmFilters): Promise<MemoryRealm[]>;
+
+  // Memory sessions and realm attachments
+  createMemorySession(input: MemorySessionInput): Promise<MemorySession>;
+  getMemorySession(id: string): Promise<MemorySession | null>;
+  closeMemorySession(id: string): Promise<MemorySession | null>;
+  attachMemoryRealmToSession(input: MemorySessionAttachmentInput): Promise<MemorySessionAttachment>;
+  listMemorySessionAttachments(filters?: MemorySessionAttachmentFilters): Promise<MemorySessionAttachment[]>;
 
   // Note manifest
   upsertNoteManifestEntry(input: NoteManifestEntryInput): Promise<NoteManifestEntry>;

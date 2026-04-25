@@ -745,6 +745,8 @@ export type MemoryMutationTargetKind =
   | 'profile_memory'
   | 'personal_episode'
   | 'memory_realm'
+  | 'memory_session'
+  | 'memory_session_attachment'
   | 'context_map'
   | 'context_atlas'
   | 'file_artifact'
@@ -775,6 +777,7 @@ export type MemoryMutationOperationName =
   | 'write_personal_episode_entry'
   | 'delete_personal_episode_entry'
   | 'upsert_memory_realm'
+  | 'attach_memory_realm_to_session'
   | 'create_memory_candidate_entry'
   | 'advance_memory_candidate_status'
   | 'reject_memory_candidate_entry'
@@ -878,6 +881,52 @@ export interface MemoryRealmInput {
 export interface MemoryRealmFilters {
   scope?: MemoryRealmScope;
   include_archived?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
+export type MemorySessionStatus = 'active' | 'closed';
+
+export interface MemorySession {
+  id: string;
+  task_id: string | null;
+  status: MemorySessionStatus;
+  actor_ref: string | null;
+  created_at: Date;
+  closed_at: Date | null;
+}
+
+export interface MemorySessionInput {
+  id: string;
+  task_id?: string | null;
+  actor_ref?: string | null;
+}
+
+export interface MemorySessionFilters {
+  status?: MemorySessionStatus;
+  task_id?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface MemorySessionAttachment {
+  session_id: string;
+  realm_id: string;
+  access: MemoryAccessMode;
+  instructions: string;
+  attached_at: Date;
+}
+
+export interface MemorySessionAttachmentInput {
+  session_id: string;
+  realm_id: string;
+  access: MemoryAccessMode;
+  instructions?: string;
+}
+
+export interface MemorySessionAttachmentFilters {
+  session_id?: string;
+  realm_id?: string;
   limit?: number;
   offset?: number;
 }

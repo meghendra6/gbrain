@@ -343,6 +343,36 @@ CREATE INDEX IF NOT EXISTS idx_memory_realms_scope
   ON memory_realms(scope, updated_at DESC);
 
 -- ============================================================
+-- memory_sessions: active agent memory sessions
+-- ============================================================
+CREATE TABLE IF NOT EXISTS memory_sessions (
+  id TEXT PRIMARY KEY,
+  task_id TEXT,
+  status TEXT NOT NULL CHECK (status IN ('active', 'closed')),
+  actor_ref TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  closed_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_memory_sessions_status_created
+  ON memory_sessions(status, created_at DESC);
+
+-- ============================================================
+-- memory_session_attachments: realms attached to sessions
+-- ============================================================
+CREATE TABLE IF NOT EXISTS memory_session_attachments (
+  session_id TEXT NOT NULL REFERENCES memory_sessions(id) ON DELETE CASCADE,
+  realm_id TEXT NOT NULL REFERENCES memory_realms(id) ON DELETE CASCADE,
+  access TEXT NOT NULL CHECK (access IN ('read_only', 'read_write')),
+  instructions TEXT NOT NULL DEFAULT '',
+  attached_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (session_id, realm_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_memory_session_attachments_realm
+  ON memory_session_attachments(realm_id, attached_at DESC);
+
+-- ============================================================
 -- config: brain-level settings
 -- ============================================================
 CREATE TABLE IF NOT EXISTS config (

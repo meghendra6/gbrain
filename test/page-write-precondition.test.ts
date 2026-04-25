@@ -531,6 +531,54 @@ describe('put_page content hash preconditions and mutation ledger', () => {
     });
   });
 
+  test('bracketed MBrain source citation string is accepted as one put_page source ref', async () => {
+    await withSqliteEngine(async (ctx) => {
+      const put = getOperation('put_page');
+      const slug = 'concepts/bracketed-mbrain-source-ref';
+      const sessionId = 'put-page-bracketed-mbrain-source-ref-session';
+      const sourceRef = '[Source: User, direct message, 2026-04-26 KST]';
+
+      await put.handler(ctx, {
+        slug,
+        content: pageContent(
+          'Bracketed MBrain Source Ref',
+          'Bracketed MBrain source citations should be accepted.',
+          '- 2026-04-26 | Bracketed source ref test.',
+        ),
+        session_id: sessionId,
+        source_refs: sourceRef,
+      });
+
+      const events = await ctx.engine.listMemoryMutationEvents({ session_id: sessionId });
+      expect(events).toHaveLength(1);
+      expect(events[0].source_refs).toEqual([sourceRef]);
+    });
+  });
+
+  test('comma-containing non-bracket source citation string is accepted as one put_page source ref', async () => {
+    await withSqliteEngine(async (ctx) => {
+      const put = getOperation('put_page');
+      const slug = 'concepts/comma-containing-source-ref';
+      const sessionId = 'put-page-comma-containing-source-ref-session';
+      const sourceRef = 'Source: User, direct message, 2026-04-26 KST';
+
+      await put.handler(ctx, {
+        slug,
+        content: pageContent(
+          'Comma Containing Source Ref',
+          'Comma-containing source citations should be accepted.',
+          '- 2026-04-26 | Comma-containing source ref test.',
+        ),
+        session_id: sessionId,
+        source_refs: sourceRef,
+      });
+
+      const events = await ctx.engine.listMemoryMutationEvents({ session_id: sessionId });
+      expect(events).toHaveLength(1);
+      expect(events[0].source_refs).toEqual([sourceRef]);
+    });
+  });
+
   test('non-string array source_refs reject before page mutation or ledger recording', async () => {
     await withSqliteEngine(async (ctx) => {
       const put = getOperation('put_page');

@@ -1298,14 +1298,18 @@ function putPageSourceRefs(value: unknown): string[] {
       try {
         rawRefs = JSON.parse(trimmed);
       } catch {
-        throw new OperationError('invalid_params', 'source_refs must be valid JSON when passed as an array string.');
+        rawRefs = undefined;
       }
-      if (!Array.isArray(rawRefs)) {
-        throw new OperationError('invalid_params', 'source_refs JSON value must be an array.');
+      if (rawRefs !== undefined) {
+        if (!Array.isArray(rawRefs)) {
+          throw new OperationError('invalid_params', 'source_refs JSON value must be an array.');
+        }
+        parsed = rawRefs.map((ref, index) => putPageSourceRef(ref, `source_refs[${index}]`));
+      } else {
+        parsed = parsePutPageSourceRefString(value);
       }
-      parsed = rawRefs.map((ref, index) => putPageSourceRef(ref, `source_refs[${index}]`));
     } else {
-      parsed = parseStringListParam(value, 'source_refs');
+      parsed = parsePutPageSourceRefString(value);
     }
   } else {
     throw new OperationError('invalid_params', 'source_refs must be an array or string list.');
@@ -1316,6 +1320,15 @@ function putPageSourceRefs(value: unknown): string[] {
     throw new OperationError('invalid_params', 'source_refs must be a non-empty array of strings');
   }
   return refs;
+}
+
+function parsePutPageSourceRefString(value: string): string[] {
+  const trimmed = value.trim();
+  if (trimmed === '') return [];
+  return trimmed
+    .split(/\r?\n/)
+    .map((ref) => ref.trim())
+    .filter((ref) => ref.length > 0);
 }
 
 function putPageSourceRef(value: unknown, key: string): string {

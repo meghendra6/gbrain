@@ -94,6 +94,12 @@ import {
   rowToTaskWorkingSet,
 } from './utils.ts';
 
+type PostgresConnection = ReturnType<typeof postgres>;
+type PostgresNestedConnection = PostgresConnection & {
+  begin?: unknown;
+  savepoint?: unknown;
+};
+
 const INTERACTION_ID_LOOKUP_BATCH_SIZE = 500;
 
 type PostgresParam = string | number | boolean | null | Date | Uint8Array | string[];
@@ -185,14 +191,43 @@ export class PostgresEngine implements BrainEngine {
   }
 
   async transaction<T>(fn: (engine: BrainEngine) => Promise<T>): Promise<T> {
-    const conn = this.sql;
-    return conn.begin<Promise<T>>(async (tx) => {
-      // Create a scoped engine with tx as its connection, no shared state mutation
+    const conn = this.sql as PostgresNestedConnection;
+    const runInConnection = (tx: unknown) => {
       const txEngine = Object.create(this) as PostgresEngine;
-      Object.defineProperty(txEngine, 'sql', { get: () => tx });
-      Object.defineProperty(txEngine, '_sql', { value: tx as unknown as ReturnType<typeof postgres>, writable: false });
+      const txConn = tx as PostgresConnection;
+      Object.defineProperty(txEngine, 'sql', { get: () => txConn });
+      Object.defineProperty(txEngine, '_sql', { value: txConn, writable: false });
       return fn(txEngine);
-    });
+    };
+
+    if (typeof conn.begin === 'function') {
+      const begin = conn.begin as <Result>(
+        callback: (tx: unknown) => Promise<Result>,
+      ) => Promise<Result>;
+      return begin((tx) => runInConnection(tx));
+    }
+    if (typeof conn.savepoint === 'function') {
+      const savepointFn = conn.savepoint as <Result>(
+        callback: (tx: unknown) => Promise<Result>,
+      ) => Promise<Result>;
+      return savepointFn((tx) => runInConnection(tx));
+    }
+
+    const savepoint = `mbrain_nested_${crypto.randomUUID().replace(/-/g, '')}`;
+    await conn.unsafe(`SAVEPOINT ${savepoint}`);
+    try {
+      const result = await fn(this);
+      await conn.unsafe(`RELEASE SAVEPOINT ${savepoint}`);
+      return result;
+    } catch (error) {
+      try {
+        await conn.unsafe(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+        await conn.unsafe(`RELEASE SAVEPOINT ${savepoint}`);
+      } catch {
+        // Best effort nested rollback.
+      }
+      throw error;
+    }
   }
 
   // Pages CRUD

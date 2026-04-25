@@ -148,7 +148,26 @@ export class PGLiteEngine implements BrainEngine {
   }
 
   async transaction<T>(fn: (engine: BrainEngine) => Promise<T>): Promise<T> {
-    return this.db.transaction(async (tx) => {
+    const db = this.db as PGLiteDB & { transaction?: PGLiteDB['transaction'] };
+    if (typeof db.transaction !== 'function') {
+      const savepoint = `mbrain_nested_${crypto.randomUUID().replace(/-/g, '')}`;
+      await db.query(`SAVEPOINT ${savepoint}`);
+      try {
+        const result = await fn(this);
+        await db.query(`RELEASE SAVEPOINT ${savepoint}`);
+        return result;
+      } catch (error) {
+        try {
+          await db.query(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+          await db.query(`RELEASE SAVEPOINT ${savepoint}`);
+        } catch {
+          // Best effort nested rollback.
+        }
+        throw error;
+      }
+    }
+
+    return db.transaction(async (tx) => {
       const txEngine = Object.create(this) as PGLiteEngine;
       Object.defineProperty(txEngine, 'db', { get: () => tx });
       return fn(txEngine);

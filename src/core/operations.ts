@@ -36,6 +36,7 @@ import { DEFAULT_PROFILE_MEMORY_SCOPE_ID, getPersonalProfileLookupRoute } from '
 import { selectPersonalWriteTarget } from './services/personal-write-target-service.ts';
 import { getPrecisionLookupRoute } from './services/precision-lookup-route-service.ts';
 import { evaluateScopeGate } from './services/scope-gate-service.ts';
+import { planRetrievalRequest } from './services/retrieval-request-planner-service.ts';
 import { selectRetrievalRoute } from './services/retrieval-route-selector-service.ts';
 import { getWorkspaceCorpusCard } from './services/workspace-corpus-card-service.ts';
 import { getWorkspaceOrientationBundle } from './services/workspace-orientation-bundle-service.ts';
@@ -52,7 +53,14 @@ import { rebuildNoteSectionEntries } from './services/note-section-service.ts';
 import { buildTaskResumeCard } from './services/task-memory-service.ts';
 import * as db from './db.ts';
 import { getUnsupportedCapabilityReason } from './offline-profile.ts';
-import type { RetrievalRouteIntent, RetrievalTraceWriteOutcome, ScopeGatePolicy } from './types.ts';
+import type {
+  PersonalEpisodeSourceKind,
+  ProfileMemoryType,
+  RetrievalRequestPlannerInput,
+  RetrievalRouteIntent,
+  RetrievalTraceWriteOutcome,
+  ScopeGatePolicy,
+} from './types.ts';
 
 // --- MCP server instructions ---
 //
@@ -157,6 +165,35 @@ const RETRIEVAL_ROUTE_INTENTS = [
   'personal_profile_lookup',
   'personal_episode_lookup',
 ] as const satisfies readonly RetrievalRouteIntent[];
+
+const REQUESTED_SCOPES = [
+  'work',
+  'personal',
+  'mixed',
+] as const;
+
+const PROFILE_MEMORY_TYPES = [
+  'preference',
+  'routine',
+  'personal_project',
+  'stable_fact',
+  'relationship_boundary',
+  'other',
+] as const satisfies readonly ProfileMemoryType[];
+
+const PERSONAL_EPISODE_SOURCE_KINDS = [
+  'chat',
+  'note',
+  'import',
+  'meeting',
+  'reminder',
+  'other',
+] as const satisfies readonly PersonalEpisodeSourceKind[];
+
+const PERSONAL_ROUTE_KINDS = [
+  'profile',
+  'episode',
+] as const;
 
 const SCOPE_GATE_POLICIES = [
   'allow',
@@ -2876,6 +2913,67 @@ const select_retrieval_route: Operation = {
   cliHints: { name: 'retrieval-route' },
 };
 
+const plan_retrieval_request: Operation = {
+  name: 'plan_retrieval_request',
+  description: 'Plan one or more retrieval route selections for a high-level request without executing them.',
+  params: {
+    intent: { type: 'string', description: 'Optional explicit intent override', enum: [...RETRIEVAL_ROUTE_INTENTS] },
+    allow_decomposition: { type: 'boolean', description: 'Allow deterministic decomposition into multiple route intents' },
+    task_id: { type: 'string', description: 'Task id for task_resume decomposition or inference' },
+    persist_trace: { type: 'boolean', description: 'Forwarded trace preference for planned selector inputs' },
+    requested_scope: { type: 'string', description: 'Optional explicit scope override', enum: [...REQUESTED_SCOPES] },
+    personal_route_kind: { type: 'string', description: 'Personal-side route kind for mixed_scope_bridge planning', enum: [...PERSONAL_ROUTE_KINDS] },
+    map_id: { type: 'string', description: 'Optional context map id for broad_synthesis planning' },
+    scope_id: { type: 'string', description: 'Scope id for planned route selection' },
+    kind: { type: 'string', description: 'Optional map kind filter for broad_synthesis planning' },
+    query: { type: 'string', description: 'Query string for synthesis or signal inference' },
+    limit: { type: 'number', description: 'Optional broad_synthesis match limit' },
+    slug: { type: 'string', description: 'Exact slug for precision_lookup planning' },
+    path: { type: 'string', description: 'Exact path for precision_lookup planning, optionally with #section/path fragment' },
+    section_id: { type: 'string', description: 'Exact section id for precision_lookup planning' },
+    source_ref: { type: 'string', description: 'Exact extracted source reference string for precision_lookup planning' },
+    subject: { type: 'string', description: 'Exact profile-memory subject for personal_profile_lookup or mixed planning' },
+    profile_type: {
+      type: 'string',
+      description: 'Optional exact profile-memory type filter for personal_profile_lookup planning',
+      enum: [...PROFILE_MEMORY_TYPES],
+    },
+    episode_title: { type: 'string', description: 'Exact personal episode title for personal_episode_lookup planning' },
+    episode_source_kind: {
+      type: 'string',
+      description: 'Optional exact personal episode source kind filter for personal_episode_lookup planning',
+      enum: [...PERSONAL_EPISODE_SOURCE_KINDS],
+    },
+  },
+  mutating: false,
+  handler: async (_ctx, p) => {
+    const input: RetrievalRequestPlannerInput = {
+      intent: parseEnumParam(p.intent, 'intent', RETRIEVAL_ROUTE_INTENTS),
+      allow_decomposition: p.allow_decomposition === true,
+      task_id: typeof p.task_id === 'string' ? p.task_id : undefined,
+      persist_trace: p.persist_trace === true,
+      requested_scope: parseEnumParam(p.requested_scope, 'requested_scope', REQUESTED_SCOPES),
+      personal_route_kind: parseEnumParam(p.personal_route_kind, 'personal_route_kind', PERSONAL_ROUTE_KINDS),
+      map_id: typeof p.map_id === 'string' ? p.map_id : undefined,
+      scope_id: typeof p.scope_id === 'string' ? p.scope_id : undefined,
+      kind: typeof p.kind === 'string' ? p.kind : undefined,
+      query: typeof p.query === 'string' ? p.query : undefined,
+      limit: typeof p.limit === 'number' ? p.limit : undefined,
+      slug: typeof p.slug === 'string' ? p.slug : undefined,
+      path: typeof p.path === 'string' ? p.path : undefined,
+      section_id: typeof p.section_id === 'string' ? p.section_id : undefined,
+      source_ref: typeof p.source_ref === 'string' ? p.source_ref : undefined,
+      subject: typeof p.subject === 'string' ? p.subject : undefined,
+      profile_type: parseEnumParam(p.profile_type, 'profile_type', PROFILE_MEMORY_TYPES),
+      episode_title: typeof p.episode_title === 'string' ? p.episode_title : undefined,
+      episode_source_kind: parseEnumParam(p.episode_source_kind, 'episode_source_kind', PERSONAL_EPISODE_SOURCE_KINDS),
+    };
+
+    return planRetrievalRequest(input);
+  },
+  cliHints: { name: 'plan-retrieval-request' },
+};
+
 const get_workspace_system_card: Operation = {
   name: 'get_workspace_system_card',
   description: 'Render a compact workspace system card from the current context-map report.',
@@ -3450,7 +3548,7 @@ export const operations: Operation[] = [
   // Structural graph
   get_note_structural_neighbors, find_note_structural_path,
   // Persisted context maps
-  build_context_map, get_context_map_entry, list_context_map_entries, get_context_map_report, get_context_map_explanation, query_context_map, find_context_map_path, get_broad_synthesis_route, get_precision_lookup_route, get_mixed_scope_bridge, get_mixed_scope_disclosure, get_personal_profile_lookup_route, get_personal_episode_lookup_route, select_personal_write_target, preview_personal_export, evaluate_scope_gate, select_retrieval_route, get_workspace_system_card, get_workspace_project_card, get_workspace_orientation_bundle, get_workspace_corpus_card,
+  build_context_map, get_context_map_entry, list_context_map_entries, get_context_map_report, get_context_map_explanation, query_context_map, find_context_map_path, get_broad_synthesis_route, get_precision_lookup_route, get_mixed_scope_bridge, get_mixed_scope_disclosure, get_personal_profile_lookup_route, get_personal_episode_lookup_route, select_personal_write_target, preview_personal_export, evaluate_scope_gate, select_retrieval_route, plan_retrieval_request, get_workspace_system_card, get_workspace_project_card, get_workspace_orientation_bundle, get_workspace_corpus_card,
   // Context atlas registry
   build_context_atlas, get_context_atlas_entry, list_context_atlas_entries, select_context_atlas_entry, get_context_atlas_overview, get_context_atlas_report, get_atlas_orientation_card, get_atlas_orientation_bundle,
   // Operational memory

@@ -86,7 +86,7 @@ function invalidInsertSql(column: string, value: string): string {
       'session-1',
       'work',
       'agent:test',
-      'put_page',
+      ${column === 'operation' ? `'${value}'` : "'put_page'"},
       ${column === 'target_kind' ? `'${value}'` : "'page'"},
       ${column === 'result' ? `'${value}'` : "'applied'"},
       ${column === 'dry_run' ? value : 'false'},
@@ -123,6 +123,7 @@ describe('memory operations control-plane schema', () => {
       .get() as { name: string; sql: string } | null;
 
     expect(table?.name).toBe('memory_mutation_events');
+    expect(table?.sql).toContain("operation TEXT NOT NULL CHECK");
     expect(table?.sql).toContain("target_kind TEXT NOT NULL CHECK");
     expect(table?.sql).toContain("result TEXT NOT NULL CHECK");
     expect(table?.sql).toContain("dry_run INTEGER NOT NULL DEFAULT 0 CHECK (dry_run IN (0, 1))");
@@ -133,18 +134,21 @@ describe('memory operations control-plane schema', () => {
 
     const indexes = db
       .query(
-        `SELECT name
+        `SELECT name, sql
          FROM sqlite_master
          WHERE type = 'index'
            AND tbl_name = 'memory_mutation_events'`,
       )
-      .all() as Array<{ name: string }>;
+      .all() as Array<{ name: string; sql: string }>;
     const indexNames = indexes.map((row) => row.name);
     for (const indexName of MUTATION_EVENT_INDEXES) {
       expect(indexNames).toContain(indexName);
     }
+    const scopeIndex = indexes.find((row) => row.name === 'idx_memory_mutation_events_scope_created');
+    expect(scopeIndex?.sql).toContain('WHERE scope_id IS NOT NULL');
 
     expect(() => db.query(validInsertSql('sqlite-valid').replace('false', '0')).run()).not.toThrow();
+    expect(() => db.query(invalidInsertSql('operation', 'invented_operation').replace('false', '0')).run()).toThrow();
     expect(() => db.query(invalidInsertSql('result', 'approved').replace('false', '0')).run()).toThrow();
     expect(() => db.query(invalidInsertSql('target_kind', 'note').replace('false', '0')).run()).toThrow();
     expect(() => db.query(invalidInsertSql('redaction_visibility', 'hidden').replace('false', '0')).run()).toThrow();
@@ -193,6 +197,7 @@ describe('memory operations control-plane schema', () => {
     }
 
     await expect(db.query(validInsertSql('pglite-valid'))).resolves.toBeDefined();
+    await expect(db.query(invalidInsertSql('operation', 'invented_operation'))).rejects.toThrow();
     await expect(db.query(invalidInsertSql('result', 'approved'))).rejects.toThrow();
     await expect(db.query(invalidInsertSql('target_kind', 'note'))).rejects.toThrow();
     await expect(db.query(invalidInsertSql('redaction_visibility', 'hidden'))).rejects.toThrow();
@@ -233,6 +238,39 @@ describe('memory operations control-plane schema', () => {
 
     await engine.disconnect();
   });
+
+  test('pglite upgrades version 25 databases to memory mutation ledger contract', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mbrain-mutation-ledger-pglite-upgrade-'));
+    tempPaths.push(dir);
+
+    const engine = new PGLiteEngine();
+    await engine.connect({ engine: 'pglite', database_path: dir });
+    const db = (engine as any).db;
+    await db.exec(`
+      CREATE TABLE config (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+      INSERT INTO config (key, value) VALUES ('version', '25');
+    `);
+
+    await engine.initSchema();
+
+    const tables = await db.query(
+      `SELECT table_name
+       FROM information_schema.tables
+       WHERE table_schema = 'public'
+         AND table_name = 'memory_mutation_events'`,
+    );
+    const version = await db.query(`SELECT value FROM config WHERE key = 'version'`);
+
+    expect(tables.rows.map((row: { table_name: string }) => row.table_name)).toEqual([
+      'memory_mutation_events',
+    ]);
+    expect(version.rows).toEqual([{ value: String(LATEST_VERSION) }]);
+
+    await engine.disconnect();
+  }, 10_000);
 
   const databaseUrl = process.env.DATABASE_URL;
   if (databaseUrl) {
@@ -276,6 +314,7 @@ describe('memory operations control-plane schema', () => {
         }
 
         await expect(engine.sql.unsafe(validInsertSql('postgres-valid'))).resolves.toBeDefined();
+        await expect(engine.sql.unsafe(invalidInsertSql('operation', 'invented_operation'))).rejects.toThrow();
         await expect(engine.sql.unsafe(invalidInsertSql('result', 'approved'))).rejects.toThrow();
         await expect(engine.sql.unsafe(invalidInsertSql('target_kind', 'note'))).rejects.toThrow();
         await expect(engine.sql.unsafe(invalidInsertSql('redaction_visibility', 'hidden'))).rejects.toThrow();

@@ -755,6 +755,7 @@ export type MemoryMutationOperationName =
   | 'close_memory_session'
   | 'expire_memory_session'
   | 'revoke_memory_session'
+  | 'dry_run_memory_mutation'
   | 'list_memory_mutation_events'
   | 'record_memory_mutation_event'
   | 'create_memory_patch_candidate'

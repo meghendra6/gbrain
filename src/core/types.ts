@@ -1014,6 +1014,22 @@ export interface RetrievalRouteSelectorInput {
   episode_source_kind?: PersonalEpisodeSourceKind;
 }
 
+export interface RetrievalRequestPlannerInput extends Omit<RetrievalRouteSelectorInput, 'intent'> {
+  intent?: RetrievalRouteIntent;
+  allow_decomposition?: boolean;
+}
+
+export interface RetrievalRequestPlanStep {
+  step_id: string;
+  intent: RetrievalRouteIntent;
+  input: RetrievalRouteSelectorInput;
+}
+
+export interface RetrievalRequestPlan {
+  selection_reason: 'decomposed_mixed_intent' | 'single_intent' | 'no_match';
+  steps: RetrievalRequestPlanStep[];
+}
+
 export interface RetrievalRouteSelectorResult {
   selected_intent: RetrievalRouteIntent;
   selection_reason: string;

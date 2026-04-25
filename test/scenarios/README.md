@@ -25,7 +25,7 @@ for the full spec (14 scenarios + invariant catalog + rollout plan).
 | S2  | `s02-task-resume.test.ts` | I3, L7 | ✅ green |
 | S3  | `s03-intent-driven-routing.test.ts` | I1 | ✅ green |
 | S4  | `s04-personal-scope-deny.test.ts` | I5 | ✅ green |
-| S5  | `s05-mixed-intent-decomposition.test.ts` | L1, I5 | ✅ green + 1 `todo` (L1 classifier gap) |
+| S5  | `s05-mixed-intent-decomposition.test.ts` | L1, I5 | ✅ green |
 | S6  | `s06-promotion-requires-provenance.test.ts` | I4, G1, L6 | ✅ green (includes engine-level I4 fix) |
 | S7  | `s07-supersession-cross-engine.test.ts` | I7, L5 | ✅ green on SQLite + PGLite, Postgres when `DATABASE_URL` is set |
 | S8  | `s08-rejection-preserves-provenance.test.ts` | G2, L5 | ✅ green |
@@ -56,7 +56,6 @@ Legend:
 
 ## Deferred follow-ups
 
-- **L1** request-level intent classifier (spec §5)
 - **L2** canonical-first ranking in broad synthesis (spec §5)
 - **L4** code claim verification subsystem (spec §5)
 

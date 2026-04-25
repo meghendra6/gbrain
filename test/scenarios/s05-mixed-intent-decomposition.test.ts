@@ -3,12 +3,11 @@
  *
  * Falsifies L1 and I5 at the bridge boundary.
  *
- * Known gaps with current code are recorded below as `test.todo` markers
- * so future PRs that add the missing classifier flip them into real tests.
  */
 
 import { describe, expect, test } from 'bun:test';
 import { allocateSqliteBrain } from './helpers.ts';
+import { planRetrievalRequest } from '../../src/core/services/retrieval-request-planner-service.ts';
 import { selectRetrievalRoute } from '../../src/core/services/retrieval-route-selector-service.ts';
 
 describe('S5 — mixed-scope bridge decomposition', () => {
@@ -72,10 +71,16 @@ describe('S5 — mixed-scope bridge decomposition', () => {
     }
   });
 
-  // L1 gap: the system today only expresses one mixed-intent pattern —
-  // broad_synthesis + personal. Other combinations (task_resume + synthesis,
-  // precision_lookup + personal) have no decomposer. See spec §5, fix direction:
-  // add classifyIntents() that emits a list of sub-intents for one natural
-  // request.
-  test.todo('S5 gap — general request-level intent classifier (resume + synthesis, etc.)', () => {});
+  test('general request planner decomposes task resume plus synthesis', () => {
+    const plan = planRetrievalRequest({
+      allow_decomposition: true,
+      intent: 'task_resume',
+      task_id: 'task-s5',
+      requested_scope: 'work',
+      query: 'Summarize what to do next after resuming this task',
+    });
+
+    expect(plan.selection_reason).toBe('decomposed_mixed_intent');
+    expect(plan.steps.map((step) => step.intent)).toEqual(['task_resume', 'broad_synthesis']);
+  });
 });

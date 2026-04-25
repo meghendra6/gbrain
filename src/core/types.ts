@@ -843,6 +843,43 @@ export interface MemoryMutationEventFilters {
   offset?: number;
 }
 
+export type MemoryRealmScope = 'work' | 'personal' | 'mixed';
+
+export type MemoryAccessMode = 'read_only' | 'read_write';
+
+export interface MemoryRealm {
+  id: string;
+  name: string;
+  description: string;
+  scope: MemoryRealmScope;
+  default_access: MemoryAccessMode;
+  retention_policy: string;
+  export_policy: string;
+  agent_instructions: string;
+  archived_at: Date | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface MemoryRealmInput {
+  id: string;
+  name: string;
+  description?: string;
+  scope: MemoryRealmScope;
+  default_access?: MemoryAccessMode;
+  retention_policy?: string;
+  export_policy?: string;
+  agent_instructions?: string;
+  archived_at?: Date | string | null;
+}
+
+export interface MemoryRealmFilters {
+  scope?: MemoryRealmScope;
+  include_archived?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
 export type MemoryCandidateType =
   | 'fact'
   | 'relationship'

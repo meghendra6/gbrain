@@ -11,6 +11,8 @@ import type {
   MemoryCandidateContradictionEntry,
   MemoryMutationEvent,
   MemoryMutationEventInput,
+  MemoryRealm,
+  MemoryRealmInput,
   MemoryCandidateStatusEvent,
   MemoryCandidateSupersessionEntry,
   CanonicalHandoffEntry,
@@ -319,6 +321,53 @@ export function normalizeMemoryMutationEventInput(input: MemoryMutationEventInpu
     source_refs: sourceRefs,
     dry_run: input.result === 'dry_run',
   };
+}
+
+export function rowToMemoryRealm(row: Record<string, unknown>): MemoryRealm {
+  return {
+    id: row.id as string,
+    name: row.name as string,
+    description: (row.description as string | null) ?? '',
+    scope: row.scope as MemoryRealm['scope'],
+    default_access: row.default_access as MemoryRealm['default_access'],
+    retention_policy: (row.retention_policy as string | null) ?? 'retain',
+    export_policy: (row.export_policy as string | null) ?? 'private',
+    agent_instructions: (row.agent_instructions as string | null) ?? '',
+    archived_at: row.archived_at == null ? null : new Date(row.archived_at as string),
+    created_at: new Date(row.created_at as string),
+    updated_at: new Date(row.updated_at as string),
+  };
+}
+
+export function normalizeMemoryRealmInput(input: MemoryRealmInput): Required<MemoryRealmInput> {
+  const id = normalizeRequiredMemoryRealmString('id', input.id);
+  const name = normalizeRequiredMemoryRealmString('name', input.name);
+  if (!['work', 'personal', 'mixed'].includes(input.scope)) {
+    throw new Error('memory realm scope must be one of: work, personal, mixed');
+  }
+  const defaultAccess = input.default_access ?? 'read_only';
+  if (!['read_only', 'read_write'].includes(defaultAccess)) {
+    throw new Error('memory realm default_access must be one of: read_only, read_write');
+  }
+
+  return {
+    id,
+    name,
+    description: input.description ?? '',
+    scope: input.scope,
+    default_access: defaultAccess,
+    retention_policy: input.retention_policy ?? 'retain',
+    export_policy: input.export_policy ?? 'private',
+    agent_instructions: input.agent_instructions ?? '',
+    archived_at: input.archived_at ?? null,
+  };
+}
+
+function normalizeRequiredMemoryRealmString(field: string, value: unknown): string {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new Error(`memory realm ${field} must be a non-empty string`);
+  }
+  return value.trim();
 }
 
 function normalizeMemoryMutationSourceRefs(value: unknown): string[] {

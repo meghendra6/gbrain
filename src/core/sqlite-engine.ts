@@ -38,6 +38,9 @@ import type {
   MemoryMutationEvent,
   MemoryMutationEventFilters,
   MemoryMutationEventInput,
+  MemoryRealm,
+  MemoryRealmFilters,
+  MemoryRealmInput,
   MemoryCandidatePromotionPatch,
   MemoryCandidateStatusEvent,
   MemoryCandidateStatusEventFilters,
@@ -83,9 +86,11 @@ import {
   contentHash,
   importContentHash,
   normalizeMemoryMutationEventInput,
+  normalizeMemoryRealmInput,
   rowToCanonicalHandoffEntry,
   rowToMemoryCandidateContradictionEntry,
   rowToMemoryMutationEvent,
+  rowToMemoryRealm,
   rowToMemoryCandidateStatusEvent,
   rowToMemoryCandidateSupersessionEntry,
 } from './utils.ts';
@@ -374,6 +379,22 @@ CREATE INDEX IF NOT EXISTS idx_context_atlas_scope_generated
   ON context_atlas_entries(scope_id, generated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_context_atlas_scope_kind
   ON context_atlas_entries(scope_id, kind);
+
+CREATE TABLE IF NOT EXISTS memory_realms (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  scope TEXT NOT NULL CHECK (scope IN ('work', 'personal', 'mixed')),
+  default_access TEXT NOT NULL CHECK (default_access IN ('read_only', 'read_write')),
+  retention_policy TEXT NOT NULL DEFAULT 'retain',
+  export_policy TEXT NOT NULL DEFAULT 'private',
+  agent_instructions TEXT NOT NULL DEFAULT '',
+  archived_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+CREATE INDEX IF NOT EXISTS idx_memory_realms_scope
+  ON memory_realms(scope, updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS access_tokens (
   id TEXT PRIMARY KEY,
@@ -1935,6 +1956,87 @@ export class SQLiteEngine implements BrainEngine {
     return rows.map(rowToMemoryMutationEvent);
   }
 
+  async upsertMemoryRealm(input: MemoryRealmInput): Promise<MemoryRealm> {
+    const realm = normalizeMemoryRealmInput(input);
+    const timestamp = nowIso();
+    this.database.run(`
+      INSERT INTO memory_realms (
+        id, name, description, scope, default_access, retention_policy,
+        export_policy, agent_instructions, archived_at, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        name = excluded.name,
+        description = excluded.description,
+        scope = excluded.scope,
+        default_access = excluded.default_access,
+        retention_policy = excluded.retention_policy,
+        export_policy = excluded.export_policy,
+        agent_instructions = excluded.agent_instructions,
+        archived_at = excluded.archived_at,
+        updated_at = excluded.updated_at
+    `, sqliteBindings([
+      realm.id,
+      realm.name,
+      realm.description,
+      realm.scope,
+      realm.default_access,
+      realm.retention_policy,
+      realm.export_policy,
+      realm.agent_instructions,
+      toNullableIso(realm.archived_at),
+      timestamp,
+      timestamp,
+    ]));
+
+    const row = this.database.query(`
+      SELECT id, name, description, scope, default_access, retention_policy,
+             export_policy, agent_instructions, archived_at, created_at, updated_at
+      FROM memory_realms
+      WHERE id = ?
+    `).get(realm.id) as Record<string, unknown> | null;
+    if (!row) throw new Error(`Memory realm not found after upsert: ${realm.id}`);
+    return rowToMemoryRealm(row);
+  }
+
+  async getMemoryRealm(id: string): Promise<MemoryRealm | null> {
+    const row = this.database.query(`
+      SELECT id, name, description, scope, default_access, retention_policy,
+             export_policy, agent_instructions, archived_at, created_at, updated_at
+      FROM memory_realms
+      WHERE id = ?
+    `).get(id) as Record<string, unknown> | null;
+    return row ? rowToMemoryRealm(row) : null;
+  }
+
+  async listMemoryRealms(filters?: MemoryRealmFilters): Promise<MemoryRealm[]> {
+    const { limit, offset } = normalizeMemoryRealmPagination(filters);
+    if (limit === 0) return [];
+    const clauses: string[] = [];
+    const params: Array<string | number> = [];
+
+    if (filters?.scope !== undefined) {
+      clauses.push('scope = ?');
+      params.push(filters.scope);
+    }
+    if (filters?.include_archived !== true) {
+      clauses.push('archived_at IS NULL');
+    }
+
+    params.push(limit);
+    params.push(offset);
+    const whereClause = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+    const rows = this.database.query(`
+      SELECT id, name, description, scope, default_access, retention_policy,
+             export_policy, agent_instructions, archived_at, created_at, updated_at
+      FROM memory_realms
+      ${whereClause}
+      ORDER BY updated_at DESC, id DESC
+      LIMIT ?
+      OFFSET ?
+    `).all(...sqliteBindings(params)) as Record<string, unknown>[];
+    return rows.map(rowToMemoryRealm);
+  }
+
   async updateMemoryCandidateEntryStatus(id: string, patch: MemoryCandidateStatusPatch): Promise<MemoryCandidateEntry | null> {
     const current = await this.getMemoryCandidateEntry(id);
     if (!current) {
@@ -3269,6 +3371,9 @@ export class SQLiteEngine implements BrainEngine {
         case 28:
           this.repairMemoryMutationEventRequiredTargetProvenanceContract();
           break;
+        case 29:
+          this.ensureMemoryRealmSchema();
+          break;
         default:
           throw new Error(`SQLite migration ${version} is not implemented`);
       }
@@ -3774,6 +3879,26 @@ export class SQLiteEngine implements BrainEngine {
         WHERE scope_id IS NOT NULL;
     `);
     this.ensureMemoryMutationEventSourceRefEntryTriggers();
+  }
+
+  private ensureMemoryRealmSchema(): void {
+    this.database.exec(`
+      CREATE TABLE IF NOT EXISTS memory_realms (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        scope TEXT NOT NULL CHECK (scope IN ('work', 'personal', 'mixed')),
+        default_access TEXT NOT NULL CHECK (default_access IN ('read_only', 'read_write')),
+        retention_policy TEXT NOT NULL DEFAULT 'retain',
+        export_policy TEXT NOT NULL DEFAULT 'private',
+        agent_instructions TEXT NOT NULL DEFAULT '',
+        archived_at TEXT,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_memory_realms_scope
+        ON memory_realms(scope, updated_at DESC);
+    `);
   }
 
   private ensureMemoryCandidateStatusEventSchema(): void {
@@ -4822,6 +4947,20 @@ function normalizeMemoryMutationPagination(
   }
   if (!Number.isInteger(offset) || offset < 0) {
     throw new Error('Memory mutation event offset must be a non-negative integer');
+  }
+  return { limit, offset };
+}
+
+function normalizeMemoryRealmPagination(
+  filters?: MemoryRealmFilters,
+): { limit: number; offset: number } {
+  const limit = filters?.limit ?? 100;
+  const offset = filters?.offset ?? 0;
+  if (!Number.isInteger(limit) || limit < 0) {
+    throw new Error('Memory realm limit must be a non-negative integer');
+  }
+  if (!Number.isInteger(offset) || offset < 0) {
+    throw new Error('Memory realm offset must be a non-negative integer');
   }
   return { limit, offset };
 }

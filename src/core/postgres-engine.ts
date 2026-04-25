@@ -29,6 +29,9 @@ import type {
   MemoryMutationEvent,
   MemoryMutationEventFilters,
   MemoryMutationEventInput,
+  MemoryRealm,
+  MemoryRealmFilters,
+  MemoryRealmInput,
   MemoryCandidatePromotionPatch,
   MemoryCandidateStatusEvent,
   MemoryCandidateStatusEventFilters,
@@ -77,6 +80,7 @@ import {
   contentHash,
   importContentHash,
   normalizeMemoryMutationEventInput,
+  normalizeMemoryRealmInput,
   rowToPage,
   rowToChunk,
   rowToContextAtlasEntry,
@@ -84,6 +88,7 @@ import {
   rowToMemoryCandidateEntry,
   rowToMemoryCandidateContradictionEntry,
   rowToMemoryMutationEvent,
+  rowToMemoryRealm,
   rowToMemoryCandidateStatusEvent,
   rowToMemoryCandidateSupersessionEntry,
   rowToCanonicalHandoffEntry,
@@ -1683,6 +1688,83 @@ export class PostgresEngine implements BrainEngine {
     return (rows as Record<string, unknown>[]).map(rowToMemoryMutationEvent);
   }
 
+  async upsertMemoryRealm(input: MemoryRealmInput): Promise<MemoryRealm> {
+    const sql = this.sql;
+    const realm = normalizeMemoryRealmInput(input);
+    const rows = await sql`
+      INSERT INTO memory_realms (
+        id, name, description, scope, default_access, retention_policy,
+        export_policy, agent_instructions, archived_at
+      ) VALUES (
+        ${realm.id},
+        ${realm.name},
+        ${realm.description},
+        ${realm.scope},
+        ${realm.default_access},
+        ${realm.retention_policy},
+        ${realm.export_policy},
+        ${realm.agent_instructions},
+        ${toNullableIso(realm.archived_at)}
+      )
+      ON CONFLICT (id) DO UPDATE SET
+        name = EXCLUDED.name,
+        description = EXCLUDED.description,
+        scope = EXCLUDED.scope,
+        default_access = EXCLUDED.default_access,
+        retention_policy = EXCLUDED.retention_policy,
+        export_policy = EXCLUDED.export_policy,
+        agent_instructions = EXCLUDED.agent_instructions,
+        archived_at = EXCLUDED.archived_at,
+        updated_at = now()
+      RETURNING id, name, description, scope, default_access, retention_policy,
+                export_policy, agent_instructions, archived_at, created_at, updated_at
+    `;
+    return rowToMemoryRealm(rows[0] as Record<string, unknown>);
+  }
+
+  async getMemoryRealm(id: string): Promise<MemoryRealm | null> {
+    const sql = this.sql;
+    const rows = await sql`
+      SELECT id, name, description, scope, default_access, retention_policy,
+             export_policy, agent_instructions, archived_at, created_at, updated_at
+      FROM memory_realms
+      WHERE id = ${id}
+    `;
+    if (rows.length === 0) return null;
+    return rowToMemoryRealm(rows[0] as Record<string, unknown>);
+  }
+
+  async listMemoryRealms(filters?: MemoryRealmFilters): Promise<MemoryRealm[]> {
+    const sql = this.sql;
+    const { limit, offset } = normalizeMemoryRealmPagination(filters);
+    if (limit === 0) return [];
+    const params: PostgresParam[] = [];
+    const clauses: string[] = [];
+
+    if (filters?.scope !== undefined) {
+      params.push(filters.scope);
+      clauses.push(`scope = $${params.length}`);
+    }
+    if (filters?.include_archived !== true) {
+      clauses.push('archived_at IS NULL');
+    }
+
+    params.push(limit);
+    params.push(offset);
+    const whereClause = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+    const rows = await sql.unsafe(
+      `SELECT id, name, description, scope, default_access, retention_policy,
+              export_policy, agent_instructions, archived_at, created_at, updated_at
+       FROM memory_realms
+       ${whereClause}
+       ORDER BY updated_at DESC, id DESC
+       LIMIT $${params.length - 1}
+       OFFSET $${params.length}`,
+      params,
+    );
+    return (rows as Record<string, unknown>[]).map(rowToMemoryRealm);
+  }
+
   async updateMemoryCandidateEntryStatus(id: string, patch: MemoryCandidateStatusPatch): Promise<MemoryCandidateEntry | null> {
     const sql = this.sql;
     const current = await this.getMemoryCandidateEntry(id);
@@ -2522,6 +2604,20 @@ function normalizeMemoryMutationPagination(
   }
   if (!Number.isInteger(offset) || offset < 0) {
     throw new Error('Memory mutation event offset must be a non-negative integer');
+  }
+  return { limit, offset };
+}
+
+function normalizeMemoryRealmPagination(
+  filters?: MemoryRealmFilters,
+): { limit: number; offset: number } {
+  const limit = filters?.limit ?? 100;
+  const offset = filters?.offset ?? 0;
+  if (!Number.isInteger(limit) || limit < 0) {
+    throw new Error('Memory realm limit must be a non-negative integer');
+  }
+  if (!Number.isInteger(offset) || offset < 0) {
+    throw new Error('Memory realm offset must be a non-negative integer');
   }
   return { limit, offset };
 }

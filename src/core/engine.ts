@@ -20,6 +20,9 @@ import type {
   MemoryMutationEvent,
   MemoryMutationEventFilters,
   MemoryMutationEventInput,
+  MemoryRealm,
+  MemoryRealmFilters,
+  MemoryRealmInput,
   MemoryCandidatePromotionPatch,
   MemoryCandidateStatusEvent,
   MemoryCandidateStatusEventFilters,
@@ -175,6 +178,11 @@ export interface BrainEngine {
   // Memory mutation ledger
   createMemoryMutationEvent(input: MemoryMutationEventInput): Promise<MemoryMutationEvent>;
   listMemoryMutationEvents(filters?: MemoryMutationEventFilters): Promise<MemoryMutationEvent[]>;
+
+  // Memory realms
+  upsertMemoryRealm(input: MemoryRealmInput): Promise<MemoryRealm>;
+  getMemoryRealm(id: string): Promise<MemoryRealm | null>;
+  listMemoryRealms(filters?: MemoryRealmFilters): Promise<MemoryRealm[]>;
 
   // Note manifest
   upsertNoteManifestEntry(input: NoteManifestEntryInput): Promise<NoteManifestEntry>;

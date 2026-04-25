@@ -307,6 +307,26 @@ CREATE INDEX IF NOT EXISTS idx_context_atlas_scope_kind
   ON context_atlas_entries(scope_id, kind);
 
 -- ============================================================
+-- memory_realms: control-plane realms for memory access policy
+-- ============================================================
+CREATE TABLE IF NOT EXISTS memory_realms (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  scope TEXT NOT NULL CHECK (scope IN ('work', 'personal', 'mixed')),
+  default_access TEXT NOT NULL CHECK (default_access IN ('read_only', 'read_write')),
+  retention_policy TEXT NOT NULL DEFAULT 'retain',
+  export_policy TEXT NOT NULL DEFAULT 'private',
+  agent_instructions TEXT NOT NULL DEFAULT '',
+  archived_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_memory_realms_scope
+  ON memory_realms(scope, updated_at DESC);
+
+-- ============================================================
 -- config: brain-level settings
 -- ============================================================
 CREATE TABLE IF NOT EXISTS config (

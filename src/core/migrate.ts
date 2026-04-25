@@ -1150,6 +1150,27 @@ const MIGRATIONS: Migration[] = [
       END $$;
     `,
   },
+  {
+    version: 29,
+    name: 'memory_realms',
+    sql: `
+      CREATE TABLE IF NOT EXISTS memory_realms (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        scope TEXT NOT NULL CHECK (scope IN ('work', 'personal', 'mixed')),
+        default_access TEXT NOT NULL CHECK (default_access IN ('read_only', 'read_write')),
+        retention_policy TEXT NOT NULL DEFAULT 'retain',
+        export_policy TEXT NOT NULL DEFAULT 'private',
+        agent_instructions TEXT NOT NULL DEFAULT '',
+        archived_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+      CREATE INDEX IF NOT EXISTS idx_memory_realms_scope
+        ON memory_realms(scope, updated_at DESC);
+    `,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.length > 0
